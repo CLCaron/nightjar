@@ -1,0 +1,24 @@
+# Gradle
+.gradle/
+build/
+**/build/
+
+# Local configuration
+local.properties
+
+# IntelliJ / Android Studio
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Logs
+*.log
+
+# Keystores
+*.jks
+*.keystore
+
+# Mac / Windows noise
+.DS_Store
+Thumbs.db
