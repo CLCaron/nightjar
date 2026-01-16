@@ -36,8 +36,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.songseed.data.repository.IdeaRepository
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.songseed.player.PlaybackViewModel
 import com.example.songseed.share.ShareUtils
 import com.example.songseed.ui.workspace.WorkspaceEvent
@@ -52,11 +51,8 @@ fun WorkspaceScreen(
     val context = LocalContext.current
 
     // ViewModels
-    val vm: WorkspaceViewModel = viewModel()
-    val playbackViewModel: PlaybackViewModel = viewModel()
-
-    // Repo only for file path lookup / sharing (no DB writes from UI)
-    val fileRepo = remember { IdeaRepository(context) }
+    val vm: WorkspaceViewModel = hiltViewModel()
+    val playbackViewModel: PlaybackViewModel = hiltViewModel()
 
     // Load data when ideaId changes
     LaunchedEffect(ideaId) {
@@ -133,7 +129,7 @@ fun WorkspaceScreen(
             val loaded = idea
             if (loaded == null) return@Column
 
-            val audioFile = fileRepo.getAudioFile(loaded.audioFileName)
+            val audioFile = vm.getAudioFile(loaded.audioFileName)
 
             // Title
             OutlinedTextField(

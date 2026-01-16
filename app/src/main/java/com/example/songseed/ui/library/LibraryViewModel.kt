@@ -1,15 +1,16 @@
 package com.example.songseed.ui.library
 
-import android.app.Application
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.songseed.data.db.entity.IdeaEntity
 import com.example.songseed.data.db.entity.TagEntity
 import com.example.songseed.data.repository.IdeaRepository
+import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 enum class SortMode {
     NEWEST,
@@ -17,9 +18,10 @@ enum class SortMode {
     FAVORITES_FIRST
 }
 
-class LibraryViewModel(app: Application) : AndroidViewModel(app) {
-
-    private val repo = IdeaRepository(app.applicationContext)
+@HiltViewModel
+class LibraryViewModel @Inject constructor(
+    private val repo: IdeaRepository
+) : ViewModel() {
 
     private val _selectedTagNormalized = MutableStateFlow<String?>(null)
     val selectedTagNormalized: StateFlow<String?> = _selectedTagNormalized.asStateFlow()
@@ -71,7 +73,6 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { refreshIdeas() }
     }
 
-    // Optional: call this after returning from Workspace if you want live updates
     fun refresh() {
         viewModelScope.launch {
             refreshUsedTags()

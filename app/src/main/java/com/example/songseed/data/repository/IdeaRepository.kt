@@ -1,8 +1,8 @@
 package com.example.songseed.data.repository
 
-import android.content.Context
 import com.example.songseed.data.db.IdeaTagCrossRef
-import com.example.songseed.data.db.SongSeedDatabase
+import com.example.songseed.data.db.dao.IdeaDao
+import com.example.songseed.data.db.dao.TagDao
 import com.example.songseed.data.db.entity.IdeaEntity
 import com.example.songseed.data.db.entity.TagEntity
 import com.example.songseed.data.storage.RecordingStorage
@@ -11,12 +11,11 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class IdeaRepository(context: Context) {
-
-    private val db = SongSeedDatabase.getInstance(context)
-    private val ideaDao = db.ideaDao()
-    private val tagDao = db.tagDao()
-    private val storage = RecordingStorage(context)
+class IdeaRepository(
+    private val ideaDao: IdeaDao,
+    private val tagDao: TagDao,
+    private val storage: RecordingStorage
+) {
 
     /* ---------- Record ---------- */
 

@@ -1,21 +1,29 @@
 package com.example.songseed.player
 
 import android.app.Application
+import android.content.Context
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.io.File
+import javax.inject.Inject
 
-class PlaybackViewModel(app: Application) : AndroidViewModel(app) {
+@HiltViewModel
+class PlaybackViewModel @Inject constructor(
+    @ApplicationContext context: Context
+) : ViewModel() {
 
     private val player: ExoPlayer =
-        ExoPlayer.Builder(app.applicationContext).build()
+        ExoPlayer.Builder(context).build()
 
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying

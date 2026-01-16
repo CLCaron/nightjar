@@ -29,7 +29,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.songseed.data.db.entity.IdeaEntity
 import com.example.songseed.ui.library.LibraryViewModel
 import com.example.songseed.ui.library.SortMode
@@ -67,7 +67,7 @@ fun LibraryScreen(
     onBack: () -> Unit,
     onOpenWorkspace: (Long) -> Unit
 ) {
-    val vm: LibraryViewModel = viewModel()
+    val vm: LibraryViewModel = hiltViewModel()
 
     val usedTags by vm.usedTags.collectAsState()
     val ideas by vm.ideas.collectAsState()

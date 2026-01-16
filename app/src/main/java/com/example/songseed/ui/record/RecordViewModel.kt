@@ -2,27 +2,30 @@ package com.example.songseed.ui.record
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.songseed.audio.AudioRecorder
 import com.example.songseed.data.repository.IdeaRepository
+import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.io.File
+import javax.inject.Inject
 
 sealed interface RecordEvent {
     data class OpenWorkspace(val ideaId: Long) : RecordEvent
     data class ShowError(val message: String) : RecordEvent
 }
 
-class RecordViewModel(app: Application) : AndroidViewModel(app) {
-
-    private val appContext = app.applicationContext
-    private val recorder = AudioRecorder(appContext)
-    private val repo = IdeaRepository(appContext)
-
+@HiltViewModel
+class RecordViewModel @Inject constructor(
+    private val recorder: AudioRecorder,
+    private val repo: IdeaRepository
+) : ViewModel()
+{
     private val _isRecording = MutableStateFlow(false)
     val isRecording = _isRecording.asStateFlow()
 

@@ -6,6 +6,7 @@
         android:name="android.hardware.microphone"
         android:required="false" />
     <application
+        android:name=".SongSeedApplication"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"

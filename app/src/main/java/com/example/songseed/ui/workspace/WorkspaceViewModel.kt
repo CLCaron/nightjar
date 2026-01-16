@@ -1,11 +1,11 @@
 package com.example.songseed.ui.workspace
 
-import android.app.Application
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.songseed.data.db.entity.IdeaEntity
 import com.example.songseed.data.db.entity.TagEntity
 import com.example.songseed.data.repository.IdeaRepository
+import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -14,15 +14,18 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.io.File
+import javax.inject.Inject
 
 sealed interface WorkspaceEvent {
     data object NavigateBack : WorkspaceEvent
     data class ShowError(val message: String) : WorkspaceEvent
 }
 
-class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
-
-    private val repo = IdeaRepository(app.applicationContext)
+@HiltViewModel
+class WorkspaceViewModel @Inject constructor(
+    private val repo: IdeaRepository
+) : ViewModel() {
 
     private var currentIdeaId: Long? = null
 
@@ -202,4 +205,6 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
+
+    fun getAudioFile(name: String): File = repo.getAudioFile(name)
 }
