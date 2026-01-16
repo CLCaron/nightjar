@@ -19,26 +19,21 @@ import javax.inject.Singleton
 abstract class AppModule {
     companion object {
         @Provides
-        @JvmStatic
         @Singleton
         fun provideDatabase(@ApplicationContext context: Context): SongSeedDatabase =
             SongSeedDatabase.getInstance(context)
 
         @Provides
-        @JvmStatic
         fun provideIdeaDao(db: SongSeedDatabase): IdeaDao = db.ideaDao()
 
         @Provides
-        @JvmStatic
         fun provideTagDao(db: SongSeedDatabase): TagDao = db.tagDao()
 
         @Provides
-        @JvmStatic
         fun provideRecordingStorage(@ApplicationContext context: Context): RecordingStorage =
             RecordingStorage(context)
 
         @Provides
-        @JvmStatic
         @Singleton
         fun provideIdeaRepository(
             ideaDao: IdeaDao,
@@ -47,7 +42,6 @@ abstract class AppModule {
         ): IdeaRepository = IdeaRepository(ideaDao, tagDao, storage)
 
         @Provides
-        @JvmStatic
         fun provideAudioRecorder(@ApplicationContext context: Context): AudioRecorder =
             AudioRecorder(context)
     }

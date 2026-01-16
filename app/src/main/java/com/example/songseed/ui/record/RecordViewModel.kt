@@ -1,7 +1,5 @@
 package com.example.songseed.ui.record
 
-import android.app.Application
-import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.songseed.audio.AudioRecorder

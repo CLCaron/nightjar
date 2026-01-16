@@ -72,11 +72,4 @@ class LibraryViewModel @Inject constructor(
         _sortMode.value = mode
         viewModelScope.launch { refreshIdeas() }
     }
-
-    fun refresh() {
-        viewModelScope.launch {
-            refreshUsedTags()
-            refreshIdeas()
-        }
-    }
 }
