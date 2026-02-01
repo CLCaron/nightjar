@@ -1,14 +1,17 @@
 package com.example.songseed.ui.library
 
+import LibraryAction
+import LibraryEffect
+import LibraryUiState
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.songseed.data.db.entity.IdeaEntity
-import com.example.songseed.data.db.entity.TagEntity
 import com.example.songseed.data.repository.IdeaRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -23,17 +26,31 @@ class LibraryViewModel @Inject constructor(
     private val repo: IdeaRepository
 ) : ViewModel() {
 
-    private val _selectedTagNormalized = MutableStateFlow<String?>(null)
-    val selectedTagNormalized: StateFlow<String?> = _selectedTagNormalized.asStateFlow()
+    private val _state = MutableStateFlow(LibraryUiState())
+    val state = _state.asStateFlow()
 
-    private val _sortMode = MutableStateFlow(SortMode.NEWEST)
-    val sortMode: StateFlow<SortMode> = _sortMode.asStateFlow()
+    private val _effects = MutableSharedFlow<LibraryEffect>()
+    val effects = _effects.asSharedFlow()
 
-    private val _usedTags = MutableStateFlow<List<TagEntity>>(emptyList())
-    val usedTags: StateFlow<List<TagEntity>> = _usedTags.asStateFlow()
+    init {
+        onAction(LibraryAction.Load)
+    }
 
-    private val _ideas = MutableStateFlow<List<IdeaEntity>>(emptyList())
-    val ideas: StateFlow<List<IdeaEntity>> = _ideas.asStateFlow()
+    fun onAction(action: LibraryAction) {
+        when (action) {
+            LibraryAction.Load -> load()
+            LibraryAction.ClearTagFilter -> clearTagFilter()
+            is LibraryAction.SelectTag -> selectTag(action.tagNormalized)
+            is LibraryAction.SetSortMode -> setSortMode(action.mode)
+        }
+    }
+
+    private fun load() {
+        viewModelScope.launch {
+            refreshUsedTags()
+            refreshIdeas()
+        }
+    }
 
     init {
         viewModelScope.launch {
@@ -43,33 +60,47 @@ class LibraryViewModel @Inject constructor(
     }
 
     private suspend fun refreshUsedTags() {
-        _usedTags.value = repo.getAllUsedTags()
-    }
-
-    private suspend fun refreshIdeas() {
-        val tag = _selectedTagNormalized.value
-        val sort = _sortMode.value
-
-        _ideas.value = when {
-            tag != null -> repo.getIdeasForTag(tag)
-            sort == SortMode.FAVORITES_FIRST -> repo.getIdeasFavoritesFirst()
-            sort == SortMode.OLDEST -> repo.getIdeasOldestFirst()
-            else -> repo.getIdeasNewest()
+        try {
+            val tags = repo.getAllUsedTags()
+            _state.update { it.copy(usedTags = tags, errorMessage = null) }
+        } catch (e: Exception) {
+            val msg = e.message ?: "Failed to load tags."
+            _state.update { it.copy(errorMessage = e.message) }
+            _effects.emit(LibraryEffect.ShowError(msg))
         }
     }
 
-    fun clearTagFilter() {
-        _selectedTagNormalized.value = null
+    private suspend fun refreshIdeas() {
+        val tag = _state.value.selectedTagNormalized
+        val sort = _state.value.sortMode
+
+        try {
+            val ideas = when {
+                tag != null -> repo.getIdeasForTag(tag)
+                sort == SortMode.FAVORITES_FIRST -> repo.getIdeasFavoritesFirst()
+                sort == SortMode.OLDEST -> repo.getIdeasOldestFirst()
+                else -> repo.getIdeasNewest()
+            }
+            _state.update { it.copy(ideas = ideas, errorMessage = null) }
+        } catch (e: Exception) {
+            val msg = e.message ?: "Failed to load ideas."
+            _state.update { it.copy(errorMessage = msg) }
+            _effects.emit(LibraryEffect.ShowError(msg))
+        }
+    }
+
+    private fun clearTagFilter() {
+        _state.update { it.copy(selectedTagNormalized = null) }
         viewModelScope.launch { refreshIdeas() }
     }
 
-    fun selectTag(tagNormalized: String) {
-        _selectedTagNormalized.value = tagNormalized
+    private fun selectTag(tagNormalized: String) {
+        _state.update { it.copy(selectedTagNormalized = tagNormalized) }
         viewModelScope.launch { refreshIdeas() }
     }
 
-    fun setSortMode(mode: SortMode) {
-        _sortMode.value = mode
+    private fun setSortMode(mode: SortMode) {
+        _state.update { it.copy(sortMode = mode) }
         viewModelScope.launch { refreshIdeas() }
     }
 }

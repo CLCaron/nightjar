@@ -39,7 +39,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.songseed.player.PlaybackViewModel
 import com.example.songseed.share.ShareUtils
-import com.example.songseed.ui.workspace.WorkspaceEvent
+import com.example.songseed.ui.workspace.WorkspaceAction
+import com.example.songseed.ui.workspace.WorkspaceEffect
 import com.example.songseed.ui.workspace.WorkspaceViewModel
 import kotlinx.coroutines.flow.collectLatest
 
@@ -50,56 +51,47 @@ fun WorkspaceScreen(
 ) {
     val context = LocalContext.current
 
-    // ViewModels
     val vm: WorkspaceViewModel = hiltViewModel()
     val playbackViewModel: PlaybackViewModel = hiltViewModel()
 
-    // Load data when ideaId changes
     LaunchedEffect(ideaId) {
-        vm.load(ideaId)
+        vm.onAction(WorkspaceAction.Load(ideaId))
     }
 
-    // Collect VM state
-    val idea by vm.idea.collectAsState()
-    val tags by vm.tags.collectAsState()
-    val titleDraft by vm.titleDraft.collectAsState()
-    val notesDraft by vm.notesDraft.collectAsState()
-    val errorMessage by vm.errorMessage.collectAsState(initial = null)
+    val state by vm.state.collectAsState()
+    val idea = state.idea
+    val tags = state.tags
+    val titleDraft = state.titleDraft
+    val notesDraft = state.notesDraft
+    val errorMessage = state.errorMessage
 
-
-    // Collect playback state
     val isPlaying by playbackViewModel.isPlaying.collectAsState()
     val durationMs by playbackViewModel.durationMs.collectAsState()
     val positionMs by playbackViewModel.positionMs.collectAsState()
 
-    // UI-only state
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var newTagText by remember { mutableStateOf("") }
 
     var isScrubbing by remember { mutableStateOf(false) }
     var scrubMs by remember { mutableStateOf(0L) }
 
-    // Keep scrub bar in sync when not scrubbing
     LaunchedEffect(positionMs, isScrubbing) {
         if (!isScrubbing) scrubMs = positionMs
     }
 
-    // Snackbar for one-off messages
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // Handle one-off VM events
     LaunchedEffect(Unit) {
-        vm.events.collectLatest { event ->
-            when (event) {
-                is WorkspaceEvent.NavigateBack -> onBack()
-                is WorkspaceEvent.ShowError -> snackbarHostState.showSnackbar(event.message)
+        vm.effects.collectLatest { effect ->
+            when (effect) {
+                is WorkspaceEffect.NavigateBack -> onBack()
+                is WorkspaceEffect.ShowError -> snackbarHostState.showSnackbar(effect.message)
             }
         }
     }
 
-    // Flush pending saves when leaving screen
     DisposableEffect(Unit) {
-        onDispose { vm.flushPendingSaves() }
+        onDispose { vm.onAction(WorkspaceAction.FlushPendingSaves) }
     }
 
     Scaffold(
@@ -111,7 +103,6 @@ fun WorkspaceScreen(
                 .padding(padding)
                 .padding(16.dp)
         ) {
-            // Header
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onBack) { Text("Back") }
                 Spacer(Modifier.width(8.dp))
@@ -120,7 +111,6 @@ fun WorkspaceScreen(
 
             Spacer(Modifier.height(12.dp))
 
-            // Top-level error
             errorMessage?.let { msg ->
                 Text(msg, color = MaterialTheme.colorScheme.error)
                 Spacer(Modifier.height(8.dp))
@@ -131,29 +121,26 @@ fun WorkspaceScreen(
 
             val audioFile = vm.getAudioFile(loaded.audioFileName)
 
-            // Title
             OutlinedTextField(
                 value = titleDraft,
-                onValueChange = vm::onTitleChange,
+                onValueChange = {  vm.onAction(WorkspaceAction.TitleChanged(it)) },
                 label = { Text("Title") },
                 modifier = Modifier.fillMaxWidth()
             )
 
             Spacer(Modifier.height(10.dp))
 
-            // Favorite
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { vm.toggleFavorite() }) {
+                TextButton(onClick = { vm.onAction(WorkspaceAction.ToggleFavorite) }) {
                     Text(if (loaded.isFavorite) "Unfavorite" else "Favorite")
                 }
             }
 
             Spacer(Modifier.height(12.dp))
 
-            // Notes
             OutlinedTextField(
                 value = notesDraft,
-                onValueChange = vm::onNotesChange,
+                onValueChange = {  vm.onAction(WorkspaceAction.NotesChanged(it)) },
                 label = { Text("Notes") },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -162,7 +149,6 @@ fun WorkspaceScreen(
 
             Spacer(Modifier.height(12.dp))
 
-            // Tags
             Text("Tags")
             Spacer(Modifier.height(6.dp))
 
@@ -177,7 +163,7 @@ fun WorkspaceScreen(
                         // AssistChip is stable (non-experimental).
                         // We use a small "✕" inside the label to hint removal.
                         AssistChip(
-                            onClick = { vm.removeTag(tag.id) },
+                            onClick = { vm.onAction(WorkspaceAction.RemoveTag(tag.id)) },
                             label = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(tag.name)
@@ -192,7 +178,6 @@ fun WorkspaceScreen(
 
             Spacer(Modifier.height(10.dp))
 
-            // Add tag input
             OutlinedTextField(
                 value = newTagText,
                 onValueChange = { newTagText = it },
@@ -203,7 +188,7 @@ fun WorkspaceScreen(
                     onDone = {
                         val text = newTagText
                         newTagText = ""
-                        vm.addTagsFromInput(text)
+                        vm.onAction(WorkspaceAction.AddTagsFromInput(text))
                     }
                 ),
                 modifier = Modifier.fillMaxWidth()
@@ -215,7 +200,7 @@ fun WorkspaceScreen(
                 onClick = {
                     val text = newTagText
                     newTagText = ""
-                    vm.addTagsFromInput(text)
+                    vm.onAction(WorkspaceAction.AddTagsFromInput(text))
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -224,7 +209,6 @@ fun WorkspaceScreen(
 
             Spacer(Modifier.height(16.dp))
 
-            // Playback
             Text("Playback")
             Spacer(Modifier.height(8.dp))
 
@@ -290,7 +274,7 @@ fun WorkspaceScreen(
                     confirmButton = {
                         TextButton(onClick = {
                             showDeleteConfirm = false
-                            vm.deleteIdea()
+                            vm.onAction(WorkspaceAction.DeleteIdea)
                         }) {
                             Text("Delete")
                         }

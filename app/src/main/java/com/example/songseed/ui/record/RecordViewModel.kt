@@ -10,90 +10,93 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import java.io.File
 import javax.inject.Inject
-
-sealed interface RecordEvent {
-    data class OpenWorkspace(val ideaId: Long) : RecordEvent
-    data class ShowError(val message: String) : RecordEvent
-}
 
 @HiltViewModel
 class RecordViewModel @Inject constructor(
     private val recorder: AudioRecorder,
     private val repo: IdeaRepository
-) : ViewModel()
-{
-    private val _isRecording = MutableStateFlow(false)
-    val isRecording = _isRecording.asStateFlow()
+) : ViewModel() {
 
-    private val _lastSavedFileName = MutableStateFlow<String?>(null)
-    val lastSavedFileName = _lastSavedFileName.asStateFlow()
+    private val _state = MutableStateFlow(RecordUiState())
+    val state = _state.asStateFlow()
 
-    // Optional: keep a state string for simple UI display.
-    private val _errorMessage = MutableStateFlow<String?>(null)
-    val errorMessage = _errorMessage.asStateFlow()
+    private val _effects = MutableSharedFlow<RecordEffect>()
+    val effects = _effects.asSharedFlow()
 
-    private val _events = MutableSharedFlow<RecordEvent>()
-    val events = _events.asSharedFlow()
-
-    fun startRecording() {
-        _errorMessage.value = null
-
-        try {
-            recorder.start()
-            _isRecording.value = true
-        } catch (e: Exception) {
-            _isRecording.value = false
-            _errorMessage.value = e.message ?: "Failed to start recording."
+    fun onAction(action: RecordAction) {
+        when (action) {
+            RecordAction.StartRecording -> startRecording()
+            RecordAction.StopAndSave -> stopAndSave()
+            RecordAction.StopForBackground -> stopForBackground()
         }
     }
 
-    /**
-     * Stop recording. If we successfully saved a file, create the Idea and emit navigation event.
-     */
-    fun stopAndSave() {
-        _errorMessage.value = null
+    fun startRecording() {
+        _state.value = _state.value.copy(errorMessage = null)
+        try {
+            recorder.start()
+            _state.value = _state.value.copy(
+                isRecording = true,
+                errorMessage = null
+            )
+        } catch (e: Exception) {
+            _state.value = _state.value.copy(
+                isRecording = false,
+                errorMessage = e.message ?: "Failed to start recording."
+            )
+        }
+    }
 
-        val saved: File? = recorder.stop()
-        _isRecording.value = false
+
+    private fun stopAndSave() {
+        _state.value = _state.value.copy(errorMessage = null)
+
+        val saved = try {
+            recorder.stop()
+        } catch (e: Exception) {
+            val msg = e.message ?: "Failed to stop/save recording."
+            _state.value = _state.value.copy(isRecording = false, errorMessage = msg)
+            viewModelScope.launch { _effects.emit(RecordEffect.ShowError(msg)) }
+            return
+        }
+
+        _state.value = _state.value.copy(isRecording = false)
 
         if (saved == null) {
-            _errorMessage.value = "Recording was too short or failed to save."
+            _state.value = _state.value.copy(errorMessage = "Failed to save audio.")
             return
         }
 
         viewModelScope.launch {
             try {
                 val ideaId = repo.createIdeaForRecordingFile(saved)
-                _lastSavedFileName.value = saved.name
-                _events.emit(RecordEvent.OpenWorkspace(ideaId))
+                _state.value = _state.value.copy(lastSavedFileName = saved.name)
+                _effects.emit(RecordEffect.OpenWorkspace(ideaId))
             } catch (e: Exception) {
-                _lastSavedFileName.value = saved.name
                 val msg = e.message ?: "Saved audio, but failed to create idea."
-                _errorMessage.value = msg
-                _events.emit(RecordEvent.ShowError(msg))
+                _state.value = _state.value.copy(
+                    lastSavedFileName = saved.name,
+                    errorMessage = msg
+                )
+                _effects.emit(RecordEffect.ShowError(msg))
             }
         }
     }
 
-    /**
-     * Called when the app goes to background (Lifecycle ON_STOP).
-     * We stop recording for safety, but we do NOT create an idea automatically.
-     * This preserves your original behavior.
-     */
-    fun stopForBackground(): String? {
-        if (!_isRecording.value) return null
+    private fun stopForBackground() {
+        if (!_state.value.isRecording) return
 
         val saved = recorder.stop()
-        _isRecording.value = false
-        _lastSavedFileName.value = saved?.name
-        return saved?.name
+
+        _state.value = _state.value.copy(
+            isRecording = false,
+            lastSavedFileName = saved?.name
+        )
     }
 
     override fun onCleared() {
         super.onCleared()
-        // Extra safety: make sure recorder isn't left running.
         recorder.stop()
     }
 }

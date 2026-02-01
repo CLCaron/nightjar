@@ -2,25 +2,18 @@ package com.example.songseed.ui.workspace
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.songseed.data.db.entity.IdeaEntity
-import com.example.songseed.data.db.entity.TagEntity
 import com.example.songseed.data.repository.IdeaRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
 import javax.inject.Inject
-
-sealed interface WorkspaceEvent {
-    data object NavigateBack : WorkspaceEvent
-    data class ShowError(val message: String) : WorkspaceEvent
-}
 
 @HiltViewModel
 class WorkspaceViewModel @Inject constructor(
@@ -28,30 +21,30 @@ class WorkspaceViewModel @Inject constructor(
 ) : ViewModel() {
 
     private var currentIdeaId: Long? = null
+    private val _state = MutableStateFlow(WorkspaceUiState())
+    val state = _state.asStateFlow()
 
-    private val _idea = MutableStateFlow<IdeaEntity?>(null)
-    val idea: StateFlow<IdeaEntity?> = _idea.asStateFlow()
-
-    private val _tags = MutableStateFlow<List<TagEntity>>(emptyList())
-    val tags: StateFlow<List<TagEntity>> = _tags.asStateFlow()
-
-    private val _titleDraft = MutableStateFlow("")
-    val titleDraft: StateFlow<String> = _titleDraft.asStateFlow()
-
-    private val _notesDraft = MutableStateFlow("")
-    val notesDraft: StateFlow<String> = _notesDraft.asStateFlow()
-
-    // ✅ FIX: explicit type avoids Kotlin inferring Nothing?
-    private val _errorMessage = MutableStateFlow<String?>(null)
-    val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
-
-    private val _events = MutableSharedFlow<WorkspaceEvent>()
-    val events = _events.asSharedFlow()
+    private val _effects = MutableSharedFlow<WorkspaceEffect>()
+    val effects = _effects.asSharedFlow()
 
     private var titleSaveJob: Job? = null
     private var notesSaveJob: Job? = null
 
-    fun load(ideaId: Long) {
+    fun onAction(action: WorkspaceAction) {
+        when (action) {
+            is WorkspaceAction.Load -> load(action.ideaId)
+            is WorkspaceAction.TitleChanged -> onTitleChange(action.value)
+            is WorkspaceAction.NotesChanged -> onNotesChange(action.value)
+            WorkspaceAction.ToggleFavorite -> toggleFavorite()
+            is WorkspaceAction.AddTagsFromInput -> addTagsFromInput(action.raw)
+            is WorkspaceAction.RemoveTag -> removeTag(action.tagId)
+            WorkspaceAction.DeleteIdea -> deleteIdea()
+            WorkspaceAction.FlushPendingSaves -> flushPendingSaves()
+        }
+    }
+
+
+    private fun load(ideaId: Long) {
         if (currentIdeaId == ideaId) return
         currentIdeaId = ideaId
 
@@ -59,91 +52,96 @@ class WorkspaceViewModel @Inject constructor(
             try {
                 val loaded = repo.getIdeaById(ideaId)
                 if (loaded == null) {
-                    _idea.value = null
-                    _errorMessage.value = "Idea not found."
+                    _state.update { it.copy(idea = null, errorMessage = "Idea not found.") }
                     return@launch
                 }
 
-                _errorMessage.value = null
-                _idea.value = loaded
-                _titleDraft.value = loaded.title
-                _notesDraft.value = loaded.notes
+                _state.update {
+                    it.copy(
+                        idea = loaded,
+                        titleDraft = loaded.title,
+                        notesDraft = loaded.notes,
+                        errorMessage = null
+                    )
+                }
 
                 refreshTags()
             } catch (e: Exception) {
-                _errorMessage.value = e.message ?: "Failed to load idea."
-                _events.emit(WorkspaceEvent.ShowError(_errorMessage.value!!))
+                val msg = e.message ?: "Failed to load idea."
+                _state.update { it.copy(errorMessage = msg) }
+                _effects.emit(WorkspaceEffect.ShowError(msg))
             }
         }
     }
 
     private suspend fun refreshTags() {
         val id = currentIdeaId ?: return
-        _tags.value = repo.getTagsForIdea(id)
+        _state.update { it.copy(tags = repo.getTagsForIdea(id)) }
     }
 
-    fun onTitleChange(value: String) {
-        _titleDraft.value = value
+    private fun onTitleChange(value: String) {
+        _state.update { it.copy(titleDraft = value) }
         scheduleTitleSave()
     }
 
-    fun onNotesChange(value: String) {
-        _notesDraft.value = value
+    private fun onNotesChange(value: String) {
+        _state.update { it.copy(notesDraft = value)}
         scheduleNotesSave()
     }
 
     private fun scheduleTitleSave() {
-        val idea = _idea.value ?: return
+        val idea = _state.value.idea ?: return
         titleSaveJob?.cancel()
 
         titleSaveJob = viewModelScope.launch {
             delay(600)
-            val finalTitle = _titleDraft.value.trim().ifBlank { idea.title }
+            val finalTitle = _state.value.titleDraft.trim().ifBlank { idea.title }
             try {
                 repo.updateTitle(idea.id, finalTitle)
-                _idea.value = idea.copy(title = finalTitle)
+                _state.update { it.copy(idea = idea.copy(title = finalTitle)) }
             } catch (e: Exception) {
                 val msg = e.message ?: "Failed to save title."
-                _errorMessage.value = msg
-                _events.emit(WorkspaceEvent.ShowError(msg))
+                _state.update { it.copy(errorMessage = msg) }
+                _effects.emit(WorkspaceEffect.ShowError(msg))
             }
         }
     }
 
     private fun scheduleNotesSave() {
-        val idea = _idea.value ?: return
+        val idea = _state.value.idea ?: return
         notesSaveJob?.cancel()
 
         notesSaveJob = viewModelScope.launch {
             delay(600)
             try {
-                repo.updateNotes(idea.id, _notesDraft.value)
-                _idea.value = idea.copy(notes = _notesDraft.value)
+                val notes = _state.value.notesDraft
+                repo.updateNotes(idea.id, notes)
+                _state.update { it.copy(idea = idea.copy(notes = notes)) }
             } catch (e: Exception) {
                 val msg = e.message ?: "Failed to save notes."
-                _errorMessage.value = msg
-                _events.emit(WorkspaceEvent.ShowError(msg))
+                _state.update { it.copy(errorMessage = msg) }
+                _effects.emit(WorkspaceEffect.ShowError(msg))
             }
         }
     }
 
-    fun toggleFavorite() {
-        val idea = _idea.value ?: return
+    private fun toggleFavorite() {
+        val idea = _state.value.idea ?: return
         val newValue = !idea.isFavorite
 
         viewModelScope.launch {
             try {
                 repo.updateFavorite(idea.id, newValue)
-                _idea.value = idea.copy(isFavorite = newValue)
+                _state.update { it.copy(idea = idea.copy(isFavorite = newValue)) }
             } catch (e: Exception) {
                 val msg = e.message ?: "Failed to update favorite."
-                _errorMessage.value = msg
-                _events.emit(WorkspaceEvent.ShowError(msg))
+                _state.update { it.copy(errorMessage = msg) }
+                _effects.emit(WorkspaceEffect.ShowError(msg))
             }
         }
     }
 
-    fun addTagsFromInput(raw: String) {
+    private fun addTagsFromInput(raw: String) {
         val id = currentIdeaId ?: return
         val parts = raw.split(",").map { it.trim() }.filter { it.isNotBlank() }
         if (parts.isEmpty()) return
@@ -154,13 +152,13 @@ class WorkspaceViewModel @Inject constructor(
                 refreshTags()
             } catch (e: Exception) {
                 val msg = e.message ?: "Failed to add tag(s)."
-                _errorMessage.value = msg
-                _events.emit(WorkspaceEvent.ShowError(msg))
+                _state.update { it.copy(errorMessage = msg) }
+                _effects.emit(WorkspaceEffect.ShowError(msg))
             }
         }
     }
 
-    fun removeTag(tagId: Long) {
+    private fun removeTag(tagId: Long) {
         val id = currentIdeaId ?: return
 
         viewModelScope.launch {
@@ -169,37 +167,37 @@ class WorkspaceViewModel @Inject constructor(
                 refreshTags()
             } catch (e: Exception) {
                 val msg = e.message ?: "Failed to remove tag."
-                _errorMessage.value = msg
-                _events.emit(WorkspaceEvent.ShowError(msg))
+                _state.update { it.copy(errorMessage = msg) }
+                _effects.emit(WorkspaceEffect.ShowError(msg))
             }
         }
     }
 
-    fun deleteIdea() {
-        val idea = _idea.value ?: return
+    private fun deleteIdea() {
+        val idea = _state.value.idea ?: return
 
         viewModelScope.launch {
             try {
                 repo.deleteIdeaAndAudio(idea.id)
-                _events.emit(WorkspaceEvent.NavigateBack)
+                _effects.emit(WorkspaceEffect.NavigateBack)
             } catch (e: Exception) {
                 val msg = e.message ?: "Failed to delete idea."
-                _errorMessage.value = msg
-                _events.emit(WorkspaceEvent.ShowError(msg))
+                _state.update { it.copy(errorMessage = msg) }
+                _effects.emit(WorkspaceEffect.ShowError(msg))
             }
         }
     }
 
-    fun flushPendingSaves() {
+    private fun flushPendingSaves() {
         titleSaveJob?.cancel()
         notesSaveJob?.cancel()
 
-        val idea = _idea.value ?: return
+        val idea = _state.value.idea ?: return
 
         viewModelScope.launch {
             try {
-                repo.updateTitle(idea.id, _titleDraft.value)
-                repo.updateNotes(idea.id, _notesDraft.value)
+                repo.updateTitle(idea.id, _state.value.titleDraft)
+                repo.updateNotes(idea.id, _state.value.notesDraft)
             } catch (_: Exception) {
                 // ignore on dispose
             }
