@@ -47,13 +47,7 @@ class LibraryViewModel @Inject constructor(
 
     private fun load() {
         viewModelScope.launch {
-            refreshUsedTags()
-            refreshIdeas()
-        }
-    }
-
-    init {
-        viewModelScope.launch {
+            _state.update { it.copy(errorMessage = null) }
             refreshUsedTags()
             refreshIdeas()
         }
@@ -62,10 +56,10 @@ class LibraryViewModel @Inject constructor(
     private suspend fun refreshUsedTags() {
         try {
             val tags = repo.getAllUsedTags()
-            _state.update { it.copy(usedTags = tags, errorMessage = null) }
+            _state.update { it.copy(usedTags = tags) }
         } catch (e: Exception) {
             val msg = e.message ?: "Failed to load tags."
-            _state.update { it.copy(errorMessage = e.message) }
+            _state.update { it.copy(errorMessage = msg) }
             _effects.emit(LibraryEffect.ShowError(msg))
         }
     }
@@ -81,7 +75,7 @@ class LibraryViewModel @Inject constructor(
                 sort == SortMode.OLDEST -> repo.getIdeasOldestFirst()
                 else -> repo.getIdeasNewest()
             }
-            _state.update { it.copy(ideas = ideas, errorMessage = null) }
+            _state.update { it.copy(ideas = ideas) }
         } catch (e: Exception) {
             val msg = e.message ?: "Failed to load ideas."
             _state.update { it.copy(errorMessage = msg) }
