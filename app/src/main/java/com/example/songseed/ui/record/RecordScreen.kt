@@ -1,5 +1,7 @@
 package com.example.songseed.ui.record
 
+import NjPrimaryButton
+import NjSecondaryButton
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -8,12 +10,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -48,7 +48,6 @@ fun RecordScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
 
     val vm: RecordViewModel = hiltViewModel()
-
     val state by vm.state.collectAsState()
     val isRecording by rememberUpdatedState(state.isRecording)
 
@@ -94,51 +93,81 @@ fun RecordScreen(
     }
 
     Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) }
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
     ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(20.dp),
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp, vertical = 18.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("Nightjar", style = MaterialTheme.typography.headlineMedium)
-            Spacer(Modifier.height(16.dp))
+            Text(
+                text = "Nightjar",
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+            )
+
+            Spacer(Modifier.height(6.dp))
+
+            Text(
+                text = "Capture now. Write later.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.60f)
+            )
+
+            Spacer(Modifier.height(28.dp))
 
             if (!hasMicPermission) {
-                Text("Mic permission is required to record.")
-                Spacer(Modifier.height(12.dp))
-                Button(onClick = { requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) }) {
-                    Text("Enable microphone")
-                }
+                Text(
+                    text = "Microphone permission is required to record.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.80f)
+                )
+
+                Spacer(Modifier.height(14.dp))
+
+                NjPrimaryButton(
+                    text = "Enable microphone",
+                    onClick = { requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
+                    minHeight = 56.dp
+                )
             } else {
-                Button(
+                NjPrimaryButton(
+                    text = if (state.isRecording) "Stop & Save" else "Record",
                     onClick = {
                         if (!state.isRecording) vm.onAction(RecordAction.StartRecording)
                         else vm.onAction(RecordAction.StopAndSave)
                     },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(64.dp)
-                ) {
-                    Text(if (state.isRecording) "Stop & Save" else "Record")
+                    minHeight = 72.dp
+                )
+
+                Spacer(Modifier.height(14.dp))
+
+                Text(
+                    text = if (state.isRecording) "Recording…" else "Ready",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f)
+                )
+
+                state.lastSavedFileName?.let { file ->
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        text = "Last saved: $file",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+                    )
                 }
 
-                Spacer(Modifier.height(12.dp))
-                Text(if (state.isRecording) "Recording…" else "Ready")
+                Spacer(Modifier.height(26.dp))
 
-                state.lastSavedFileName?.let {
-                    Spacer(Modifier.height(12.dp))
-                    Text("Last saved file: $it", style = MaterialTheme.typography.bodySmall)
-                }
-
-                Spacer(Modifier.height(20.dp))
-
-                OutlinedButton(onClick = onOpenLibrary, modifier = Modifier.fillMaxWidth()) {
-                    Text("Open Library")
-                }
+                NjSecondaryButton(
+                    text = "Open Library",
+                    onClick = onOpenLibrary,
+                    minHeight = 56.dp
+                )
             }
         }
     }

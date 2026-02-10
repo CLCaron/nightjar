@@ -5,20 +5,17 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -31,7 +28,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
@@ -39,6 +35,10 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.songseed.player.PlaybackViewModel
 import com.example.songseed.share.ShareUtils
+import com.example.songseed.ui.components.NjScrubber
+import com.example.songseed.ui.components.NjTagChip
+import com.example.songseed.ui.components.NjTextField
+import com.example.songseed.ui.components.NjTopBar
 import com.example.songseed.ui.workspace.WorkspaceAction
 import com.example.songseed.ui.workspace.WorkspaceEffect
 import com.example.songseed.ui.workspace.WorkspaceViewModel
@@ -75,8 +75,8 @@ fun WorkspaceScreen(
     var isScrubbing by remember { mutableStateOf(false) }
     var scrubMs by remember { mutableStateOf(0L) }
 
-    LaunchedEffect(positionMs, isScrubbing) {
-        if (!isScrubbing) scrubMs = positionMs
+    LaunchedEffect(positionMs, isScrubbing, durationMs) {
+        if (!isScrubbing) scrubMs = positionMs.coerceIn(0L, durationMs.coerceAtLeast(1L))
     }
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -94,94 +94,147 @@ fun WorkspaceScreen(
         onDispose { vm.onAction(WorkspaceAction.FlushPendingSaves) }
     }
 
+    val loaded = idea
+    val audioFile = loaded?.let { vm.getAudioFile(it.audioFileName) }
+
     Scaffold(
-        snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+        bottomBar = {
+            if (loaded != null && audioFile != null) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        NjDestructiveButton("Delete", onClick = { showDeleteConfirm = true }, modifier = Modifier.weight(1f), fullWidth = false)
+                        NjSecondaryButton("Share", onClick = { ShareUtils.shareAudioFile(
+                            context = context,
+                            file = audioFile,
+                            title = loaded.title
+                        ) }, modifier = Modifier.weight(1f), fullWidth = false)
+                    }
+                }
+            }
+        }
     ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(16.dp)
+                .padding(horizontal = 16.dp)
+                .padding(top = 12.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onBack) { Text("Back") }
-                Spacer(Modifier.width(8.dp))
-                Text("Workspace", style = MaterialTheme.typography.headlineSmall)
-            }
-
-            Spacer(Modifier.height(12.dp))
+            NjTopBar(
+                title = "Workspace",
+                onBack = onBack
+            )
 
             errorMessage?.let { msg ->
                 Text(msg, color = MaterialTheme.colorScheme.error)
-                Spacer(Modifier.height(8.dp))
             }
 
-            val loaded = idea
-            if (loaded == null) return@Column
+            if (loaded == null || audioFile == null) {
+                Text("Loading…", style = MaterialTheme.typography.bodyMedium)
+                return@Column
+            }
 
-            val audioFile = vm.getAudioFile(loaded.audioFileName)
+            // TODO: Make TextButton components
+            TextButton(onClick = { vm.onAction(WorkspaceAction.ToggleFavorite) }) {
+                Text(if (loaded.isFavorite) "Unfavorite" else "Favorite")
+            }
 
-            OutlinedTextField(
+            NjTextField(
                 value = titleDraft,
-                onValueChange = {  vm.onAction(WorkspaceAction.TitleChanged(it)) },
-                label = { Text("Title") },
-                modifier = Modifier.fillMaxWidth()
+                onValueChange = { vm.onAction(WorkspaceAction.TitleChanged(it)) },
+                label = "Title",
+                placeholder = "Untitled idea",
+                singleLine = true
             )
 
-            Spacer(Modifier.height(10.dp))
+            NjSectionTitle("Playback")
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { vm.onAction(WorkspaceAction.ToggleFavorite) }) {
-                    Text(if (loaded.isFavorite) "Unfavorite" else "Favorite")
+            NjScrubber(
+                positionMs = scrubMs,
+                durationMs = durationMs,
+                onScrub = { newMs ->
+                    isScrubbing = true
+                    scrubMs = newMs
+                },
+                onScrubFinished = { finalMs ->
+                    isScrubbing = false
+                    playbackViewModel.seekTo(finalMs)
                 }
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                NjPrimaryButton(
+                    text = if (isPlaying) "Resume" else "Play",
+                    onClick = { playbackViewModel.playFile(audioFile) },
+                    modifier = Modifier.weight(1f),
+                    fullWidth = false
+                )
+                NjPrimaryButton(
+                    text = "Pause",
+                    onClick = { playbackViewModel.pause() },
+                    modifier = Modifier.weight(1f),
+                    fullWidth = false
+                )
             }
 
-            Spacer(Modifier.height(12.dp))
-
-            OutlinedTextField(
-                value = notesDraft,
-                onValueChange = {  vm.onAction(WorkspaceAction.NotesChanged(it)) },
-                label = { Text("Notes") },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(140.dp)
+            Text(
+                "File: ${loaded.audioFileName}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
             )
 
-            Spacer(Modifier.height(12.dp))
+            NjSectionTitle("Notes")
+            NjTextField(
+                value = notesDraft,
+                onValueChange = { vm.onAction(WorkspaceAction.NotesChanged(it)) },
+                label = "Notes",
+                placeholder = "Lyrics? Chords? Vibe?",
+                minLines = 6,
+                maxLines = 12
+            )
 
-            Text("Tags")
-            Spacer(Modifier.height(6.dp))
-
+            NjSectionTitle("Tags")
             if (tags.isEmpty()) {
-                Text("No tags yet.", style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "No tags yet.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
+                )
             } else {
                 LazyRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(items = tags, key = { it.id }) { tag ->
-                        // AssistChip is stable (non-experimental).
-                        // We use a small "✕" inside the label to hint removal.
-                        AssistChip(
-                            onClick = { vm.onAction(WorkspaceAction.RemoveTag(tag.id)) },
-                            label = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(tag.name)
-                                    Spacer(Modifier.width(6.dp))
-                                    Text("✕")
-                                }
-                            }
+                        NjTagChip(
+                            text = tag.name,
+                            onClick = { vm.onAction(WorkspaceAction.RemoveTag(tag.id)) }
                         )
                     }
                 }
             }
 
-            Spacer(Modifier.height(10.dp))
-
-            OutlinedTextField(
+            NjTextField(
                 value = newTagText,
                 onValueChange = { newTagText = it },
-                label = { Text("Add tag") },
+                label = "Add tag",
+                placeholder = "e.g. chorus, sad, 120bpm",
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(
@@ -190,81 +243,19 @@ fun WorkspaceScreen(
                         newTagText = ""
                         vm.onAction(WorkspaceAction.AddTagsFromInput(text))
                     }
-                ),
-                modifier = Modifier.fillMaxWidth()
+                )
             )
 
-            Spacer(Modifier.height(8.dp))
-
-            Button(
+            NjPrimaryButton(
+                text = "Add Tag",
                 onClick = {
                     val text = newTagText
                     newTagText = ""
                     vm.onAction(WorkspaceAction.AddTagsFromInput(text))
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Add Tag")
-            }
-
-            Spacer(Modifier.height(16.dp))
-
-            Text("Playback")
-            Spacer(Modifier.height(8.dp))
-
-            Slider(
-                value = scrubMs.toFloat().coerceAtLeast(0f),
-                onValueChange = { newValue ->
-                    isScrubbing = true
-                    scrubMs = newValue.toLong()
-                },
-                onValueChangeFinished = {
-                    isScrubbing = false
-                    playbackViewModel.seekTo(scrubMs)
-                },
-                valueRange = 0f..durationMs.toFloat().coerceAtLeast(1f),
-                modifier = Modifier.fillMaxWidth()
+                }
             )
 
-            Spacer(Modifier.height(8.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                Button(onClick = { playbackViewModel.playFile(audioFile) }) {
-                    Text(if (isPlaying) "Resume" else "Play")
-                }
-                Button(onClick = { playbackViewModel.pause() }) {
-                    Text("Pause")
-                }
-            }
-
-            Spacer(Modifier.height(10.dp))
-
-            Text("File: ${loaded.audioFileName}", style = MaterialTheme.typography.bodySmall)
-
-            Spacer(Modifier.height(10.dp))
-
-            OutlinedButton(
-                onClick = {
-                    ShareUtils.shareAudioFile(
-                        context = context,
-                        file = audioFile,
-                        title = loaded.title
-                    )
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Share / Export")
-            }
-
-            OutlinedButton(
-                onClick = { showDeleteConfirm = true },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Delete Idea")
-            }
+            Spacer(Modifier.height(96.dp))
 
             if (showDeleteConfirm) {
                 AlertDialog(
@@ -275,14 +266,10 @@ fun WorkspaceScreen(
                         TextButton(onClick = {
                             showDeleteConfirm = false
                             vm.onAction(WorkspaceAction.DeleteIdea)
-                        }) {
-                            Text("Delete")
-                        }
+                        }) { Text("Delete") }
                     },
                     dismissButton = {
-                        TextButton(onClick = { showDeleteConfirm = false }) {
-                            Text("Cancel")
-                        }
+                        TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }
                     }
                 )
             }
