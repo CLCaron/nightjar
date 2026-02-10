@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.songseed.player.PlaybackViewModel
 import com.example.songseed.share.ShareUtils
+import com.example.songseed.ui.components.NjInlineAction
 import com.example.songseed.ui.components.NjScrubber
 import com.example.songseed.ui.components.NjTagChip
 import com.example.songseed.ui.components.NjTextField
@@ -59,7 +60,7 @@ fun WorkspaceScreen(
     }
 
     val state by vm.state.collectAsState()
-    val idea = state.idea
+    val loaded = state.idea
     val tags = state.tags
     val titleDraft = state.titleDraft
     val notesDraft = state.notesDraft
@@ -94,7 +95,6 @@ fun WorkspaceScreen(
         onDispose { vm.onAction(WorkspaceAction.FlushPendingSaves) }
     }
 
-    val loaded = idea
     val audioFile = loaded?.let { vm.getAudioFile(it.audioFileName) }
 
     Scaffold(
@@ -108,17 +108,28 @@ fun WorkspaceScreen(
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        NjDestructiveButton("Delete", onClick = { showDeleteConfirm = true }, modifier = Modifier.weight(1f), fullWidth = false)
-                        NjSecondaryButton("Share", onClick = { ShareUtils.shareAudioFile(
-                            context = context,
-                            file = audioFile,
-                            title = loaded.title
-                        ) }, modifier = Modifier.weight(1f), fullWidth = false)
+                        NjDestructiveButton(
+                            text = "Delete",
+                            onClick = { showDeleteConfirm = true },
+                            modifier = Modifier.weight(1f),
+                            fullWidth = false
+                        )
+                        NjSecondaryButton(
+                            text = "Share",
+                            onClick = {
+                                ShareUtils.shareAudioFile(
+                                    context = context,
+                                    file = audioFile,
+                                    title = loaded.title
+                                )
+                            },
+                            modifier = Modifier.weight(1f),
+                            fullWidth = false
+                        )
                     }
                 }
             }
@@ -129,7 +140,7 @@ fun WorkspaceScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .padding(horizontal = 16.dp)
-                .padding(top = 12.dp)
+                .padding(top = 8.dp)
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -143,13 +154,23 @@ fun WorkspaceScreen(
             }
 
             if (loaded == null || audioFile == null) {
-                Text("Loading…", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    "Loading…",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
+                )
                 return@Column
             }
 
-            // TODO: Make TextButton components
-            TextButton(onClick = { vm.onAction(WorkspaceAction.ToggleFavorite) }) {
-                Text(if (loaded.isFavorite) "Unfavorite" else "Favorite")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                NjInlineAction(
+                    text = if (loaded.isFavorite) "★ Favorited" else "☆ Favorite",
+                    onClick = { vm.onAction(WorkspaceAction.ToggleFavorite) },
+                    emphasized = loaded.isFavorite
+                )
             }
 
             NjTextField(
