@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.NavType
 import androidx.navigation.compose.*
 import androidx.navigation.navArgument
+import com.example.nightjar.ui.explore.ExploreScreen
 import com.example.nightjar.ui.record.RecordScreen
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -37,6 +38,7 @@ private object Routes {
     const val RECORD = "record"
     const val LIBRARY = "library"
     const val WORKSPACE = "workspace"
+    const val EXPLORE = "explore"
 }
 
 @Composable
@@ -66,6 +68,19 @@ fun NightjarApp() {
         ) { entry ->
             val ideaId = entry.arguments?.getLong("ideaId") ?: -1L
             WorkspaceScreen(
+                ideaId = ideaId,
+                onBack = { navController.popBackStack() },
+                onOpenExplore = { id ->
+                    navController.navigate("${Routes.EXPLORE}/$id")
+                }
+            )
+        }
+        composable(
+            route = "${Routes.EXPLORE}/{ideaId}",
+            arguments = listOf(navArgument("ideaId") { type = NavType.LongType })
+        ) { entry ->
+            val ideaId = entry.arguments?.getLong("ideaId") ?: -1L
+            ExploreScreen(
                 ideaId = ideaId,
                 onBack = { navController.popBackStack() }
             )

@@ -6,18 +6,21 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import com.example.nightjar.data.db.dao.IdeaDao
 import com.example.nightjar.data.db.dao.TagDao
+import com.example.nightjar.data.db.dao.TrackDao
 import com.example.nightjar.data.db.entity.IdeaEntity
 import com.example.nightjar.data.db.entity.TagEntity
+import com.example.nightjar.data.db.entity.TrackEntity
 
 @Database(
-    entities = [IdeaEntity::class, TagEntity::class, IdeaTagCrossRef::class],
-    version = 2,
+    entities = [IdeaEntity::class, TagEntity::class, IdeaTagCrossRef::class, TrackEntity::class],
+    version = 3,
     exportSchema = false
 )
 abstract class NightjarDatabase : RoomDatabase() {
 
     abstract fun ideaDao(): IdeaDao
     abstract fun tagDao(): TagDao
+    abstract fun trackDao(): TrackDao
 
     companion object {
         @Volatile private var INSTANCE: NightjarDatabase? = null
@@ -47,13 +50,39 @@ abstract class NightjarDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("""
+            CREATE TABLE IF NOT EXISTS tracks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                ideaId INTEGER NOT NULL,
+                audioFileName TEXT NOT NULL,
+                displayName TEXT NOT NULL,
+                sortIndex INTEGER NOT NULL,
+                offsetMs INTEGER NOT NULL DEFAULT 0,
+                trimStartMs INTEGER NOT NULL DEFAULT 0,
+                trimEndMs INTEGER NOT NULL DEFAULT 0,
+                durationMs INTEGER NOT NULL,
+                isMuted INTEGER NOT NULL DEFAULT 0,
+                volume REAL NOT NULL DEFAULT 1.0,
+                createdAtEpochMs INTEGER NOT NULL,
+                FOREIGN KEY(ideaId) REFERENCES ideas(id) ON DELETE CASCADE
+            )
+        """.trimIndent())
+
+                db.execSQL("""
+            CREATE INDEX IF NOT EXISTS index_tracks_ideaId ON tracks(ideaId)
+        """.trimIndent())
+            }
+        }
+
         fun getInstance(context: Context): NightjarDatabase {
             return INSTANCE ?: synchronized(this) {
                 val db = Room.databaseBuilder(
                     context.applicationContext,
                     NightjarDatabase::class.java,
                     "nightjar.db"
-                ).addMigrations(MIGRATION_1_2).build()
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
                 INSTANCE = db
                 db
             }

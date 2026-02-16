@@ -48,7 +48,8 @@ import kotlinx.coroutines.flow.collectLatest
 @Composable
 fun WorkspaceScreen(
     ideaId: Long,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onOpenExplore: (Long) -> Unit = {}
 ) {
     val context = LocalContext.current
 
@@ -170,6 +171,10 @@ fun WorkspaceScreen(
                     text = if (loaded.isFavorite) "★ Favorited" else "☆ Favorite",
                     onClick = { vm.onAction(WorkspaceAction.ToggleFavorite) },
                     emphasized = loaded.isFavorite
+                )
+                NjInlineAction(
+                    text = "Explore",
+                    onClick = { onOpenExplore(ideaId) }
                 )
             }
 
