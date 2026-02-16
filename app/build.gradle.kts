@@ -7,11 +7,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.songseed"
+    namespace = "com.example.nightjar"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.example.songseed"
+        applicationId = "com.example.nightjar"
         minSdk = 24
         targetSdk = 36
         versionCode = 1
