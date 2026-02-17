@@ -14,6 +14,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
+/** Compact inline action button (e.g. "Favorite", "Explore") with subtle surface styling. */
 @Composable
 fun NjInlineAction(
     text: String,

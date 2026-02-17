@@ -1,8 +1,5 @@
 package com.example.nightjar.ui.library
 
-import LibraryAction
-import LibraryEffect
-import LibraryUiState
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.nightjar.data.repository.IdeaRepository
@@ -15,12 +12,19 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+/** Sort order for the idea list in the Library screen. */
 enum class SortMode {
     NEWEST,
     OLDEST,
     FAVORITES_FIRST
 }
 
+/**
+ * ViewModel for the Library screen.
+ *
+ * Loads all ideas with sorting and tag-based filtering. Refreshes
+ * automatically when the sort mode or selected tag changes.
+ */
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
     private val repo: IdeaRepository

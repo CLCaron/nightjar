@@ -11,13 +11,20 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/**
+ * Central repository for idea lifecycle operations.
+ *
+ * Bridges the Record, Workspace, and Library screens to the underlying
+ * [IdeaDao], [TagDao], and [RecordingStorage]. All database and file
+ * operations are suspend functions safe to call from a ViewModel scope.
+ */
 class IdeaRepository(
     private val ideaDao: IdeaDao,
     private val tagDao: TagDao,
     private val storage: RecordingStorage
 ) {
 
-    /* ---------- Record ---------- */
+    // ── Record ──────────────────────────────────────────────────────────
 
     suspend fun createIdeaForRecordingFile(saved: File): Long {
         val title = defaultTitle()
@@ -36,7 +43,7 @@ class IdeaRepository(
         return "Idea ${fmt.format(Date())}"
     }
 
-    /* ---------- Workspace ---------- */
+    // ── Workspace ────────────────────────────────────────────────────────
 
     suspend fun getIdeaById(id: Long): IdeaEntity? =
         ideaDao.getIdeaById(id)
@@ -82,7 +89,7 @@ class IdeaRepository(
     fun getAudioFile(name: String): File =
         storage.getAudioFile(name)
 
-    /* ---------- Library (non-Flow) ---------- */
+    // ── Library ──────────────────────────────────────────────────────────
 
     suspend fun getAllUsedTags(): List<TagEntity> =
         tagDao.getAllUsedTags()

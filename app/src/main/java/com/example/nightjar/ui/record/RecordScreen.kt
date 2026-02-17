@@ -1,7 +1,7 @@
 package com.example.nightjar.ui.record
 
-import NjPrimaryButton
-import NjSecondaryButton
+import com.example.nightjar.ui.components.NjPrimaryButton
+import com.example.nightjar.ui.components.NjSecondaryButton
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -38,6 +38,14 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.flow.collectLatest
 
+/**
+ * Record screen — the app's landing page.
+ *
+ * Presents a single prominent button to start/stop recording. On save the
+ * recording is persisted as an [IdeaEntity] and the user is navigated to
+ * the Workspace. Handles microphone permission requests and gracefully
+ * saves when the app is backgrounded mid-recording.
+ */
 @Composable
 fun RecordScreen(
     onOpenLibrary: () -> Unit,

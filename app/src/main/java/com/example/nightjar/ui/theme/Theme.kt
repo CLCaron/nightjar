@@ -30,6 +30,7 @@ private val LightColorScheme = lightColorScheme(
     secondary = NjPrimary2
 )
 
+/** Applies the Nightjar Material 3 color scheme and typography. Defaults to dark theme. */
 @Composable
 fun NightjarTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),

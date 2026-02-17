@@ -15,6 +15,13 @@ import kotlinx.coroutines.launch
 import java.io.File
 import javax.inject.Inject
 
+/**
+ * Single-track audio playback for the Workspace screen.
+ *
+ * Wraps an [ExoPlayer] instance and exposes playback state as [StateFlow]s
+ * for Compose observation. Position is polled at ~5 Hz while playing.
+ * For multi-track playback in Explore mode, see [ExplorePlaybackManager].
+ */
 @HiltViewModel
 class PlaybackViewModel @Inject constructor(
     @ApplicationContext context: Context

@@ -19,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
+/** Top bar with optional back button, title, and trailing action slot. Includes a subtle divider. */
 @Composable
 fun NjTopBar(
     title: String,

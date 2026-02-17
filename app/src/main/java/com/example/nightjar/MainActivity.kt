@@ -1,7 +1,7 @@
 package com.example.nightjar
 
-import LibraryScreen
-import WorkspaceScreen
+import com.example.nightjar.ui.library.LibraryScreen
+import com.example.nightjar.ui.workspace.WorkspaceScreen
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -12,9 +12,11 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.NavType
 import androidx.navigation.compose.*
 import androidx.navigation.navArgument
+import com.example.nightjar.ui.explore.ExploreScreen
 import com.example.nightjar.ui.record.RecordScreen
 import dagger.hilt.android.AndroidEntryPoint
 
+/** Single-activity host. Sets up the Compose theme and [NightjarApp] navigation graph. */
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -33,12 +35,15 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/** Navigation route constants. */
 private object Routes {
     const val RECORD = "record"
     const val LIBRARY = "library"
     const val WORKSPACE = "workspace"
+    const val EXPLORE = "explore"
 }
 
+/** Top-level navigation graph: Record → Library → Workspace → Explore. */
 @Composable
 fun NightjarApp() {
     val navController = rememberNavController()
@@ -66,6 +71,19 @@ fun NightjarApp() {
         ) { entry ->
             val ideaId = entry.arguments?.getLong("ideaId") ?: -1L
             WorkspaceScreen(
+                ideaId = ideaId,
+                onBack = { navController.popBackStack() },
+                onOpenExplore = { id ->
+                    navController.navigate("${Routes.EXPLORE}/$id")
+                }
+            )
+        }
+        composable(
+            route = "${Routes.EXPLORE}/{ideaId}",
+            arguments = listOf(navArgument("ideaId") { type = NavType.LongType })
+        ) { entry ->
+            val ideaId = entry.arguments?.getLong("ideaId") ?: -1L
+            ExploreScreen(
                 ideaId = ideaId,
                 onBack = { navController.popBackStack() }
             )

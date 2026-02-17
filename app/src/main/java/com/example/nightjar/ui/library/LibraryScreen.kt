@@ -1,3 +1,5 @@
+package com.example.nightjar.ui.library
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -33,6 +35,7 @@ import java.text.DateFormat
 import java.util.Date
 import kotlinx.coroutines.flow.collectLatest
 
+/** A single idea card in the library list — shows title, favorite star, and creation date. */
 @Composable
 private fun IdeaRow(
     idea: IdeaEntity,
@@ -71,12 +74,18 @@ private fun IdeaRow(
     }
 }
 
+/**
+ * Library screen — browse saved ideas with sorting and tag-based filtering.
+ *
+ * Displays a horizontal tag chip bar for filtering, sort mode selectors,
+ * and a scrollable list of idea cards. Tapping a card navigates to the
+ * Workspace.
+ */
 @Composable
 fun LibraryScreen(
     onBack: () -> Unit,
     onOpenWorkspace: (Long) -> Unit
 ) {
-    //TODO: hiltViewModel deprecated?
     val vm: LibraryViewModel = hiltViewModel()
     val state by vm.state.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
