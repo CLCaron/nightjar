@@ -7,6 +7,7 @@ import androidx.room.Query
 import com.example.nightjar.data.db.entity.IdeaEntity
 import kotlinx.coroutines.flow.Flow
 
+/** Data access object for [IdeaEntity] — CRUD operations and sorted/filtered queries. */
 @Dao
 interface IdeaDao {
 

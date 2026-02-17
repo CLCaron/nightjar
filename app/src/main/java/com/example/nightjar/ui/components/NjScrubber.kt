@@ -11,6 +11,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 
+/**
+ * Audio playback scrubber with current/total time display.
+ *
+ * Reports drag position via [onScrub] during the gesture and the final
+ * committed position via [onScrubFinished] on release.
+ */
 @Composable
 fun NjScrubber(
     positionMs: Long,

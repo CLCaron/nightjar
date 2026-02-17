@@ -1,3 +1,5 @@
+package com.example.nightjar.ui.components
+
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -5,6 +7,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
+/** Section heading used to label groups of related content (e.g. "Playback", "Tags"). */
 @Composable
 fun NjSectionTitle(text: String) {
     Text(

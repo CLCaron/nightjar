@@ -8,13 +8,21 @@ import com.example.nightjar.data.storage.RecordingStorage
 import kotlinx.coroutines.flow.Flow
 import java.io.File
 
+/**
+ * Repository for multi-track Explore projects.
+ *
+ * Handles project initialization (promoting the original idea recording to
+ * Track 1), track CRUD, timeline edits (move, trim, reorder), and mix
+ * controls (mute, volume). All operations are non-destructive — audio
+ * files are never modified in place.
+ */
 class ExploreRepository(
     private val ideaDao: IdeaDao,
     private val trackDao: TrackDao,
     private val storage: RecordingStorage
 ) {
 
-    /* ---------- project lifecycle ---------- */
+    // ── Project lifecycle ───────────────────────────────────────────────
 
     /**
      * Ensures the idea has at least one track.  On first call the original
@@ -41,7 +49,7 @@ class ExploreRepository(
         return trackDao.getTracksForIdea(ideaId)
     }
 
-    /* ---------- track CRUD ---------- */
+    // ── Track CRUD ────────────────────────────────────────────────────────
 
     suspend fun addTrack(
         ideaId: Long,
@@ -71,7 +79,7 @@ class ExploreRepository(
         trackDao.updateDisplayName(trackId, name)
     }
 
-    /* ---------- timeline edits ---------- */
+    // ── Timeline edits ────────────────────────────────────────────────────
 
     suspend fun moveTrack(trackId: Long, newOffsetMs: Long) {
         trackDao.updateOffset(trackId, newOffsetMs)
@@ -87,7 +95,7 @@ class ExploreRepository(
         }
     }
 
-    /* ---------- mix controls ---------- */
+    // ── Mix controls ──────────────────────────────────────────────────────
 
     suspend fun setTrackMuted(trackId: Long, muted: Boolean) {
         trackDao.updateMuted(trackId, muted)
@@ -97,7 +105,7 @@ class ExploreRepository(
         trackDao.updateVolume(trackId, volume)
     }
 
-    /* ---------- reads ---------- */
+    // ── Reads ────────────────────────────────────────────────────────────
 
     fun observeTracks(ideaId: Long): Flow<List<TrackEntity>> =
         trackDao.observeTracksForIdea(ideaId)
@@ -110,7 +118,7 @@ class ExploreRepository(
         return storage.getAudioFile(track.audioFileName)
     }
 
-    /* ---------- internal ---------- */
+    // ── Internal ─────────────────────────────────────────────────────────
 
     private fun resolveFileDurationMs(file: File): Long {
         if (!file.exists()) return 0L

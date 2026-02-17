@@ -12,6 +12,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+/**
+ * ViewModel for the Record screen.
+ *
+ * Manages the record → stop → save → navigate-to-workspace flow.
+ * Handles lifecycle edge cases like the app being backgrounded
+ * mid-recording.
+ */
 @HiltViewModel
 class RecordViewModel @Inject constructor(
     private val recorder: AudioRecorder,

@@ -13,6 +13,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
+/** Styled outlined text field with Nightjar's color scheme and rounded corners. */
 @Composable
 fun NjTextField(
     value: String,

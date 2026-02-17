@@ -3,6 +3,7 @@ package com.example.nightjar.ui.workspace
 import com.example.nightjar.data.db.entity.IdeaEntity
 import com.example.nightjar.data.db.entity.TagEntity
 
+/** UI state for the Workspace screen. */
 data class WorkspaceUiState(
     val idea: IdeaEntity? = null,
     val tags: List<TagEntity> = emptyList(),
@@ -11,6 +12,7 @@ data class WorkspaceUiState(
     val errorMessage: String? = null
 )
 
+/** User-initiated actions on the Workspace screen. */
 sealed interface WorkspaceAction {
     data class Load(val ideaId: Long) : WorkspaceAction
     data class TitleChanged(val value: String) : WorkspaceAction
@@ -22,6 +24,7 @@ sealed interface WorkspaceAction {
     data object FlushPendingSaves : WorkspaceAction
 }
 
+/** One-shot side effects emitted by [WorkspaceViewModel]. */
 sealed interface WorkspaceEffect {
     data object NavigateBack : WorkspaceEffect
     data class ShowError(val message: String) : WorkspaceEffect

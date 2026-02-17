@@ -15,6 +15,13 @@ import kotlinx.coroutines.launch
 import java.io.File
 import javax.inject.Inject
 
+/**
+ * ViewModel for the Workspace screen.
+ *
+ * Manages editing of a single idea's metadata (title, notes, tags, favorite).
+ * Title and notes changes are debounced (600 ms) to avoid excessive writes.
+ * Pending saves are flushed when the screen is disposed.
+ */
 @HiltViewModel
 class WorkspaceViewModel @Inject constructor(
     private val repo: IdeaRepository

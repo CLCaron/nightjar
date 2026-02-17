@@ -1,5 +1,6 @@
 package com.example.nightjar.ui.explore
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.nightjar.audio.WavRecorder
@@ -22,6 +23,18 @@ import java.util.Date
 import java.util.Locale
 import javax.inject.Inject
 
+/**
+ * ViewModel for the Explore (multi-track workspace) screen.
+ *
+ * Coordinates overdub recording via [WavRecorder], multi-track playback
+ * via [ExplorePlaybackManager], and timeline editing (drag-to-reposition,
+ * trim). Recording synchronization follows this protocol:
+ *
+ * 1. Start [WavRecorder] and wait for the audio pipeline to become hot.
+ * 2. Start playback and wait for audio to actually render to the speaker.
+ * 3. Open the WAV write gate — audio is captured in sync with playback.
+ * 4. On stop, save the new track at the captured timeline offset.
+ */
 @HiltViewModel
 class ExploreViewModel @Inject constructor(
     private val ideaRepo: IdeaRepository,
@@ -32,6 +45,11 @@ class ExploreViewModel @Inject constructor(
 ) : ViewModel() {
 
     private var currentIdeaId: Long? = null
+
+    companion object {
+        private const val TAG = "ExploreVM"
+        private const val MIN_EFFECTIVE_DURATION_MS = 200L
+    }
 
     private val _state = MutableStateFlow(ExploreUiState())
     val state = _state.asStateFlow()
@@ -89,6 +107,25 @@ class ExploreViewModel @Inject constructor(
             ExploreAction.Pause -> playbackManager.pause()
             is ExploreAction.SeekTo -> playbackManager.seekTo(action.positionMs)
             is ExploreAction.SeekFinished -> playbackManager.seekTo(action.positionMs)
+
+            // Drag-to-reposition
+            is ExploreAction.StartDragTrack -> startDragTrack(action.trackId)
+            is ExploreAction.UpdateDragTrack -> updateDragTrack(action.previewOffsetMs)
+            is ExploreAction.FinishDragTrack -> finishDragTrack(action.trackId, action.newOffsetMs)
+            ExploreAction.CancelDrag -> cancelDrag()
+
+            // Trim
+            is ExploreAction.StartTrim -> startTrim(action.trackId, action.edge)
+            is ExploreAction.UpdateTrim -> updateTrim(
+                action.previewTrimStartMs,
+                action.previewTrimEndMs
+            )
+            is ExploreAction.FinishTrim -> finishTrim(
+                action.trackId,
+                action.trimStartMs,
+                action.trimEndMs
+            )
+            ExploreAction.CancelTrim -> cancelTrim()
         }
     }
 
@@ -129,30 +166,45 @@ class ExploreViewModel @Inject constructor(
     private fun startOverdubRecording() {
         val ideaId = currentIdeaId ?: return
 
-        try {
-            val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-            val file = recordingStorage.getAudioFile("nightjar_overdub_$ts.wav")
-            recordingFile = file
+        viewModelScope.launch {
+            try {
+                val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                val file = recordingStorage.getAudioFile("nightjar_overdub_$ts.wav")
+                recordingFile = file
 
-            recordingStartGlobalMs = _state.value.globalPositionMs
-            recordingStartNanos = System.nanoTime()
+                wavRecorder.start(file)
 
-            wavRecorder.start(file)
-            playbackManager.play()
+                // Wait for the audio pipeline to deliver its first buffer,
+                // confirming the mic is actually capturing. Buffers read
+                // before markWriting() are discarded to avoid pre-roll desync.
+                wavRecorder.awaitFirstBuffer()
 
-            _state.update {
-                it.copy(isRecording = true, recordingElapsedMs = 0L)
-            }
+                // Start playback FIRST, then wait for ExoPlayer to actually
+                // begin rendering audio to the speaker. This avoids the desync
+                // where the WAV accumulates silence while ExoPlayer is still
+                // buffering/starting up.
+                playbackManager.setRecording(true)
+                playbackManager.play()
+                playbackManager.awaitPlaybackRendering()
 
-            recordingTickJob = viewModelScope.launch {
-                while (true) {
-                    delay(100L)
-                    val elapsed = (System.nanoTime() - recordingStartNanos) / 1_000_000L
-                    _state.update { it.copy(recordingElapsedMs = elapsed) }
+                // NOW open the write gate — the WAV only captures audio from
+                // the moment playback is audible, keeping the overdub in sync.
+                wavRecorder.markWriting()
+                recordingStartGlobalMs = playbackManager.globalPositionMs.value
+                recordingStartNanos = System.nanoTime()
+
+                _state.update {
+                    it.copy(isRecording = true, recordingElapsedMs = 0L)
                 }
-            }
-        } catch (e: Exception) {
-            viewModelScope.launch {
+
+                recordingTickJob = viewModelScope.launch {
+                    while (true) {
+                        delay(100L)
+                        val elapsed = (System.nanoTime() - recordingStartNanos) / 1_000_000L
+                        _state.update { it.copy(recordingElapsedMs = elapsed) }
+                    }
+                }
+            } catch (e: Exception) {
                 _effects.emit(
                     ExploreEffect.ShowError(e.message ?: "Failed to start recording.")
                 )
@@ -163,11 +215,14 @@ class ExploreViewModel @Inject constructor(
     private fun stopOverdubRecording() {
         val ideaId = currentIdeaId ?: return
 
+        playbackManager.setRecording(false)
         playbackManager.pause()
         recordingTickJob?.cancel()
         recordingTickJob = null
 
         val result = wavRecorder.stop()
+        Log.d(TAG, "Recording stopped: file=${result?.file?.name}, " +
+            "durationMs=${result?.durationMs}, offsetMs=$recordingStartGlobalMs")
 
         _state.update { it.copy(isRecording = false, recordingElapsedMs = 0L) }
 
@@ -187,15 +242,107 @@ class ExploreViewModel @Inject constructor(
                     offsetMs = recordingStartGlobalMs
                 )
 
-                val tracks = exploreRepo.getTracks(ideaId)
-                _state.update { it.copy(tracks = tracks) }
-                playbackManager.prepare(tracks, ::getAudioFile)
+                reloadAndPrepare()
             } catch (e: Exception) {
                 _effects.emit(
                     ExploreEffect.ShowError(e.message ?: "Failed to save track.")
                 )
             }
         }
+    }
+
+    // ── Drag-to-reposition ────────────────────────────────────────────────
+
+    private fun startDragTrack(trackId: Long) {
+        val track = _state.value.tracks.find { it.id == trackId } ?: return
+        _state.update {
+            it.copy(
+                dragState = TrackDragState(
+                    trackId = trackId,
+                    originalOffsetMs = track.offsetMs,
+                    previewOffsetMs = track.offsetMs
+                )
+            )
+        }
+    }
+
+    private fun updateDragTrack(previewOffsetMs: Long) {
+        _state.update { st ->
+            st.dragState?.let { drag ->
+                st.copy(dragState = drag.copy(previewOffsetMs = previewOffsetMs.coerceAtLeast(0L)))
+            } ?: st
+        }
+    }
+
+    private fun finishDragTrack(trackId: Long, newOffsetMs: Long) {
+        _state.update { it.copy(dragState = null) }
+        viewModelScope.launch {
+            exploreRepo.moveTrack(trackId, newOffsetMs.coerceAtLeast(0L))
+            reloadAndPrepare()
+        }
+    }
+
+    private fun cancelDrag() {
+        _state.update { it.copy(dragState = null) }
+    }
+
+    // ── Trim ─────────────────────────────────────────────────────────────
+
+    private fun startTrim(trackId: Long, edge: TrimEdge) {
+        val track = _state.value.tracks.find { it.id == trackId } ?: return
+        _state.update {
+            it.copy(
+                trimState = TrackTrimState(
+                    trackId = trackId,
+                    edge = edge,
+                    originalTrimStartMs = track.trimStartMs,
+                    originalTrimEndMs = track.trimEndMs,
+                    previewTrimStartMs = track.trimStartMs,
+                    previewTrimEndMs = track.trimEndMs
+                )
+            )
+        }
+    }
+
+    private fun updateTrim(previewTrimStartMs: Long, previewTrimEndMs: Long) {
+        _state.update { st ->
+            st.trimState?.let { trim ->
+                val track = st.tracks.find { it.id == trim.trackId } ?: return@let st
+                val maxTrimStart = track.durationMs - previewTrimEndMs - MIN_EFFECTIVE_DURATION_MS
+                val maxTrimEnd = track.durationMs - previewTrimStartMs - MIN_EFFECTIVE_DURATION_MS
+
+                val clampedStart = previewTrimStartMs.coerceIn(0L, maxTrimStart.coerceAtLeast(0L))
+                val clampedEnd = previewTrimEndMs.coerceIn(0L, maxTrimEnd.coerceAtLeast(0L))
+
+                st.copy(
+                    trimState = trim.copy(
+                        previewTrimStartMs = clampedStart,
+                        previewTrimEndMs = clampedEnd
+                    )
+                )
+            } ?: st
+        }
+    }
+
+    private fun finishTrim(trackId: Long, trimStartMs: Long, trimEndMs: Long) {
+        _state.update { it.copy(trimState = null) }
+        viewModelScope.launch {
+            exploreRepo.trimTrack(trackId, trimStartMs, trimEndMs)
+            reloadAndPrepare()
+        }
+    }
+
+    private fun cancelTrim() {
+        _state.update { it.copy(trimState = null) }
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────
+
+    private suspend fun reloadAndPrepare() {
+        val ideaId = currentIdeaId ?: return
+        val tracks = exploreRepo.getTracks(ideaId)
+        _state.update { it.copy(tracks = tracks) }
+        playbackManager.prepare(tracks, ::getAudioFile)
     }
 
     fun getAudioFile(name: String): File = ideaRepo.getAudioFile(name)

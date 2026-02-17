@@ -16,6 +16,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
+/** Bottom sheet presenting available track types to add to the project. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddTrackBottomSheet(

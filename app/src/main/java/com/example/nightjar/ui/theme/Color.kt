@@ -2,7 +2,7 @@ package com.example.nightjar.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// Nightjar - deep purple, stoic, minimal
+// ── Nightjar color palette — deep purple, stoic, minimal ────────────────
 val NjBg = Color(0xFF0F0B16)          // near-black purple
 val NjSurface = Color(0xFF161125)     // base surface
 val NjSurface2 = Color(0xFF1C1630)    // elevated surface

@@ -1,8 +1,12 @@
 package com.example.nightjar.audio
 
+import android.Manifest
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.util.Log
+import androidx.annotation.RequiresPermission
+import kotlinx.coroutines.CompletableDeferred
 import java.io.File
 import java.io.FileOutputStream
 import java.io.RandomAccessFile
@@ -16,22 +20,38 @@ import javax.inject.Inject
  * Designed for overdub recording in the Explore screen where simultaneous
  * playback + recording is needed (MediaRecorder can't do this reliably).
  *
+ * ## Synchronisation protocol
+ *
+ * To avoid pre-roll desync (audio captured before playback starts):
+ * 1. Call [start] — starts AudioRecord and the IO thread.
+ * 2. Call [awaitFirstBuffer] — suspends until the hardware pipeline is hot.
+ *    Buffers are read but **discarded** at this stage.
+ * 3. Call [markWriting] — from this moment the IO thread writes to disk.
+ *    The caller should start playback immediately before or after this call.
+ *
  * Thread-safe start/stop via [AtomicBoolean].
  */
 class WavRecorder @Inject constructor() {
 
     private val isRecordingFlag = AtomicBoolean(false)
+    private val isWritingFlag = AtomicBoolean(false)
 
     private var audioRecord: AudioRecord? = null
     private var recordingThread: Thread? = null
     private var outputFile: File? = null
     private var totalBytesWritten: Long = 0L
+    private var firstBufferSignal: CompletableDeferred<Unit>? = null
 
+    @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     fun start(file: File) {
         if (isRecordingFlag.getAndSet(true)) return
 
         outputFile = file
         totalBytesWritten = 0L
+        isWritingFlag.set(false)
+
+        val signal = CompletableDeferred<Unit>()
+        firstBufferSignal = signal
 
         val bufferSize = AudioRecord.getMinBufferSize(
             SAMPLE_RATE,
@@ -50,12 +70,14 @@ class WavRecorder @Inject constructor() {
         if (recorder.state != AudioRecord.STATE_INITIALIZED) {
             recorder.release()
             isRecordingFlag.set(false)
+            signal.complete(Unit)
             throw IllegalStateException("AudioRecord failed to initialize")
         }
 
         audioRecord = recorder
 
         recorder.startRecording()
+        Log.d(TAG, "startRecording() called")
 
         recordingThread = Thread({
             val buffer = ByteArray(bufferSize)
@@ -63,15 +85,44 @@ class WavRecorder @Inject constructor() {
                 // Write placeholder WAV header (44 bytes)
                 fos.write(ByteArray(WAV_HEADER_SIZE))
 
+                var pipelineHot = false
                 while (isRecordingFlag.get()) {
                     val read = recorder.read(buffer, 0, buffer.size)
                     if (read > 0) {
-                        fos.write(buffer, 0, read)
-                        totalBytesWritten += read
+                        if (!pipelineHot) {
+                            pipelineHot = true
+                            Log.d(TAG, "Pipeline hot — first buffer ${read}B")
+                            signal.complete(Unit)
+                        }
+                        // Only write to disk once the caller has opened the gate.
+                        if (isWritingFlag.get()) {
+                            fos.write(buffer, 0, read)
+                            totalBytesWritten += read
+                        }
                     }
                 }
             }
         }, "WavRecorder-IO").also { it.start() }
+    }
+
+    /**
+     * Suspends until the recording thread has received its first audio buffer,
+     * confirming the hardware audio pipeline is hot. Call this after [start]
+     * and before [markWriting].
+     */
+    suspend fun awaitFirstBuffer() {
+        firstBufferSignal?.await()
+        Log.d(TAG, "awaitFirstBuffer() completed — pipeline is hot")
+    }
+
+    /**
+     * Opens the write gate. From this point forward the IO thread writes
+     * captured audio to the WAV file. Call this right when playback starts
+     * so the WAV contains only audio that is synchronised with playback.
+     */
+    fun markWriting() {
+        isWritingFlag.set(true)
+        Log.d(TAG, "markWriting() — file writes enabled")
     }
 
     fun stop(): WavRecordingResult? {
@@ -97,6 +148,7 @@ class WavRecorder @Inject constructor() {
         val durationMs = totalBytesWritten * 1000L /
             (SAMPLE_RATE * CHANNELS * BYTES_PER_SAMPLE)
 
+        Log.d(TAG, "stop() — wrote ${totalBytesWritten}B, duration=${durationMs}ms")
         return WavRecordingResult(file = file, durationMs = durationMs)
     }
 
@@ -171,6 +223,7 @@ class WavRecorder @Inject constructor() {
     }
 
     companion object {
+        private const val TAG = "WavRecorder"
         private const val SAMPLE_RATE = 44100
         private const val CHANNELS = 1
         private const val BYTES_PER_SAMPLE = 2

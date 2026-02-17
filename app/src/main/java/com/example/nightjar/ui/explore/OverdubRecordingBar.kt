@@ -1,6 +1,6 @@
 package com.example.nightjar.ui.explore
 
-import NjSecondaryButton
+import com.example.nightjar.ui.components.NjSecondaryButton
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 
+/** Status bar shown while an overdub recording is in progress. Displays elapsed time and a stop button. */
 @Composable
 fun OverdubRecordingBar(
     elapsedMs: Long,

@@ -6,6 +6,7 @@ import androidx.room.Query
 import com.example.nightjar.data.db.entity.TrackEntity
 import kotlinx.coroutines.flow.Flow
 
+/** Data access object for [TrackEntity] — multi-track timeline operations. */
 @Dao
 interface TrackDao {
 

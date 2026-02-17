@@ -1,3 +1,5 @@
+package com.example.nightjar.ui.workspace
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -35,8 +37,12 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.nightjar.player.PlaybackViewModel
 import com.example.nightjar.share.ShareUtils
+import com.example.nightjar.ui.components.NjDestructiveButton
 import com.example.nightjar.ui.components.NjInlineAction
+import com.example.nightjar.ui.components.NjPrimaryButton
 import com.example.nightjar.ui.components.NjScrubber
+import com.example.nightjar.ui.components.NjSecondaryButton
+import com.example.nightjar.ui.components.NjSectionTitle
 import com.example.nightjar.ui.components.NjTagChip
 import com.example.nightjar.ui.components.NjTextField
 import com.example.nightjar.ui.components.NjTopBar
@@ -45,6 +51,14 @@ import com.example.nightjar.ui.workspace.WorkspaceEffect
 import com.example.nightjar.ui.workspace.WorkspaceViewModel
 import kotlinx.coroutines.flow.collectLatest
 
+/**
+ * Workspace screen — view and edit a single idea.
+ *
+ * Provides playback controls, editable title and notes fields, tag
+ * management, favorite toggle, sharing, and deletion. Title and notes
+ * are auto-saved with a 600 ms debounce. The "Explore" button opens the
+ * multi-track workspace for this idea.
+ */
 @Composable
 fun WorkspaceScreen(
     ideaId: Long,

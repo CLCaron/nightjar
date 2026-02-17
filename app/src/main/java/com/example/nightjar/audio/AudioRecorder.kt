@@ -8,6 +8,13 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/**
+ * High-level audio recorder using [MediaRecorder].
+ *
+ * Records M4A/AAC at 44.1 kHz, 128 kbps to app-private storage. Used by the
+ * Record screen for quick single-take captures. For simultaneous
+ * playback + recording (overdub), see [WavRecorder] instead.
+ */
 class AudioRecorder(private val context: Context) {
 
     private var recorder: MediaRecorder? = null

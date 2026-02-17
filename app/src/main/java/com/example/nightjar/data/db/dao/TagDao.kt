@@ -8,6 +8,7 @@ import com.example.nightjar.data.db.IdeaTagCrossRef
 import com.example.nightjar.data.db.entity.TagEntity
 import kotlinx.coroutines.flow.Flow
 
+/** Data access object for [TagEntity] and the [IdeaTagCrossRef] junction table. */
 @Dao
 interface TagDao {
 
@@ -28,7 +29,6 @@ interface TagDao {
     """)
     fun observeTagsForIdea(ideaId: Long): Flow<List<TagEntity>>
 
-    // ✅ NEW: non-Flow version for WorkspaceViewModel’s imperative refresh
     @Query("""
         SELECT t.* FROM tags t
         INNER JOIN idea_tags it ON it.tagId = t.id

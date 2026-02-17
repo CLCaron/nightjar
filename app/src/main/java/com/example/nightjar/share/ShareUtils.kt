@@ -5,6 +5,7 @@ import android.content.Intent
 import androidx.core.content.FileProvider
 import java.io.File
 
+/** Utilities for sharing audio files via Android's share sheet. */
 object ShareUtils {
 
     fun shareAudioFile(context: Context, file: File, title: String = "Nightjar idea") {

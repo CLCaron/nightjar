@@ -11,6 +11,14 @@ import com.example.nightjar.data.db.entity.IdeaEntity
 import com.example.nightjar.data.db.entity.TagEntity
 import com.example.nightjar.data.db.entity.TrackEntity
 
+/**
+ * Room database for Nightjar.
+ *
+ * ## Schema history
+ * - **v1** — `ideas` table (core recording metadata).
+ * - **v2** — Added `tags` and `idea_tags` tables for user-defined tagging.
+ * - **v3** — Added `tracks` table for multi-track Explore projects.
+ */
 @Database(
     entities = [IdeaEntity::class, TagEntity::class, IdeaTagCrossRef::class, TrackEntity::class],
     version = 3,
@@ -25,6 +33,7 @@ abstract class NightjarDatabase : RoomDatabase() {
     companion object {
         @Volatile private var INSTANCE: NightjarDatabase? = null
 
+        /** v1 → v2: Add tagging support (tags + junction table). */
         private val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                 db.execSQL("""
@@ -50,6 +59,7 @@ abstract class NightjarDatabase : RoomDatabase() {
             }
         }
 
+        /** v2 → v3: Add multi-track support (tracks table with idea FK). */
         private val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                 db.execSQL("""

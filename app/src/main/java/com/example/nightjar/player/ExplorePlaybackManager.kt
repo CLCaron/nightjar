@@ -46,17 +46,53 @@ class ExplorePlaybackManager @Inject constructor(
     private var delayedStartJobs: MutableList<Job> = mutableListOf()
     private var tickJob: Job? = null
 
+    /** True while the ViewModel is recording an overdub. */
+    private var isRecording = false
+
     /** Nanosecond timestamp when [play] was last called. */
     private var clockStartNanos: Long = 0L
 
     /** The global position (ms) captured at the moment [play] started the clock. */
     private var clockBaseMs: Long = 0L
 
-    // ---- Public API ----
+    // ── Public API ───────────────────────────────────────────────────────
 
     /** Bind this manager to a [CoroutineScope] (typically viewModelScope). */
     fun setScope(scope: CoroutineScope) {
         this.scope = scope
+    }
+
+    /**
+     * Inform the playback manager whether an overdub recording is active.
+     * When recording, the playhead continues past [totalDurationMs] so the
+     * user can keep capturing audio beyond existing tracks.
+     */
+    fun setRecording(active: Boolean) {
+        isRecording = active
+    }
+
+    /**
+     * Suspends until at least one non-muted ExoPlayer slot reports
+     * [ExoPlayer.isPlaying] == true, meaning audio is actually being
+     * rendered to the speaker. Returns the global playback position at
+     * that moment.
+     *
+     * Falls through immediately if no eligible slots exist, or after
+     * [timeoutMs] to avoid hanging indefinitely.
+     */
+    suspend fun awaitPlaybackRendering(timeoutMs: Long = 2_000L): Long {
+        val hasEligibleSlot = slots.any { !it.track.isMuted }
+        if (!hasEligibleSlot) return _globalPositionMs.value
+
+        val deadline = System.nanoTime() + timeoutMs * 1_000_000L
+        while (System.nanoTime() < deadline) {
+            if (slots.any { !it.track.isMuted && it.player.isPlaying }) {
+                return _globalPositionMs.value
+            }
+            delay(5L)
+        }
+        // Timed out — return best-effort position.
+        return _globalPositionMs.value
     }
 
     /**
@@ -183,7 +219,7 @@ class ExplorePlaybackManager @Inject constructor(
         _isPlaying.value = false
     }
 
-    // ---- Internals ----
+    // ── Internals ────────────────────────────────────────────────────────
 
     private fun startSlotForGlobalPosition(slot: PlayerSlot, globalMs: Long) {
         val localMs = globalMs - slot.track.offsetMs
@@ -218,13 +254,20 @@ class ExplorePlaybackManager @Inject constructor(
                 _globalPositionMs.value = pos
 
                 if (pos >= _totalDurationMs.value) {
-                    _globalPositionMs.value = _totalDurationMs.value
-                    _isPlaying.value = false
-                    cancelDelayedJobs()
-                    for (slot in slots) {
-                        slot.player.pause()
+                    if (isRecording) {
+                        // Recording is active — let the playhead keep advancing
+                        // past existing tracks. Individual ExoPlayers have
+                        // naturally finished; the clock drives the playhead.
+                    } else {
+                        // Normal playback ended — reset to 0 and stop.
+                        _globalPositionMs.value = 0L
+                        _isPlaying.value = false
+                        cancelDelayedJobs()
+                        for (slot in slots) {
+                            slot.player.pause()
+                        }
+                        break
                     }
-                    break
                 }
 
                 delay(32L) // ~30 fps playhead refresh
@@ -234,7 +277,10 @@ class ExplorePlaybackManager @Inject constructor(
 
     private fun currentClockMs(): Long {
         val elapsed = (System.nanoTime() - clockStartNanos) / 1_000_000L
-        return (clockBaseMs + elapsed).coerceIn(0L, _totalDurationMs.value)
+        val raw = clockBaseMs + elapsed
+        // When recording, allow the clock to advance past existing tracks.
+        return if (isRecording) raw.coerceAtLeast(0L)
+               else raw.coerceIn(0L, _totalDurationMs.value)
     }
 
     private fun cancelDelayedJobs() {

@@ -1,14 +1,12 @@
 package com.example.nightjar.ui.explore
 
-import NjPrimaryButton
-import NjSectionTitle
+import com.example.nightjar.ui.components.NjPrimaryButton
+import com.example.nightjar.ui.components.NjSectionTitle
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -17,7 +15,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.MaterialTheme
@@ -37,7 +34,6 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -47,10 +43,16 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.nightjar.ui.components.NjScrubber
 import com.example.nightjar.ui.components.NjTopBar
-import com.example.nightjar.ui.components.NjWaveform
 import kotlinx.coroutines.flow.collectLatest
-import java.io.File
 
+/**
+ * Explore screen — multi-track DAW-like workspace.
+ *
+ * Displays a scrollable timeline with stacked track lanes, a time ruler,
+ * and a playhead. Users can play/pause, scrub, add overdub recordings,
+ * drag tracks to reposition them, and trim track edges. Handles
+ * microphone permissions and gracefully stops recording when backgrounded.
+ */
 @Composable
 fun ExploreScreen(
     ideaId: Long,
@@ -194,32 +196,20 @@ fun ExploreScreen(
             if (state.tracks.isEmpty()) {
                 TimelinePlaceholder("No tracks yet.")
             } else {
-                state.tracks.forEach { track ->
-                    val effectiveDuration =
-                        track.durationMs - track.trimStartMs - track.trimEndMs
-                    val displayPositionMs =
-                        if (isScrubbing) scrubMs else state.globalPositionMs
+                val displayPositionMs =
+                    if (isScrubbing) scrubMs else state.globalPositionMs
 
-                    val progressFraction = if (effectiveDuration <= 0L) {
-                        -1f
-                    } else {
-                        val localMs = displayPositionMs - track.offsetMs
-                        when {
-                            localMs < 0 -> -1f
-                            localMs >= effectiveDuration -> 1f
-                            else -> localMs.toFloat() / effectiveDuration.toFloat()
-                        }
-                    }
-
-                    TrackRow(
-                        displayName = track.displayName,
-                        durationMs = track.durationMs,
-                        offsetMs = track.offsetMs,
-                        isMuted = track.isMuted,
-                        audioFile = vm.getAudioFile(track.audioFileName),
-                        progressFraction = progressFraction
-                    )
-                }
+                TimelinePanel(
+                    tracks = state.tracks,
+                    globalPositionMs = displayPositionMs,
+                    totalDurationMs = state.totalDurationMs,
+                    msPerDp = state.msPerDp,
+                    isPlaying = state.isPlaying,
+                    dragState = state.dragState,
+                    trimState = state.trimState,
+                    getAudioFile = vm::getAudioFile,
+                    onAction = vm::onAction
+                )
 
                 NjScrubber(
                     positionMs = scrubMs,
@@ -245,86 +235,4 @@ fun ExploreScreen(
             onDismiss = { vm.onAction(ExploreAction.DismissAddTrackSheet) }
         )
     }
-}
-
-@Composable
-private fun TimelinePlaceholder(message: String) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(200.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = message,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-        )
-    }
-}
-
-@Composable
-private fun TrackRow(
-    displayName: String,
-    durationMs: Long,
-    offsetMs: Long,
-    isMuted: Boolean,
-    audioFile: File,
-    progressFraction: Float = -1f
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(
-                if (isMuted) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)
-                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-            )
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                text = displayName,
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (isMuted) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
-                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (isMuted) {
-                    Text(
-                        text = "Muted",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
-                    )
-                }
-                Text(
-                    text = formatDuration(durationMs),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                )
-            }
-        }
-
-        NjWaveform(
-            audioFile = audioFile,
-            barColor = if (isMuted) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
-            else MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
-            height = 40.dp,
-            progressFraction = progressFraction
-        )
-    }
-}
-
-private fun formatDuration(ms: Long): String {
-    val totalSeconds = ms / 1000
-    val minutes = totalSeconds / 60
-    val seconds = totalSeconds % 60
-    return "%d:%02d".format(minutes, seconds)
 }

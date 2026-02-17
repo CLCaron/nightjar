@@ -16,6 +16,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
 
+/** Hilt module providing database, DAOs, repositories, and audio infrastructure. */
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class AppModule {
