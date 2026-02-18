@@ -1,4 +1,4 @@
-package com.example.nightjar.ui.workspace
+package com.example.nightjar.ui.overview
 
 import app.cash.turbine.test
 import com.example.nightjar.data.db.entity.IdeaEntity
@@ -19,7 +19,7 @@ import org.junit.Rule
 import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
-class WorkspaceViewModelTest {
+class OverviewViewModelTest {
     private val testDispatcher = StandardTestDispatcher()
 
     @get:Rule
@@ -38,8 +38,8 @@ class WorkspaceViewModelTest {
         coEvery { repo.getIdeaById(9) } returns idea
         coEvery { repo.getTagsForIdea(9) } returns tags
 
-        val viewModel = WorkspaceViewModel(repo)
-        viewModel.onAction(WorkspaceAction.Load(9))
+        val viewModel = OverviewViewModel(repo)
+        viewModel.onAction(OverviewAction.Load(9))
         advanceUntilIdle()
 
         assertEquals(idea, viewModel.state.value.idea)
@@ -61,11 +61,11 @@ class WorkspaceViewModelTest {
         coEvery { repo.getTagsForIdea(10) } returns emptyList()
         coEvery { repo.updateTitle(10, "New Title") } returns Unit
 
-        val viewModel = WorkspaceViewModel(repo)
-        viewModel.onAction(WorkspaceAction.Load(10))
+        val viewModel = OverviewViewModel(repo)
+        viewModel.onAction(OverviewAction.Load(10))
         advanceUntilIdle()
 
-        viewModel.onAction(WorkspaceAction.TitleChanged("  New Title  "))
+        viewModel.onAction(OverviewAction.TitleChanged("  New Title  "))
         advanceTimeBy(600)
         advanceUntilIdle()
 
@@ -87,11 +87,11 @@ class WorkspaceViewModelTest {
         coEvery { repo.getTagsForIdea(11) } returns emptyList()
         coEvery { repo.updateFavorite(11, true) } returns Unit
 
-        val viewModel = WorkspaceViewModel(repo)
-        viewModel.onAction(WorkspaceAction.Load(11))
+        val viewModel = OverviewViewModel(repo)
+        viewModel.onAction(OverviewAction.Load(11))
         advanceUntilIdle()
 
-        viewModel.onAction(WorkspaceAction.ToggleFavorite)
+        viewModel.onAction(OverviewAction.ToggleFavorite)
         advanceUntilIdle()
 
         coVerify { repo.updateFavorite(11, true) }
@@ -111,11 +111,11 @@ class WorkspaceViewModelTest {
         coEvery { repo.getTagsForIdea(12) } returns emptyList()
         coEvery { repo.addTagToIdea(12, any()) } returns Unit
 
-        val viewModel = WorkspaceViewModel(repo)
-        viewModel.onAction(WorkspaceAction.Load(12))
+        val viewModel = OverviewViewModel(repo)
+        viewModel.onAction(OverviewAction.Load(12))
         advanceUntilIdle()
 
-        viewModel.onAction(WorkspaceAction.AddTagsFromInput("Rock, Jazz"))
+        viewModel.onAction(OverviewAction.AddTagsFromInput("Rock, Jazz"))
         advanceUntilIdle()
 
         coVerify { repo.addTagToIdea(12, "Rock") }
@@ -136,15 +136,15 @@ class WorkspaceViewModelTest {
         coEvery { repo.getTagsForIdea(13) } returns emptyList()
         coEvery { repo.deleteIdeaAndAudio(13) } returns Unit
 
-        val viewModel = WorkspaceViewModel(repo)
-        viewModel.onAction(WorkspaceAction.Load(13))
+        val viewModel = OverviewViewModel(repo)
+        viewModel.onAction(OverviewAction.Load(13))
         advanceUntilIdle()
 
         viewModel.effects.test {
-            viewModel.onAction(WorkspaceAction.DeleteIdea)
+            viewModel.onAction(OverviewAction.DeleteIdea)
             advanceUntilIdle()
             val effect = awaitItem()
-            assertTrue(effect is WorkspaceEffect.NavigateBack)
+            assertTrue(effect is OverviewEffect.NavigateBack)
             cancelAndIgnoreRemainingEvents()
         }
     }

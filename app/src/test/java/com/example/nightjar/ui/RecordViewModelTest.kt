@@ -54,7 +54,7 @@ class RecordViewModelTest {
     }
 
     @Test
-    fun `stop and save emits open workspace`() = runTest(testDispatcher.scheduler) {
+    fun `stop and save emits open overview`() = runTest(testDispatcher.scheduler) {
         val recorder = mockk<AudioRecorder>()
         val repo = mockk<IdeaRepository>()
         val saved = File("saved.m4a")
@@ -67,8 +67,8 @@ class RecordViewModelTest {
             viewModel.onAction(RecordAction.StopAndSave)
             advanceUntilIdle()
             val effect = awaitItem()
-            assertTrue(effect is RecordEffect.OpenWorkspace)
-            assertEquals(42L, (effect as RecordEffect.OpenWorkspace).ideaId)
+            assertTrue(effect is RecordEffect.OpenOverview)
+            assertEquals(42L, (effect as RecordEffect.OpenOverview).ideaId)
             cancelAndIgnoreRemainingEvents()
         }
 

@@ -17,7 +17,7 @@ import javax.inject.Inject
  * Low-level WAV recorder using [AudioRecord].
  *
  * Records 16-bit PCM, 44.1 kHz, mono and writes a standard WAV file.
- * Designed for overdub recording in the Explore screen where simultaneous
+ * Designed for overdub recording in the Studio screen where simultaneous
  * playback + recording is needed (MediaRecorder can't do this reliably).
  *
  * ## Synchronisation protocol

@@ -1,13 +1,13 @@
-package com.example.nightjar.ui.explore
+package com.example.nightjar.ui.studio
 
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.nightjar.audio.WavRecorder
-import com.example.nightjar.data.repository.ExploreRepository
+import com.example.nightjar.data.repository.StudioRepository
 import com.example.nightjar.data.repository.IdeaRepository
 import com.example.nightjar.data.storage.RecordingStorage
-import com.example.nightjar.player.ExplorePlaybackManager
+import com.example.nightjar.player.StudioPlaybackManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -24,10 +24,10 @@ import java.util.Locale
 import javax.inject.Inject
 
 /**
- * ViewModel for the Explore (multi-track workspace) screen.
+ * ViewModel for the Studio (multi-track workspace) screen.
  *
  * Coordinates overdub recording via [WavRecorder], multi-track playback
- * via [ExplorePlaybackManager], and timeline editing (drag-to-reposition,
+ * via [StudioPlaybackManager], and timeline editing (drag-to-reposition,
  * trim). Recording synchronization follows this protocol:
  *
  * 1. Start [WavRecorder] and wait for the audio pipeline to become hot.
@@ -36,10 +36,10 @@ import javax.inject.Inject
  * 4. On stop, save the new track at the captured timeline offset.
  */
 @HiltViewModel
-class ExploreViewModel @Inject constructor(
+class StudioViewModel @Inject constructor(
     private val ideaRepo: IdeaRepository,
-    private val exploreRepo: ExploreRepository,
-    private val playbackManager: ExplorePlaybackManager,
+    private val studioRepo: StudioRepository,
+    private val playbackManager: StudioPlaybackManager,
     private val wavRecorder: WavRecorder,
     private val recordingStorage: RecordingStorage
 ) : ViewModel() {
@@ -47,14 +47,14 @@ class ExploreViewModel @Inject constructor(
     private var currentIdeaId: Long? = null
 
     companion object {
-        private const val TAG = "ExploreVM"
+        private const val TAG = "StudioVM"
         private const val MIN_EFFECTIVE_DURATION_MS = 200L
     }
 
-    private val _state = MutableStateFlow(ExploreUiState())
+    private val _state = MutableStateFlow(StudioUiState())
     val state = _state.asStateFlow()
 
-    private val _effects = MutableSharedFlow<ExploreEffect>()
+    private val _effects = MutableSharedFlow<StudioEffect>()
     val effects = _effects.asSharedFlow()
 
     private var recordingStartGlobalMs: Long = 0L
@@ -82,50 +82,50 @@ class ExploreViewModel @Inject constructor(
         }
     }
 
-    fun onAction(action: ExploreAction) {
+    fun onAction(action: StudioAction) {
         when (action) {
-            is ExploreAction.Load -> load(action.ideaId)
-            ExploreAction.ShowAddTrackSheet -> {
+            is StudioAction.Load -> load(action.ideaId)
+            StudioAction.ShowAddTrackSheet -> {
                 _state.update { it.copy(showAddTrackSheet = true) }
             }
-            ExploreAction.DismissAddTrackSheet -> {
+            StudioAction.DismissAddTrackSheet -> {
                 _state.update { it.copy(showAddTrackSheet = false) }
             }
-            is ExploreAction.SelectNewTrackType -> {
+            is StudioAction.SelectNewTrackType -> {
                 _state.update { it.copy(showAddTrackSheet = false) }
                 when (action.type) {
                     NewTrackType.AUDIO_RECORDING -> {
                         viewModelScope.launch {
-                            _effects.emit(ExploreEffect.RequestMicPermission)
+                            _effects.emit(StudioEffect.RequestMicPermission)
                         }
                     }
                 }
             }
-            ExploreAction.MicPermissionGranted -> startOverdubRecording()
-            ExploreAction.StopOverdubRecording -> stopOverdubRecording()
-            ExploreAction.Play -> playbackManager.play()
-            ExploreAction.Pause -> playbackManager.pause()
-            is ExploreAction.SeekTo -> playbackManager.seekTo(action.positionMs)
-            is ExploreAction.SeekFinished -> playbackManager.seekTo(action.positionMs)
+            StudioAction.MicPermissionGranted -> startOverdubRecording()
+            StudioAction.StopOverdubRecording -> stopOverdubRecording()
+            StudioAction.Play -> playbackManager.play()
+            StudioAction.Pause -> playbackManager.pause()
+            is StudioAction.SeekTo -> playbackManager.seekTo(action.positionMs)
+            is StudioAction.SeekFinished -> playbackManager.seekTo(action.positionMs)
 
             // Drag-to-reposition
-            is ExploreAction.StartDragTrack -> startDragTrack(action.trackId)
-            is ExploreAction.UpdateDragTrack -> updateDragTrack(action.previewOffsetMs)
-            is ExploreAction.FinishDragTrack -> finishDragTrack(action.trackId, action.newOffsetMs)
-            ExploreAction.CancelDrag -> cancelDrag()
+            is StudioAction.StartDragTrack -> startDragTrack(action.trackId)
+            is StudioAction.UpdateDragTrack -> updateDragTrack(action.previewOffsetMs)
+            is StudioAction.FinishDragTrack -> finishDragTrack(action.trackId, action.newOffsetMs)
+            StudioAction.CancelDrag -> cancelDrag()
 
             // Trim
-            is ExploreAction.StartTrim -> startTrim(action.trackId, action.edge)
-            is ExploreAction.UpdateTrim -> updateTrim(
+            is StudioAction.StartTrim -> startTrim(action.trackId, action.edge)
+            is StudioAction.UpdateTrim -> updateTrim(
                 action.previewTrimStartMs,
                 action.previewTrimEndMs
             )
-            is ExploreAction.FinishTrim -> finishTrim(
+            is StudioAction.FinishTrim -> finishTrim(
                 action.trackId,
                 action.trimStartMs,
                 action.trimEndMs
             )
-            ExploreAction.CancelTrim -> cancelTrim()
+            StudioAction.CancelTrim -> cancelTrim()
         }
     }
 
@@ -143,7 +143,7 @@ class ExploreViewModel @Inject constructor(
                     return@launch
                 }
 
-                val tracks = exploreRepo.ensureProjectInitialized(ideaId)
+                val tracks = studioRepo.ensureProjectInitialized(ideaId)
 
                 _state.update {
                     it.copy(
@@ -158,7 +158,7 @@ class ExploreViewModel @Inject constructor(
             } catch (e: Exception) {
                 val msg = e.message ?: "Failed to load project."
                 _state.update { it.copy(isLoading = false, errorMessage = msg) }
-                _effects.emit(ExploreEffect.ShowError(msg))
+                _effects.emit(StudioEffect.ShowError(msg))
             }
         }
     }
@@ -206,7 +206,7 @@ class ExploreViewModel @Inject constructor(
                 }
             } catch (e: Exception) {
                 _effects.emit(
-                    ExploreEffect.ShowError(e.message ?: "Failed to start recording.")
+                    StudioEffect.ShowError(e.message ?: "Failed to start recording.")
                 )
             }
         }
@@ -228,14 +228,14 @@ class ExploreViewModel @Inject constructor(
 
         if (result == null) {
             viewModelScope.launch {
-                _effects.emit(ExploreEffect.ShowError("Recording failed — no audio captured."))
+                _effects.emit(StudioEffect.ShowError("Recording failed — no audio captured."))
             }
             return
         }
 
         viewModelScope.launch {
             try {
-                exploreRepo.addTrack(
+                studioRepo.addTrack(
                     ideaId = ideaId,
                     audioFile = result.file,
                     durationMs = result.durationMs,
@@ -245,7 +245,7 @@ class ExploreViewModel @Inject constructor(
                 reloadAndPrepare()
             } catch (e: Exception) {
                 _effects.emit(
-                    ExploreEffect.ShowError(e.message ?: "Failed to save track.")
+                    StudioEffect.ShowError(e.message ?: "Failed to save track.")
                 )
             }
         }
@@ -277,7 +277,7 @@ class ExploreViewModel @Inject constructor(
     private fun finishDragTrack(trackId: Long, newOffsetMs: Long) {
         _state.update { it.copy(dragState = null) }
         viewModelScope.launch {
-            exploreRepo.moveTrack(trackId, newOffsetMs.coerceAtLeast(0L))
+            studioRepo.moveTrack(trackId, newOffsetMs.coerceAtLeast(0L))
             reloadAndPrepare()
         }
     }
@@ -327,7 +327,7 @@ class ExploreViewModel @Inject constructor(
     private fun finishTrim(trackId: Long, trimStartMs: Long, trimEndMs: Long) {
         _state.update { it.copy(trimState = null) }
         viewModelScope.launch {
-            exploreRepo.trimTrack(trackId, trimStartMs, trimEndMs)
+            studioRepo.trimTrack(trackId, trimStartMs, trimEndMs)
             reloadAndPrepare()
         }
     }
@@ -340,7 +340,7 @@ class ExploreViewModel @Inject constructor(
 
     private suspend fun reloadAndPrepare() {
         val ideaId = currentIdeaId ?: return
-        val tracks = exploreRepo.getTracks(ideaId)
+        val tracks = studioRepo.getTracks(ideaId)
         _state.update { it.copy(tracks = tracks) }
         playbackManager.prepare(tracks, ::getAudioFile)
     }

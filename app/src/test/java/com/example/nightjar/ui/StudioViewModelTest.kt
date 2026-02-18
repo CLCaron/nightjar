@@ -3,12 +3,12 @@ package com.example.nightjar.ui
 import app.cash.turbine.test
 import com.example.nightjar.data.db.entity.IdeaEntity
 import com.example.nightjar.data.db.entity.TrackEntity
-import com.example.nightjar.data.repository.ExploreRepository
+import com.example.nightjar.data.repository.StudioRepository
 import com.example.nightjar.data.repository.IdeaRepository
-import com.example.nightjar.player.ExplorePlaybackManager
-import com.example.nightjar.ui.explore.ExploreAction
-import com.example.nightjar.ui.explore.ExploreEffect
-import com.example.nightjar.ui.explore.ExploreViewModel
+import com.example.nightjar.player.StudioPlaybackManager
+import com.example.nightjar.ui.studio.StudioAction
+import com.example.nightjar.ui.studio.StudioEffect
+import com.example.nightjar.ui.studio.StudioViewModel
 import com.example.nightjar.util.MainDispatcherRule
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -28,11 +28,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
-// TODO: Kotlin K2 compiler internal error when MockK mocks ExplorePlaybackManager
+// TODO: Kotlin K2 compiler internal error when MockK mocks StudioPlaybackManager
 //  (has @Inject + @ApplicationContext). Fix by extracting an interface for the manager,
 //  or by upgrading Kotlin past 2.0.21 where the K2 FIR bug is resolved.
 @OptIn(ExperimentalCoroutinesApi::class)
-class ExploreViewModelTest {
+class StudioViewModelTest {
 
     @get:Rule
     val mainDispatcherRule = MainDispatcherRule()
@@ -54,8 +54,8 @@ class ExploreViewModelTest {
         )
     )
 
-    private fun mockPlaybackManager(): ExplorePlaybackManager {
-        val manager = mockk<ExplorePlaybackManager>(relaxed = true)
+    private fun mockPlaybackManager(): StudioPlaybackManager {
+        val manager = mockk<StudioPlaybackManager>(relaxed = true)
         every { manager.isPlaying } returns MutableStateFlow(false)
         every { manager.globalPositionMs } returns MutableStateFlow(0L)
         every { manager.totalDurationMs } returns MutableStateFlow(0L)
@@ -66,13 +66,13 @@ class ExploreViewModelTest {
     @Test
     fun `load populates title and tracks`() = runTest(mainDispatcherRule.dispatcher.scheduler) {
         val ideaRepo = mockk<IdeaRepository>()
-        val exploreRepo = mockk<ExploreRepository>()
+        val studioRepo = mockk<StudioRepository>()
 
         coEvery { ideaRepo.getIdeaById(1L) } returns idea
-        coEvery { exploreRepo.ensureProjectInitialized(1L) } returns tracks
+        coEvery { studioRepo.ensureProjectInitialized(1L) } returns tracks
 
-        val vm = ExploreViewModel(ideaRepo, exploreRepo, mockPlaybackManager())
-        vm.onAction(ExploreAction.Load(1L))
+        val vm = StudioViewModel(ideaRepo, studioRepo, mockPlaybackManager())
+        vm.onAction(StudioAction.Load(1L))
         advanceUntilIdle()
 
         val state = vm.state.value
@@ -85,12 +85,12 @@ class ExploreViewModelTest {
     @Test
     fun `load with unknown idea shows error`() = runTest(mainDispatcherRule.dispatcher.scheduler) {
         val ideaRepo = mockk<IdeaRepository>()
-        val exploreRepo = mockk<ExploreRepository>()
+        val studioRepo = mockk<StudioRepository>()
 
         coEvery { ideaRepo.getIdeaById(99L) } returns null
 
-        val vm = ExploreViewModel(ideaRepo, exploreRepo, mockPlaybackManager())
-        vm.onAction(ExploreAction.Load(99L))
+        val vm = StudioViewModel(ideaRepo, studioRepo, mockPlaybackManager())
+        vm.onAction(StudioAction.Load(99L))
         advanceUntilIdle()
 
         val state = vm.state.value
@@ -101,18 +101,18 @@ class ExploreViewModelTest {
     @Test
     fun `load failure emits ShowError effect`() = runTest(mainDispatcherRule.dispatcher.scheduler) {
         val ideaRepo = mockk<IdeaRepository>()
-        val exploreRepo = mockk<ExploreRepository>()
+        val studioRepo = mockk<StudioRepository>()
 
         coEvery { ideaRepo.getIdeaById(1L) } throws RuntimeException("db error")
 
-        val vm = ExploreViewModel(ideaRepo, exploreRepo, mockPlaybackManager())
+        val vm = StudioViewModel(ideaRepo, studioRepo, mockPlaybackManager())
 
         vm.effects.test {
-            vm.onAction(ExploreAction.Load(1L))
+            vm.onAction(StudioAction.Load(1L))
 
             val effect = awaitItem()
-            assertTrue(effect is ExploreEffect.ShowError)
-            assertEquals("db error", (effect as ExploreEffect.ShowError).message)
+            assertTrue(effect is StudioEffect.ShowError)
+            assertEquals("db error", (effect as StudioEffect.ShowError).message)
 
             assertEquals("db error", vm.state.value.errorMessage)
             cancelAndIgnoreRemainingEvents()
@@ -122,14 +122,14 @@ class ExploreViewModelTest {
     @Test
     fun `load is idempotent for same ideaId`() = runTest(mainDispatcherRule.dispatcher.scheduler) {
         val ideaRepo = mockk<IdeaRepository>()
-        val exploreRepo = mockk<ExploreRepository>()
+        val studioRepo = mockk<StudioRepository>()
 
         coEvery { ideaRepo.getIdeaById(1L) } returns idea
-        coEvery { exploreRepo.ensureProjectInitialized(1L) } returns tracks
+        coEvery { studioRepo.ensureProjectInitialized(1L) } returns tracks
 
-        val vm = ExploreViewModel(ideaRepo, exploreRepo, mockPlaybackManager())
-        vm.onAction(ExploreAction.Load(1L))
-        vm.onAction(ExploreAction.Load(1L))
+        val vm = StudioViewModel(ideaRepo, studioRepo, mockPlaybackManager())
+        vm.onAction(StudioAction.Load(1L))
+        vm.onAction(StudioAction.Load(1L))
         advanceUntilIdle()
 
         coVerify(exactly = 1) { ideaRepo.getIdeaById(1L) }
@@ -137,7 +137,7 @@ class ExploreViewModelTest {
 
     @Test
     fun `initial state has playback fields at defaults`() = runTest(mainDispatcherRule.dispatcher.scheduler) {
-        val vm = ExploreViewModel(mockk(), mockk(), mockPlaybackManager())
+        val vm = StudioViewModel(mockk(), mockk(), mockPlaybackManager())
         val state = vm.state.value
 
         assertFalse(state.isPlaying)
@@ -148,9 +148,9 @@ class ExploreViewModelTest {
     @Test
     fun `play action delegates to playback manager`() = runTest(mainDispatcherRule.dispatcher.scheduler) {
         val manager = mockPlaybackManager()
-        val vm = ExploreViewModel(mockk(), mockk(), manager)
+        val vm = StudioViewModel(mockk(), mockk(), manager)
 
-        vm.onAction(ExploreAction.Play)
+        vm.onAction(StudioAction.Play)
 
         verify { manager.play() }
     }
@@ -158,9 +158,9 @@ class ExploreViewModelTest {
     @Test
     fun `pause action delegates to playback manager`() = runTest(mainDispatcherRule.dispatcher.scheduler) {
         val manager = mockPlaybackManager()
-        val vm = ExploreViewModel(mockk(), mockk(), manager)
+        val vm = StudioViewModel(mockk(), mockk(), manager)
 
-        vm.onAction(ExploreAction.Pause)
+        vm.onAction(StudioAction.Pause)
 
         verify { manager.pause() }
     }
@@ -168,9 +168,9 @@ class ExploreViewModelTest {
     @Test
     fun `seek action delegates to playback manager`() = runTest(mainDispatcherRule.dispatcher.scheduler) {
         val manager = mockPlaybackManager()
-        val vm = ExploreViewModel(mockk(), mockk(), manager)
+        val vm = StudioViewModel(mockk(), mockk(), manager)
 
-        vm.onAction(ExploreAction.SeekFinished(5000L))
+        vm.onAction(StudioAction.SeekFinished(5000L))
 
         verify { manager.seekTo(5000L) }
     }

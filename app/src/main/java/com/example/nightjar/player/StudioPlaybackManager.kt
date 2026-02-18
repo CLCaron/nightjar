@@ -17,7 +17,7 @@ import java.io.File
 import javax.inject.Inject
 
 /**
- * Manages multi-track playback for the Explore screen.
+ * Manages multi-track playback for the Studio screen.
  *
  * One [ExoPlayer] per track, coordinated by a monotonic clock
  * ([System.nanoTime]). Each track's trim is handled via
@@ -27,7 +27,7 @@ import javax.inject.Inject
  * Call [setScope] before [prepare] to bind coroutine work to
  * the owning ViewModel's lifecycle.
  */
-class ExplorePlaybackManager @Inject constructor(
+class StudioPlaybackManager @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
 

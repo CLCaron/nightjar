@@ -1,4 +1,4 @@
-package com.example.nightjar.ui.workspace
+package com.example.nightjar.ui.overview
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -46,32 +46,29 @@ import com.example.nightjar.ui.components.NjSectionTitle
 import com.example.nightjar.ui.components.NjTagChip
 import com.example.nightjar.ui.components.NjTextField
 import com.example.nightjar.ui.components.NjTopBar
-import com.example.nightjar.ui.workspace.WorkspaceAction
-import com.example.nightjar.ui.workspace.WorkspaceEffect
-import com.example.nightjar.ui.workspace.WorkspaceViewModel
 import kotlinx.coroutines.flow.collectLatest
 
 /**
- * Workspace screen — view and edit a single idea.
+ * Overview screen — view and edit a single idea.
  *
  * Provides playback controls, editable title and notes fields, tag
  * management, favorite toggle, sharing, and deletion. Title and notes
- * are auto-saved with a 600 ms debounce. The "Explore" button opens the
- * multi-track workspace for this idea.
+ * are auto-saved with a 600 ms debounce. The "Studio" button opens the
+ * multi-track studio for this idea.
  */
 @Composable
-fun WorkspaceScreen(
+fun OverviewScreen(
     ideaId: Long,
     onBack: () -> Unit,
-    onOpenExplore: (Long) -> Unit = {}
+    onOpenStudio: (Long) -> Unit = {}
 ) {
     val context = LocalContext.current
 
-    val vm: WorkspaceViewModel = hiltViewModel()
+    val vm: OverviewViewModel = hiltViewModel()
     val playbackViewModel: PlaybackViewModel = hiltViewModel()
 
     LaunchedEffect(ideaId) {
-        vm.onAction(WorkspaceAction.Load(ideaId))
+        vm.onAction(OverviewAction.Load(ideaId))
     }
 
     val state by vm.state.collectAsState()
@@ -100,14 +97,14 @@ fun WorkspaceScreen(
     LaunchedEffect(Unit) {
         vm.effects.collectLatest { effect ->
             when (effect) {
-                is WorkspaceEffect.NavigateBack -> onBack()
-                is WorkspaceEffect.ShowError -> snackbarHostState.showSnackbar(effect.message)
+                is OverviewEffect.NavigateBack -> onBack()
+                is OverviewEffect.ShowError -> snackbarHostState.showSnackbar(effect.message)
             }
         }
     }
 
     DisposableEffect(Unit) {
-        onDispose { vm.onAction(WorkspaceAction.FlushPendingSaves) }
+        onDispose { vm.onAction(OverviewAction.FlushPendingSaves) }
     }
 
     val audioFile = loaded?.let { vm.getAudioFile(it.audioFileName) }
@@ -160,7 +157,7 @@ fun WorkspaceScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             NjTopBar(
-                title = "Workspace",
+                title = "Overview",
                 onBack = onBack
             )
 
@@ -183,18 +180,18 @@ fun WorkspaceScreen(
             ) {
                 NjInlineAction(
                     text = if (loaded.isFavorite) "★ Favorited" else "☆ Favorite",
-                    onClick = { vm.onAction(WorkspaceAction.ToggleFavorite) },
+                    onClick = { vm.onAction(OverviewAction.ToggleFavorite) },
                     emphasized = loaded.isFavorite
                 )
                 NjInlineAction(
-                    text = "Explore",
-                    onClick = { onOpenExplore(ideaId) }
+                    text = "Studio",
+                    onClick = { onOpenStudio(ideaId) }
                 )
             }
 
             NjTextField(
                 value = titleDraft,
-                onValueChange = { vm.onAction(WorkspaceAction.TitleChanged(it)) },
+                onValueChange = { vm.onAction(OverviewAction.TitleChanged(it)) },
                 label = "Title",
                 placeholder = "Untitled idea",
                 singleLine = true
@@ -242,7 +239,7 @@ fun WorkspaceScreen(
             NjSectionTitle("Notes")
             NjTextField(
                 value = notesDraft,
-                onValueChange = { vm.onAction(WorkspaceAction.NotesChanged(it)) },
+                onValueChange = { vm.onAction(OverviewAction.NotesChanged(it)) },
                 label = "Notes",
                 placeholder = "Lyrics? Chords? Vibe?",
                 minLines = 6,
@@ -264,7 +261,7 @@ fun WorkspaceScreen(
                     items(items = tags, key = { it.id }) { tag ->
                         NjTagChip(
                             text = tag.name,
-                            onClick = { vm.onAction(WorkspaceAction.RemoveTag(tag.id)) }
+                            onClick = { vm.onAction(OverviewAction.RemoveTag(tag.id)) }
                         )
                     }
                 }
@@ -281,7 +278,7 @@ fun WorkspaceScreen(
                     onDone = {
                         val text = newTagText
                         newTagText = ""
-                        vm.onAction(WorkspaceAction.AddTagsFromInput(text))
+                        vm.onAction(OverviewAction.AddTagsFromInput(text))
                     }
                 )
             )
@@ -291,7 +288,7 @@ fun WorkspaceScreen(
                 onClick = {
                     val text = newTagText
                     newTagText = ""
-                    vm.onAction(WorkspaceAction.AddTagsFromInput(text))
+                    vm.onAction(OverviewAction.AddTagsFromInput(text))
                 }
             )
 
@@ -305,7 +302,7 @@ fun WorkspaceScreen(
                     confirmButton = {
                         TextButton(onClick = {
                             showDeleteConfirm = false
-                            vm.onAction(WorkspaceAction.DeleteIdea)
+                            vm.onAction(OverviewAction.DeleteIdea)
                         }) { Text("Delete") }
                     },
                     dismissButton = {

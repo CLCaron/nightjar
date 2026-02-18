@@ -43,13 +43,13 @@ import kotlinx.coroutines.flow.collectLatest
  *
  * Presents a single prominent button to start/stop recording. On save the
  * recording is persisted as an [IdeaEntity] and the user is navigated to
- * the Workspace. Handles microphone permission requests and gracefully
+ * the Overview. Handles microphone permission requests and gracefully
  * saves when the app is backgrounded mid-recording.
  */
 @Composable
 fun RecordScreen(
     onOpenLibrary: () -> Unit,
-    onOpenWorkspace: (Long) -> Unit
+    onOpenOverview: (Long) -> Unit
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
@@ -75,7 +75,7 @@ fun RecordScreen(
     LaunchedEffect(Unit) {
         vm.effects.collectLatest { effect ->
             when (effect) {
-                is RecordEffect.OpenWorkspace -> onOpenWorkspace(effect.ideaId)
+                is RecordEffect.OpenOverview -> onOpenOverview(effect.ideaId)
                 is RecordEffect.ShowError -> {
                     snackbarHostState.showSnackbar(
                         message = effect.message,

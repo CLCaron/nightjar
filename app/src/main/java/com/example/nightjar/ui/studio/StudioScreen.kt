@@ -1,4 +1,4 @@
-package com.example.nightjar.ui.explore
+package com.example.nightjar.ui.studio
 
 import com.example.nightjar.ui.components.NjPrimaryButton
 import com.example.nightjar.ui.components.NjSectionTitle
@@ -46,7 +46,7 @@ import com.example.nightjar.ui.components.NjTopBar
 import kotlinx.coroutines.flow.collectLatest
 
 /**
- * Explore screen — multi-track DAW-like workspace.
+ * Studio screen — multi-track DAW-like workspace.
  *
  * Displays a scrollable timeline with stacked track lanes, a time ruler,
  * and a playhead. Users can play/pause, scrub, add overdub recordings,
@@ -54,16 +54,16 @@ import kotlinx.coroutines.flow.collectLatest
  * microphone permissions and gracefully stops recording when backgrounded.
  */
 @Composable
-fun ExploreScreen(
+fun StudioScreen(
     ideaId: Long,
     onBack: () -> Unit
 ) {
-    val vm: ExploreViewModel = hiltViewModel()
+    val vm: StudioViewModel = hiltViewModel()
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
     LaunchedEffect(ideaId) {
-        vm.onAction(ExploreAction.Load(ideaId))
+        vm.onAction(StudioAction.Load(ideaId))
     }
 
     val state by vm.state.collectAsState()
@@ -86,22 +86,22 @@ fun ExploreScreen(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            vm.onAction(ExploreAction.MicPermissionGranted)
+            vm.onAction(StudioAction.MicPermissionGranted)
         }
     }
 
     LaunchedEffect(Unit) {
         vm.effects.collectLatest { effect ->
             when (effect) {
-                is ExploreEffect.NavigateBack -> onBack()
-                is ExploreEffect.ShowError -> snackbarHostState.showSnackbar(effect.message)
-                is ExploreEffect.RequestMicPermission -> {
+                is StudioEffect.NavigateBack -> onBack()
+                is StudioEffect.ShowError -> snackbarHostState.showSnackbar(effect.message)
+                is StudioEffect.RequestMicPermission -> {
                     val hasPermission = ContextCompat.checkSelfPermission(
                         context, Manifest.permission.RECORD_AUDIO
                     ) == PackageManager.PERMISSION_GRANTED
 
                     if (hasPermission) {
-                        vm.onAction(ExploreAction.MicPermissionGranted)
+                        vm.onAction(StudioAction.MicPermissionGranted)
                     } else {
                         permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                     }
@@ -113,7 +113,7 @@ fun ExploreScreen(
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP && currentIsRecording) {
-                vm.onAction(ExploreAction.StopOverdubRecording)
+                vm.onAction(StudioAction.StopOverdubRecording)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -127,7 +127,7 @@ fun ExploreScreen(
         floatingActionButton = {
             if (!state.isLoading && state.errorMessage == null && !state.isRecording) {
                 FloatingActionButton(
-                    onClick = { vm.onAction(ExploreAction.ShowAddTrackSheet) },
+                    onClick = { vm.onAction(StudioAction.ShowAddTrackSheet) },
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary
                 ) {
@@ -146,7 +146,7 @@ fun ExploreScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             NjTopBar(
-                title = state.ideaTitle.ifBlank { "Explore" },
+                title = state.ideaTitle.ifBlank { "Studio" },
                 onBack = onBack
             )
 
@@ -166,7 +166,7 @@ fun ExploreScreen(
             if (state.isRecording) {
                 OverdubRecordingBar(
                     elapsedMs = state.recordingElapsedMs,
-                    onStop = { vm.onAction(ExploreAction.StopOverdubRecording) }
+                    onStop = { vm.onAction(StudioAction.StopOverdubRecording) }
                 )
             }
 
@@ -182,9 +182,9 @@ fun ExploreScreen(
                         text = if (state.isPlaying) "Pause" else "Play",
                         onClick = {
                             if (state.isPlaying) {
-                                vm.onAction(ExploreAction.Pause)
+                                vm.onAction(StudioAction.Pause)
                             } else {
-                                vm.onAction(ExploreAction.Play)
+                                vm.onAction(StudioAction.Play)
                             }
                         },
                         fullWidth = false,
@@ -220,7 +220,7 @@ fun ExploreScreen(
                     },
                     onScrubFinished = { finalMs ->
                         isScrubbing = false
-                        vm.onAction(ExploreAction.SeekFinished(finalMs))
+                        vm.onAction(StudioAction.SeekFinished(finalMs))
                     }
                 )
             }
@@ -231,8 +231,8 @@ fun ExploreScreen(
 
     if (state.showAddTrackSheet) {
         AddTrackBottomSheet(
-            onSelect = { type -> vm.onAction(ExploreAction.SelectNewTrackType(type)) },
-            onDismiss = { vm.onAction(ExploreAction.DismissAddTrackSheet) }
+            onSelect = { type -> vm.onAction(StudioAction.SelectNewTrackType(type)) },
+            onDismiss = { vm.onAction(StudioAction.DismissAddTrackSheet) }
         )
     }
 }

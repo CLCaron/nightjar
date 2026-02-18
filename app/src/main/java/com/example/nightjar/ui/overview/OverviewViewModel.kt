@@ -1,4 +1,4 @@
-package com.example.nightjar.ui.workspace
+package com.example.nightjar.ui.overview
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -16,37 +16,37 @@ import java.io.File
 import javax.inject.Inject
 
 /**
- * ViewModel for the Workspace screen.
+ * ViewModel for the Overview screen.
  *
  * Manages editing of a single idea's metadata (title, notes, tags, favorite).
  * Title and notes changes are debounced (600 ms) to avoid excessive writes.
  * Pending saves are flushed when the screen is disposed.
  */
 @HiltViewModel
-class WorkspaceViewModel @Inject constructor(
+class OverviewViewModel @Inject constructor(
     private val repo: IdeaRepository
 ) : ViewModel() {
 
     private var currentIdeaId: Long? = null
-    private val _state = MutableStateFlow(WorkspaceUiState())
+    private val _state = MutableStateFlow(OverviewUiState())
     val state = _state.asStateFlow()
 
-    private val _effects = MutableSharedFlow<WorkspaceEffect>()
+    private val _effects = MutableSharedFlow<OverviewEffect>()
     val effects = _effects.asSharedFlow()
 
     private var titleSaveJob: Job? = null
     private var notesSaveJob: Job? = null
 
-    fun onAction(action: WorkspaceAction) {
+    fun onAction(action: OverviewAction) {
         when (action) {
-            is WorkspaceAction.Load -> load(action.ideaId)
-            is WorkspaceAction.TitleChanged -> onTitleChange(action.value)
-            is WorkspaceAction.NotesChanged -> onNotesChange(action.value)
-            WorkspaceAction.ToggleFavorite -> toggleFavorite()
-            is WorkspaceAction.AddTagsFromInput -> addTagsFromInput(action.raw)
-            is WorkspaceAction.RemoveTag -> removeTag(action.tagId)
-            WorkspaceAction.DeleteIdea -> deleteIdea()
-            WorkspaceAction.FlushPendingSaves -> flushPendingSaves()
+            is OverviewAction.Load -> load(action.ideaId)
+            is OverviewAction.TitleChanged -> onTitleChange(action.value)
+            is OverviewAction.NotesChanged -> onNotesChange(action.value)
+            OverviewAction.ToggleFavorite -> toggleFavorite()
+            is OverviewAction.AddTagsFromInput -> addTagsFromInput(action.raw)
+            is OverviewAction.RemoveTag -> removeTag(action.tagId)
+            OverviewAction.DeleteIdea -> deleteIdea()
+            OverviewAction.FlushPendingSaves -> flushPendingSaves()
         }
     }
 
@@ -76,7 +76,7 @@ class WorkspaceViewModel @Inject constructor(
             } catch (e: Exception) {
                 val msg = e.message ?: "Failed to load idea."
                 _state.update { it.copy(errorMessage = msg) }
-                _effects.emit(WorkspaceEffect.ShowError(msg))
+                _effects.emit(OverviewEffect.ShowError(msg))
             }
         }
     }
@@ -109,7 +109,7 @@ class WorkspaceViewModel @Inject constructor(
             } catch (e: Exception) {
                 val msg = e.message ?: "Failed to save title."
                 _state.update { it.copy(errorMessage = msg) }
-                _effects.emit(WorkspaceEffect.ShowError(msg))
+                _effects.emit(OverviewEffect.ShowError(msg))
             }
         }
     }
@@ -127,7 +127,7 @@ class WorkspaceViewModel @Inject constructor(
             } catch (e: Exception) {
                 val msg = e.message ?: "Failed to save notes."
                 _state.update { it.copy(errorMessage = msg) }
-                _effects.emit(WorkspaceEffect.ShowError(msg))
+                _effects.emit(OverviewEffect.ShowError(msg))
             }
         }
     }
@@ -143,7 +143,7 @@ class WorkspaceViewModel @Inject constructor(
             } catch (e: Exception) {
                 val msg = e.message ?: "Failed to update favorite."
                 _state.update { it.copy(errorMessage = msg) }
-                _effects.emit(WorkspaceEffect.ShowError(msg))
+                _effects.emit(OverviewEffect.ShowError(msg))
             }
         }
     }
@@ -160,7 +160,7 @@ class WorkspaceViewModel @Inject constructor(
             } catch (e: Exception) {
                 val msg = e.message ?: "Failed to add tag(s)."
                 _state.update { it.copy(errorMessage = msg) }
-                _effects.emit(WorkspaceEffect.ShowError(msg))
+                _effects.emit(OverviewEffect.ShowError(msg))
             }
         }
     }
@@ -175,7 +175,7 @@ class WorkspaceViewModel @Inject constructor(
             } catch (e: Exception) {
                 val msg = e.message ?: "Failed to remove tag."
                 _state.update { it.copy(errorMessage = msg) }
-                _effects.emit(WorkspaceEffect.ShowError(msg))
+                _effects.emit(OverviewEffect.ShowError(msg))
             }
         }
     }
@@ -186,11 +186,11 @@ class WorkspaceViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 repo.deleteIdeaAndAudio(idea.id)
-                _effects.emit(WorkspaceEffect.NavigateBack)
+                _effects.emit(OverviewEffect.NavigateBack)
             } catch (e: Exception) {
                 val msg = e.message ?: "Failed to delete idea."
                 _state.update { it.copy(errorMessage = msg) }
-                _effects.emit(WorkspaceEffect.ShowError(msg))
+                _effects.emit(OverviewEffect.ShowError(msg))
             }
         }
     }

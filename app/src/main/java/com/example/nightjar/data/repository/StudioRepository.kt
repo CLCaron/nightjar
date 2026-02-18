@@ -9,14 +9,14 @@ import kotlinx.coroutines.flow.Flow
 import java.io.File
 
 /**
- * Repository for multi-track Explore projects.
+ * Repository for multi-track Studio projects.
  *
  * Handles project initialization (promoting the original idea recording to
  * Track 1), track CRUD, timeline edits (move, trim, reorder), and mix
  * controls (mute, volume). All operations are non-destructive — audio
  * files are never modified in place.
  */
-class ExploreRepository(
+class StudioRepository(
     private val ideaDao: IdeaDao,
     private val trackDao: TrackDao,
     private val storage: RecordingStorage

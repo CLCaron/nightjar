@@ -6,7 +6,7 @@ import com.example.nightjar.data.db.NightjarDatabase
 import com.example.nightjar.data.db.dao.IdeaDao
 import com.example.nightjar.data.db.dao.TagDao
 import com.example.nightjar.data.db.dao.TrackDao
-import com.example.nightjar.data.repository.ExploreRepository
+import com.example.nightjar.data.repository.StudioRepository
 import com.example.nightjar.data.repository.IdeaRepository
 import com.example.nightjar.data.storage.RecordingStorage
 import dagger.Module
@@ -49,11 +49,11 @@ abstract class AppModule {
 
         @Provides
         @Singleton
-        fun provideExploreRepository(
+        fun provideStudioRepository(
             ideaDao: IdeaDao,
             trackDao: TrackDao,
             storage: RecordingStorage
-        ): ExploreRepository = ExploreRepository(ideaDao, trackDao, storage)
+        ): StudioRepository = StudioRepository(ideaDao, trackDao, storage)
 
         @Provides
         fun provideAudioRecorder(@ApplicationContext context: Context): AudioRecorder =

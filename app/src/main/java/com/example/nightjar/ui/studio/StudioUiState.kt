@@ -1,0 +1,62 @@
+package com.example.nightjar.ui.studio
+
+import com.example.nightjar.data.db.entity.TrackEntity
+
+/** UI state for the Studio (multi-track workspace) screen. */
+data class StudioUiState(
+    val ideaTitle: String = "",
+    val tracks: List<TrackEntity> = emptyList(),
+    val isLoading: Boolean = true,
+    val errorMessage: String? = null,
+    val isPlaying: Boolean = false,
+    val globalPositionMs: Long = 0L,
+    val totalDurationMs: Long = 0L,
+    val isRecording: Boolean = false,
+    val recordingElapsedMs: Long = 0L,
+    val showAddTrackSheet: Boolean = false,
+    val msPerDp: Float = 10f,
+    val dragState: TrackDragState? = null,
+    val trimState: TrackTrimState? = null
+)
+
+/** User-initiated actions on the Studio screen. */
+sealed interface StudioAction {
+    data class Load(val ideaId: Long) : StudioAction
+    data object ShowAddTrackSheet : StudioAction
+    data object DismissAddTrackSheet : StudioAction
+    data class SelectNewTrackType(val type: NewTrackType) : StudioAction
+    data object MicPermissionGranted : StudioAction
+    data object StopOverdubRecording : StudioAction
+    data object Play : StudioAction
+    data object Pause : StudioAction
+    data class SeekTo(val positionMs: Long) : StudioAction
+    data class SeekFinished(val positionMs: Long) : StudioAction
+
+    // Drag-to-reposition
+    data class StartDragTrack(val trackId: Long) : StudioAction
+    data class UpdateDragTrack(val previewOffsetMs: Long) : StudioAction
+    data class FinishDragTrack(val trackId: Long, val newOffsetMs: Long) : StudioAction
+    data object CancelDrag : StudioAction
+
+    // Trim
+    data class StartTrim(val trackId: Long, val edge: TrimEdge) : StudioAction
+    data class UpdateTrim(val previewTrimStartMs: Long, val previewTrimEndMs: Long) : StudioAction
+    data class FinishTrim(
+        val trackId: Long,
+        val trimStartMs: Long,
+        val trimEndMs: Long
+    ) : StudioAction
+    data object CancelTrim : StudioAction
+}
+
+/** One-shot side effects emitted by [StudioViewModel]. */
+sealed interface StudioEffect {
+    data object NavigateBack : StudioEffect
+    data class ShowError(val message: String) : StudioEffect
+    data object RequestMicPermission : StudioEffect
+}
+
+/** Available track types for the "Add Track" bottom sheet. */
+enum class NewTrackType(val label: String, val description: String) {
+    AUDIO_RECORDING("Audio Recording", "Record with your microphone")
+}

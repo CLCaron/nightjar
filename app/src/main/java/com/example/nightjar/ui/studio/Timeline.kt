@@ -1,4 +1,4 @@
-package com.example.nightjar.ui.explore
+package com.example.nightjar.ui.studio
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -74,7 +74,7 @@ fun TimelinePanel(
     dragState: TrackDragState?,
     trimState: TrackTrimState?,
     getAudioFile: (String) -> File,
-    onAction: (ExploreAction) -> Unit,
+    onAction: (StudioAction) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val scrollState = rememberScrollState()
@@ -232,7 +232,7 @@ private fun TimelineTrackLane(
     dragState: TrackDragState?,
     trimState: TrackTrimState?,
     getAudioFile: (String) -> File,
-    onAction: (ExploreAction) -> Unit
+    onAction: (StudioAction) -> Unit
 ) {
     val isDragging = dragState?.trackId == track.id
     val isTrimming = trimState?.trackId == track.id
@@ -295,7 +295,7 @@ private fun TimelineTrackLane(
                     detectDragGesturesAfterLongPress(
                         onDragStart = {
                             dragAccumulatedPx = 0f
-                            onAction(ExploreAction.StartDragTrack(track.id))
+                            onAction(StudioAction.StartDragTrack(track.id))
                         },
                         onDrag = { change, dragAmount ->
                             change.consume()
@@ -303,17 +303,17 @@ private fun TimelineTrackLane(
                             val deltaDp = dragAccumulatedPx / density.density
                             val newOffsetMs = (track.offsetMs + (deltaDp * msPerDp).toLong())
                                 .coerceAtLeast(0L)
-                            onAction(ExploreAction.UpdateDragTrack(newOffsetMs))
+                            onAction(StudioAction.UpdateDragTrack(newOffsetMs))
                         },
                         onDragEnd = {
                             val deltaDp = dragAccumulatedPx / density.density
                             val newOffsetMs = (track.offsetMs + (deltaDp * msPerDp).toLong())
                                 .coerceAtLeast(0L)
-                            onAction(ExploreAction.FinishDragTrack(track.id, newOffsetMs))
+                            onAction(StudioAction.FinishDragTrack(track.id, newOffsetMs))
                             dragAccumulatedPx = 0f
                         },
                         onDragCancel = {
-                            onAction(ExploreAction.CancelDrag)
+                            onAction(StudioAction.CancelDrag)
                             dragAccumulatedPx = 0f
                         }
                     )
@@ -361,7 +361,7 @@ private fun TrimHandle(
     edge: TrimEdge,
     track: TrackEntity,
     msPerDp: Float,
-    onAction: (ExploreAction) -> Unit,
+    onAction: (StudioAction) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
@@ -380,17 +380,17 @@ private fun TrimHandle(
                 detectHorizontalDragGestures(
                     onDragStart = {
                         trimAccumulatedPx = 0f
-                        onAction(ExploreAction.StartTrim(track.id, edge))
+                        onAction(StudioAction.StartTrim(track.id, edge))
                     },
                     onDragEnd = {
                         val deltaDp = trimAccumulatedPx / density.density
                         val deltaMs = (deltaDp * msPerDp).toLong()
                         val (newStart, newEnd) = computeTrimValues(edge, track, deltaMs)
-                        onAction(ExploreAction.FinishTrim(track.id, newStart, newEnd))
+                        onAction(StudioAction.FinishTrim(track.id, newStart, newEnd))
                         trimAccumulatedPx = 0f
                     },
                     onDragCancel = {
-                        onAction(ExploreAction.CancelTrim)
+                        onAction(StudioAction.CancelTrim)
                         trimAccumulatedPx = 0f
                     },
                     onHorizontalDrag = { change, dragAmount ->
@@ -399,7 +399,7 @@ private fun TrimHandle(
                         val deltaDp = trimAccumulatedPx / density.density
                         val deltaMs = (deltaDp * msPerDp).toLong()
                         val (newStart, newEnd) = computeTrimValues(edge, track, deltaMs)
-                        onAction(ExploreAction.UpdateTrim(newStart, newEnd))
+                        onAction(StudioAction.UpdateTrim(newStart, newEnd))
                     }
                 )
             }

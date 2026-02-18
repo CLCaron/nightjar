@@ -17,6 +17,6 @@ sealed interface RecordAction {
 
 /** One-shot side effects emitted by [RecordViewModel]. */
 sealed interface RecordEffect {
-    data class OpenWorkspace(val ideaId: Long) : RecordEffect
+    data class OpenOverview(val ideaId: Long) : RecordEffect
     data class ShowError(val message: String) : RecordEffect
 }
