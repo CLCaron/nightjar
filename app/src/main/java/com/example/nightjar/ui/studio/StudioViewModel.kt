@@ -126,6 +126,15 @@ class StudioViewModel @Inject constructor(
                 action.trimEndMs
             )
             StudioAction.CancelTrim -> cancelTrim()
+
+            // Delete
+            is StudioAction.ConfirmDeleteTrack -> {
+                _state.update { it.copy(confirmingDeleteTrackId = action.trackId) }
+            }
+            StudioAction.DismissDeleteTrack -> {
+                _state.update { it.copy(confirmingDeleteTrackId = null) }
+            }
+            StudioAction.ExecuteDeleteTrack -> executeDeleteTrack()
         }
     }
 
@@ -339,6 +348,25 @@ class StudioViewModel @Inject constructor(
 
     private fun cancelTrim() {
         _state.update { it.copy(trimState = null) }
+    }
+
+    // ── Delete ─────────────────────────────────────────────────────────
+
+    private fun executeDeleteTrack() {
+        val trackId = _state.value.confirmingDeleteTrackId ?: return
+        _state.update { it.copy(confirmingDeleteTrackId = null) }
+
+        viewModelScope.launch {
+            try {
+                playbackManager.pause()
+                studioRepo.deleteTrackAndAudio(trackId)
+                reloadAndPrepare()
+            } catch (e: Exception) {
+                _effects.emit(
+                    StudioEffect.ShowError(e.message ?: "Failed to delete track.")
+                )
+            }
+        }
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────

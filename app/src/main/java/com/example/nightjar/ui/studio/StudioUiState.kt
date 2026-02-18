@@ -16,7 +16,8 @@ data class StudioUiState(
     val showAddTrackSheet: Boolean = false,
     val msPerDp: Float = 10f,
     val dragState: TrackDragState? = null,
-    val trimState: TrackTrimState? = null
+    val trimState: TrackTrimState? = null,
+    val confirmingDeleteTrackId: Long? = null
 )
 
 /** User-initiated actions on the Studio screen. */
@@ -47,6 +48,11 @@ sealed interface StudioAction {
         val trimEndMs: Long
     ) : StudioAction
     data object CancelTrim : StudioAction
+
+    // Delete
+    data class ConfirmDeleteTrack(val trackId: Long) : StudioAction
+    data object DismissDeleteTrack : StudioAction
+    data object ExecuteDeleteTrack : StudioAction
 }
 
 /** One-shot side effects emitted by [StudioViewModel]. */

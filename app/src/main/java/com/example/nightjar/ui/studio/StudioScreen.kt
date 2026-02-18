@@ -17,12 +17,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -238,6 +240,28 @@ fun StudioScreen(
         AddTrackBottomSheet(
             onSelect = { type -> vm.onAction(StudioAction.SelectNewTrackType(type)) },
             onDismiss = { vm.onAction(StudioAction.DismissAddTrackSheet) }
+        )
+    }
+
+    if (state.confirmingDeleteTrackId != null) {
+        val trackName = state.tracks
+            .find { it.id == state.confirmingDeleteTrackId }
+            ?.displayName ?: "this track"
+
+        AlertDialog(
+            onDismissRequest = { vm.onAction(StudioAction.DismissDeleteTrack) },
+            title = { Text("Delete $trackName?") },
+            text = { Text("This will permanently delete the track and its audio file.") },
+            confirmButton = {
+                TextButton(onClick = { vm.onAction(StudioAction.ExecuteDeleteTrack) }) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { vm.onAction(StudioAction.DismissDeleteTrack) }) {
+                    Text("Cancel")
+                }
+            }
         )
     }
 }
