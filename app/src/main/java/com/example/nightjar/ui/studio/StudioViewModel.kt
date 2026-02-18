@@ -172,6 +172,10 @@ class StudioViewModel @Inject constructor(
                 val file = recordingStorage.getAudioFile("nightjar_overdub_$ts.wav")
                 recordingFile = file
 
+                // Capture the user's intended start position BEFORE any
+                // startup latency shifts the clock forward.
+                val intendedStartMs = playbackManager.globalPositionMs.value
+
                 wavRecorder.start(file)
 
                 // Wait for the audio pipeline to deliver its first buffer,
@@ -179,18 +183,19 @@ class StudioViewModel @Inject constructor(
                 // before markWriting() are discarded to avoid pre-roll desync.
                 wavRecorder.awaitFirstBuffer()
 
-                // Start playback FIRST, then wait for ExoPlayer to actually
-                // begin rendering audio to the speaker. This avoids the desync
-                // where the WAV accumulates silence while ExoPlayer is still
-                // buffering/starting up.
+                // Start playback, then wait for ExoPlayer to actually render
+                // audio to the speaker. awaitPlaybackRendering() resets the
+                // monotonic clock when rendering is confirmed, eliminating
+                // startup latency from the timeline position.
                 playbackManager.setRecording(true)
                 playbackManager.play()
                 playbackManager.awaitPlaybackRendering()
 
-                // NOW open the write gate — the WAV only captures audio from
-                // the moment playback is audible, keeping the overdub in sync.
+                // Open the write gate — the WAV captures from the moment
+                // playback is audible. Use the intended start position
+                // (before startup latency), not the clock position.
                 wavRecorder.markWriting()
-                recordingStartGlobalMs = playbackManager.globalPositionMs.value
+                recordingStartGlobalMs = intendedStartMs
                 recordingStartNanos = System.nanoTime()
 
                 _state.update {

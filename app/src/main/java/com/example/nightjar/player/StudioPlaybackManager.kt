@@ -87,7 +87,13 @@ class StudioPlaybackManager @Inject constructor(
         val deadline = System.nanoTime() + timeoutMs * 1_000_000L
         while (System.nanoTime() < deadline) {
             if (slots.any { !it.track.isMuted && it.player.isPlaying }) {
-                return _globalPositionMs.value
+                // Reset the monotonic clock to eliminate ExoPlayer startup
+                // latency from the timeline position. Without this, the clock
+                // advances during the rendering delay, causing overdub tracks
+                // to be offset from their intended start position.
+                clockStartNanos = System.nanoTime()
+                _globalPositionMs.value = clockBaseMs
+                return clockBaseMs
             }
             delay(5L)
         }
