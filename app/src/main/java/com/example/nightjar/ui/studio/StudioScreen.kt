@@ -243,6 +243,17 @@ fun StudioScreen(
         )
     }
 
+    if (state.settingsTrackId != null) {
+        val settingsTrack = state.tracks.find { it.id == state.settingsTrackId }
+        if (settingsTrack != null) {
+            TrackSettingsSheet(
+                track = settingsTrack,
+                onAction = vm::onAction,
+                onDismiss = { vm.onAction(StudioAction.DismissTrackSettings) }
+            )
+        }
+    }
+
     if (state.confirmingDeleteTrackId != null) {
         val trackName = state.tracks
             .find { it.id == state.confirmingDeleteTrackId }
