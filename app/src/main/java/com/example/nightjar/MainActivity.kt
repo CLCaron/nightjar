@@ -1,7 +1,7 @@
 package com.example.nightjar
 
 import com.example.nightjar.ui.library.LibraryScreen
-import com.example.nightjar.ui.workspace.WorkspaceScreen
+import com.example.nightjar.ui.overview.OverviewScreen
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -12,7 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.NavType
 import androidx.navigation.compose.*
 import androidx.navigation.navArgument
-import com.example.nightjar.ui.explore.ExploreScreen
+import com.example.nightjar.ui.studio.StudioScreen
 import com.example.nightjar.ui.record.RecordScreen
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -39,11 +39,11 @@ class MainActivity : ComponentActivity() {
 private object Routes {
     const val RECORD = "record"
     const val LIBRARY = "library"
-    const val WORKSPACE = "workspace"
-    const val EXPLORE = "explore"
+    const val OVERVIEW = "overview"
+    const val STUDIO = "studio"
 }
 
-/** Top-level navigation graph: Record → Library → Workspace → Explore. */
+/** Top-level navigation graph: Record → Library → Overview → Studio. */
 @Composable
 fun NightjarApp() {
     val navController = rememberNavController()
@@ -52,38 +52,38 @@ fun NightjarApp() {
         composable(Routes.RECORD) {
             RecordScreen(
                 onOpenLibrary = { navController.navigate(Routes.LIBRARY) },
-                onOpenWorkspace = { ideaId ->
-                    navController.navigate("${Routes.WORKSPACE}/$ideaId")
+                onOpenOverview = { ideaId ->
+                    navController.navigate("${Routes.OVERVIEW}/$ideaId")
                 }
             )
         }
         composable(Routes.LIBRARY) {
             LibraryScreen(
                 onBack = { navController.popBackStack() },
-                onOpenWorkspace = { ideaId ->
-                    navController.navigate("${Routes.WORKSPACE}/$ideaId")
+                onOpenOverview = { ideaId ->
+                    navController.navigate("${Routes.OVERVIEW}/$ideaId")
                 }
             )
         }
         composable(
-            route = "${Routes.WORKSPACE}/{ideaId}",
+            route = "${Routes.OVERVIEW}/{ideaId}",
             arguments = listOf(navArgument("ideaId") { type = NavType.LongType })
         ) { entry ->
             val ideaId = entry.arguments?.getLong("ideaId") ?: -1L
-            WorkspaceScreen(
+            OverviewScreen(
                 ideaId = ideaId,
                 onBack = { navController.popBackStack() },
-                onOpenExplore = { id ->
-                    navController.navigate("${Routes.EXPLORE}/$id")
+                onOpenStudio = { id ->
+                    navController.navigate("${Routes.STUDIO}/$id")
                 }
             )
         }
         composable(
-            route = "${Routes.EXPLORE}/{ideaId}",
+            route = "${Routes.STUDIO}/{ideaId}",
             arguments = listOf(navArgument("ideaId") { type = NavType.LongType })
         ) { entry ->
             val ideaId = entry.arguments?.getLong("ideaId") ?: -1L
-            ExploreScreen(
+            StudioScreen(
                 ideaId = ideaId,
                 onBack = { navController.popBackStack() }
             )

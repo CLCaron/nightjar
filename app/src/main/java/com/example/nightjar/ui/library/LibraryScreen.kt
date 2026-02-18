@@ -79,12 +79,12 @@ private fun IdeaRow(
  *
  * Displays a horizontal tag chip bar for filtering, sort mode selectors,
  * and a scrollable list of idea cards. Tapping a card navigates to the
- * Workspace.
+ * Overview.
  */
 @Composable
 fun LibraryScreen(
     onBack: () -> Unit,
-    onOpenWorkspace: (Long) -> Unit
+    onOpenOverview: (Long) -> Unit
 ) {
     val vm: LibraryViewModel = hiltViewModel()
     val state by vm.state.collectAsState()
@@ -199,7 +199,7 @@ fun LibraryScreen(
                     items(state.ideas, key = { it.id }) { idea ->
                         IdeaRow(
                             idea = idea,
-                            onClick = { onOpenWorkspace(idea.id) }
+                            onClick = { onOpenOverview(idea.id) }
                         )
                     }
                 }

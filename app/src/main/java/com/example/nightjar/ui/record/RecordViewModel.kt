@@ -15,7 +15,7 @@ import javax.inject.Inject
 /**
  * ViewModel for the Record screen.
  *
- * Manages the record → stop → save → navigate-to-workspace flow.
+ * Manages the record → stop → save → navigate-to-overview flow.
  * Handles lifecycle edge cases like the app being backgrounded
  * mid-recording.
  */
@@ -79,7 +79,7 @@ class RecordViewModel @Inject constructor(
             try {
                 val ideaId = repo.createIdeaForRecordingFile(saved)
                 _state.value = _state.value.copy(lastSavedFileName = saved.name)
-                _effects.emit(RecordEffect.OpenWorkspace(ideaId))
+                _effects.emit(RecordEffect.OpenOverview(ideaId))
             } catch (e: Exception) {
                 val msg = e.message ?: "Saved audio, but failed to create idea."
                 _state.value = _state.value.copy(

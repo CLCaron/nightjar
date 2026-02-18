@@ -1,4 +1,4 @@
-package com.example.nightjar.ui.explore
+package com.example.nightjar.ui.studio
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column

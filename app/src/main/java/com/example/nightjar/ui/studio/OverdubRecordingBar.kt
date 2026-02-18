@@ -1,4 +1,4 @@
-package com.example.nightjar.ui.explore
+package com.example.nightjar.ui.studio
 
 import com.example.nightjar.ui.components.NjSecondaryButton
 import androidx.compose.foundation.background

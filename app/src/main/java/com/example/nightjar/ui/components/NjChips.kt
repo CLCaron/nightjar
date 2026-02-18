@@ -13,7 +13,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
-/** Pill-shaped tag chip with an optional remove glyph (✕). Used in the Workspace tag list. */
+/** Pill-shaped tag chip with an optional remove glyph (✕). Used in the Overview tag list. */
 @Composable
 fun NjTagChip(
     text: String,

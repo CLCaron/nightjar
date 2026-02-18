@@ -16,11 +16,11 @@ import java.io.File
 import javax.inject.Inject
 
 /**
- * Single-track audio playback for the Workspace screen.
+ * Single-track audio playback for the Overview screen.
  *
  * Wraps an [ExoPlayer] instance and exposes playback state as [StateFlow]s
  * for Compose observation. Position is polled at ~5 Hz while playing.
- * For multi-track playback in Explore mode, see [ExplorePlaybackManager].
+ * For multi-track playback in Studio mode, see [StudioPlaybackManager].
  */
 @HiltViewModel
 class PlaybackViewModel @Inject constructor(

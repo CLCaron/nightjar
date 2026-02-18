@@ -14,7 +14,7 @@ import java.util.Locale
 /**
  * Central repository for idea lifecycle operations.
  *
- * Bridges the Record, Workspace, and Library screens to the underlying
+ * Bridges the Record, Overview, and Library screens to the underlying
  * [IdeaDao], [TagDao], and [RecordingStorage]. All database and file
  * operations are suspend functions safe to call from a ViewModel scope.
  */
@@ -43,7 +43,7 @@ class IdeaRepository(
         return "Idea ${fmt.format(Date())}"
     }
 
-    // ── Workspace ────────────────────────────────────────────────────────
+    // ── Overview ─────────────────────────────────────────────────────────
 
     suspend fun getIdeaById(id: Long): IdeaEntity? =
         ideaDao.getIdeaById(id)

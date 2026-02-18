@@ -17,7 +17,7 @@ import com.example.nightjar.data.db.entity.TrackEntity
  * ## Schema history
  * - **v1** — `ideas` table (core recording metadata).
  * - **v2** — Added `tags` and `idea_tags` tables for user-defined tagging.
- * - **v3** — Added `tracks` table for multi-track Explore projects.
+ * - **v3** — Added `tracks` table for multi-track Studio projects.
  */
 @Database(
     entities = [IdeaEntity::class, TagEntity::class, IdeaTagCrossRef::class, TrackEntity::class],

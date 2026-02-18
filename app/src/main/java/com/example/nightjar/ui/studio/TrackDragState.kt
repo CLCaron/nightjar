@@ -1,4 +1,4 @@
-package com.example.nightjar.ui.explore
+package com.example.nightjar.ui.studio
 
 /** Transient state while the user is long-press-dragging a track to reposition it. */
 data class TrackDragState(
