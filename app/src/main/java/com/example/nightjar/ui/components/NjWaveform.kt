@@ -17,6 +17,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.nightjar.audio.extractWaveform
+import com.example.nightjar.ui.theme.NjAccent
+import com.example.nightjar.ui.theme.NjStarlight
 import java.io.File
 
 /**
@@ -40,12 +42,12 @@ fun NjWaveform(
     audioFile: File,
     modifier: Modifier = Modifier,
     height: Dp = 48.dp,
-    barColor: Color = MaterialTheme.colorScheme.primary,
+    barColor: Color = NjStarlight.copy(alpha = 0.65f),
     barWidthDp: Dp = 2.dp,
     gapDp: Dp = 1.dp,
     minBarFraction: Float = 0.05f,
     progressFraction: Float = -1f,
-    playheadColor: Color = Color.White
+    playheadColor: Color = NjAccent
 ) {
     // Extract a generous number of samples; we resample to canvas width at draw time.
     var amplitudes by remember(audioFile.absolutePath) {

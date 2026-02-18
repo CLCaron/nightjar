@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.nightjar.player.PlaybackViewModel
 import com.example.nightjar.share.ShareUtils
+import androidx.compose.material3.ButtonDefaults
 import com.example.nightjar.ui.components.NjDestructiveButton
 import com.example.nightjar.ui.components.NjInlineAction
 import com.example.nightjar.ui.components.NjPrimaryButton
@@ -216,17 +217,23 @@ fun OverviewScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                val quietColors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+                )
                 NjPrimaryButton(
                     text = if (isPlaying) "Resume" else "Play",
                     onClick = { playbackViewModel.playFile(audioFile) },
                     modifier = Modifier.weight(1f),
-                    fullWidth = false
+                    fullWidth = false,
+                    colors = quietColors
                 )
                 NjPrimaryButton(
                     text = "Pause",
                     onClick = { playbackViewModel.pause() },
                     modifier = Modifier.weight(1f),
-                    fullWidth = false
+                    fullWidth = false,
+                    colors = quietColors
                 )
             }
 
@@ -289,7 +296,11 @@ fun OverviewScreen(
                     val text = newTagText
                     newTagText = ""
                     vm.onAction(OverviewAction.AddTagsFromInput(text))
-                }
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+                )
             )
 
             Spacer(Modifier.height(96.dp))

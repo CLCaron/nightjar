@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonColors
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -22,7 +23,8 @@ fun NjPrimaryButton(
     modifier: Modifier = Modifier,
     fullWidth: Boolean = true,
     enabled: Boolean = true,
-    minHeight: Dp = 48.dp
+    minHeight: Dp = 48.dp,
+    colors: ButtonColors? = null
 ) {
     val base = if (fullWidth) Modifier.fillMaxWidth() else Modifier
     Button(
@@ -32,7 +34,7 @@ fun NjPrimaryButton(
             .then(modifier)
             .heightIn(min = minHeight),
         shape = RoundedCornerShape(14.dp),
-        colors = ButtonDefaults.buttonColors(
+        colors = colors ?: ButtonDefaults.buttonColors(
             containerColor = MaterialTheme.colorScheme.primary,
             contentColor = MaterialTheme.colorScheme.onPrimary
         )
