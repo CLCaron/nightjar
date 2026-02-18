@@ -5,6 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -117,7 +119,7 @@ fun TimelinePanel(
         Column(modifier = Modifier.width(HEADER_WIDTH)) {
             Spacer(Modifier.height(RULER_HEIGHT))
             tracks.forEach { track ->
-                TrackHeader(track = track, height = TRACK_LANE_HEIGHT)
+                TrackHeader(track = track, height = TRACK_LANE_HEIGHT, onAction = onAction)
             }
         }
 
@@ -432,45 +434,64 @@ private fun computeTrimValues(
     }
 }
 
-/** Fixed-width header showing a track's display name, duration, and mute status. */
+/** Fixed-width header showing a track's display name, duration, mute status, and delete glyph. */
 @Composable
 private fun TrackHeader(
     track: TrackEntity,
-    height: Dp
+    height: Dp,
+    onAction: (StudioAction) -> Unit
 ) {
-    Column(
+    Row(
         modifier = Modifier
             .width(HEADER_WIDTH)
             .height(height)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        verticalArrangement = Arrangement.Center
+            .padding(start = 8.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            text = track.displayName,
-            style = MaterialTheme.typography.bodySmall,
-            color = if (track.isMuted) {
-                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
-            } else {
-                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
-            },
-            maxLines = 1
-        )
-        val effectiveDur = track.durationMs - track.trimStartMs - track.trimEndMs
-        val totalSeconds = effectiveDur.coerceAtLeast(0L) / 1000
-        val min = totalSeconds / 60
-        val sec = totalSeconds % 60
-        Text(
-            text = "%d:%02d".format(min, sec),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
-        )
-        if (track.isMuted) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.Center
+        ) {
             Text(
-                text = "Muted",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
+                text = track.displayName,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (track.isMuted) {
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                } else {
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+                },
+                maxLines = 1
             )
+            val effectiveDur = track.durationMs - track.trimStartMs - track.trimEndMs
+            val totalSeconds = effectiveDur.coerceAtLeast(0L) / 1000
+            val min = totalSeconds / 60
+            val sec = totalSeconds % 60
+            Text(
+                text = "%d:%02d".format(min, sec),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+            )
+            if (track.isMuted) {
+                Text(
+                    text = "Muted",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
+                )
+            }
         }
+
+        Text(
+            text = "✕",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
+            modifier = Modifier
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = { onAction(StudioAction.ConfirmDeleteTrack(track.id)) }
+                )
+                .padding(4.dp)
+        )
     }
 }
 
