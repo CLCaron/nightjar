@@ -135,6 +135,16 @@ class StudioViewModel @Inject constructor(
                 _state.update { it.copy(confirmingDeleteTrackId = null) }
             }
             StudioAction.ExecuteDeleteTrack -> executeDeleteTrack()
+
+            // Track settings
+            is StudioAction.OpenTrackSettings -> {
+                _state.update { it.copy(settingsTrackId = action.trackId) }
+            }
+            StudioAction.DismissTrackSettings -> {
+                _state.update { it.copy(settingsTrackId = null) }
+            }
+            is StudioAction.SetTrackMuted -> setTrackMuted(action.trackId, action.muted)
+            is StudioAction.SetTrackVolume -> setTrackVolume(action.trackId, action.volume)
         }
     }
 
@@ -348,6 +358,30 @@ class StudioViewModel @Inject constructor(
 
     private fun cancelTrim() {
         _state.update { it.copy(trimState = null) }
+    }
+
+    // ── Track settings ─────────────────────────────────────────────────
+
+    private fun setTrackMuted(trackId: Long, muted: Boolean) {
+        viewModelScope.launch {
+            try {
+                studioRepo.setTrackMuted(trackId, muted)
+                reloadAndPrepare()
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to update track."))
+            }
+        }
+    }
+
+    private fun setTrackVolume(trackId: Long, volume: Float) {
+        viewModelScope.launch {
+            try {
+                studioRepo.setTrackVolume(trackId, volume.coerceIn(0f, 1f))
+                reloadAndPrepare()
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to update volume."))
+            }
+        }
     }
 
     // ── Delete ─────────────────────────────────────────────────────────
