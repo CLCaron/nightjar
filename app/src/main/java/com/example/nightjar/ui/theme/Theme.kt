@@ -9,6 +9,7 @@ import androidx.compose.runtime.Composable
 private val DarkColorScheme = darkColorScheme(
     primary = NjPrimary,
     secondary = NjPrimary2,
+    tertiary = NjAccent,
 
     background = NjBg,
     surface = NjSurface,
@@ -16,6 +17,7 @@ private val DarkColorScheme = darkColorScheme(
 
     onPrimary = NjOnSurface,
     onSecondary = NjOnSurface,
+    onTertiary = NjBg,
     onBackground = NjOnBg,
     onSurface = NjOnSurface,
     onSurfaceVariant = NjOnSurface,
@@ -27,14 +29,14 @@ private val DarkColorScheme = darkColorScheme(
 
 private val LightColorScheme = lightColorScheme(
     primary = NjPrimary,
-    secondary = NjPrimary2
+    secondary = NjPrimary2,
+    tertiary = NjAccent
 )
 
 /** Applies the Nightjar Material 3 color scheme and typography. Defaults to dark theme. */
 @Composable
 fun NightjarTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme

@@ -44,6 +44,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.nightjar.data.db.entity.TrackEntity
 import com.example.nightjar.ui.components.NjWaveform
+import com.example.nightjar.ui.theme.NjAccent
+import com.example.nightjar.ui.theme.NjMidnight2
+import com.example.nightjar.ui.theme.NjStarlight
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import java.io.File
@@ -262,9 +265,9 @@ private fun TimelineTrackLane(
     val widthDp = (effectiveDurationMs / msPerDp).dp
 
     val bgAlpha = when {
-        isDragging -> 0.6f
-        track.isMuted -> 0.2f
-        else -> 0.4f
+        isDragging -> 0.8f
+        track.isMuted -> 0.3f
+        else -> 0.6f
     }
 
     // Accumulated drag offset in px for the body drag gesture
@@ -282,7 +285,7 @@ private fun TimelineTrackLane(
                 .width(widthDp)
                 .fillMaxHeight()
                 .clip(RoundedCornerShape(6.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = bgAlpha))
+                .background(NjMidnight2.copy(alpha = bgAlpha))
                 .then(
                     if (isDragging) Modifier
                         .graphicsLayer { shadowElevation = 8f }
@@ -321,9 +324,9 @@ private fun TimelineTrackLane(
                 .padding(vertical = 4.dp)
         ) {
             val barColor = if (track.isMuted) {
-                MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
+                NjStarlight.copy(alpha = 0.18f)
             } else {
-                MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                NjStarlight.copy(alpha = 0.65f)
             }
 
             // Waveform fills edge-to-edge — no horizontal padding so bars
@@ -373,7 +376,7 @@ private fun TrimHandle(
             .fillMaxHeight()
             .padding(vertical = 8.dp)
             .clip(RoundedCornerShape(4.dp))
-            .background(Color.White.copy(alpha = 0.5f))
+            .background(NjStarlight.copy(alpha = 0.45f))
             // Keys include the current trim values so the lambda is always fresh
             // after a committed trim reloads tracks from the DB.
             .pointerInput(track.id, track.trimStartMs, track.trimEndMs, edge, msPerDp) {
@@ -479,7 +482,7 @@ fun TimelinePlaceholder(message: String) {
             .fillMaxWidth()
             .height(200.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
+            .background(NjMidnight2.copy(alpha = 0.55f)),
         contentAlignment = Alignment.Center
     ) {
         Text(
@@ -504,6 +507,6 @@ private fun PlayheadLine(
             .offset(x = offsetDp)
             .width(2.dp)
             .height(height)
-            .background(Color.White)
+            .background(NjAccent)
     )
 }

@@ -37,11 +37,11 @@ fun NjScrubber(
             valueRange = 0f..safeDuration.toFloat(),
             modifier = Modifier.fillMaxWidth(),
             colors = SliderDefaults.colors(
-                thumbColor = MaterialTheme.colorScheme.primary,
-                activeTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
-                inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.18f),
-                activeTickColor = MaterialTheme.colorScheme.primary.copy(alpha = 0f),
-                inactiveTickColor = MaterialTheme.colorScheme.primary.copy(alpha = 0f)
+                thumbColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                activeTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
+                inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+                activeTickColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0f),
+                inactiveTickColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0f)
             )
         )
 
