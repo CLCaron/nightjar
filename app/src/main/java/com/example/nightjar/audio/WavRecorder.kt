@@ -1,11 +1,9 @@
 package com.example.nightjar.audio
 
-import android.Manifest
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.util.Log
-import androidx.annotation.RequiresPermission
 import kotlinx.coroutines.CompletableDeferred
 import java.io.File
 import java.io.FileOutputStream
@@ -42,7 +40,6 @@ class WavRecorder @Inject constructor() {
     private var totalBytesWritten: Long = 0L
     private var firstBufferSignal: CompletableDeferred<Unit>? = null
 
-    @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     fun start(file: File) {
         if (isRecordingFlag.getAndSet(true)) return
 
@@ -59,13 +56,19 @@ class WavRecorder @Inject constructor() {
             AUDIO_FORMAT
         ).coerceAtLeast(BUFFER_SIZE)
 
-        val recorder = AudioRecord(
-            MediaRecorder.AudioSource.MIC,
-            SAMPLE_RATE,
-            CHANNEL_CONFIG,
-            AUDIO_FORMAT,
-            bufferSize
-        )
+        val recorder = try {
+            AudioRecord(
+                MediaRecorder.AudioSource.MIC,
+                SAMPLE_RATE,
+                CHANNEL_CONFIG,
+                AUDIO_FORMAT,
+                bufferSize
+            )
+        } catch (e: SecurityException) {
+            isRecordingFlag.set(false)
+            signal.complete(Unit)
+            throw IllegalStateException("Microphone permission not granted", e)
+        }
 
         if (recorder.state != AudioRecord.STATE_INITIALIZED) {
             recorder.release()

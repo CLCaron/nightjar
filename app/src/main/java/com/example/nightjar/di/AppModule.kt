@@ -1,7 +1,6 @@
 package com.example.nightjar.di
 
 import android.content.Context
-import com.example.nightjar.audio.AudioRecorder
 import com.example.nightjar.data.db.NightjarDatabase
 import com.example.nightjar.data.db.dao.IdeaDao
 import com.example.nightjar.data.db.dao.TagDao
@@ -55,8 +54,5 @@ abstract class AppModule {
             storage: RecordingStorage
         ): StudioRepository = StudioRepository(ideaDao, trackDao, storage)
 
-        @Provides
-        fun provideAudioRecorder(@ApplicationContext context: Context): AudioRecorder =
-            AudioRecorder(context)
     }
 }
