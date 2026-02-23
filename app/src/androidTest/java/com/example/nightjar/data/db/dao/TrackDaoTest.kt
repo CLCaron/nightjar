@@ -34,7 +34,7 @@ class TrackDaoTest {
         ideaDao = db.ideaDao()
 
         ideaId = ideaDao.insertIdea(
-            IdeaEntity(audioFileName = "original.m4a", title = "Test Idea")
+            IdeaEntity(title = "Test Idea")
         )
     }
 
@@ -189,7 +189,7 @@ class TrackDaoTest {
     @Test
     fun observeTracksForIdea_doesNotEmitTracksFromOtherIdeas() = runTest {
         val otherId = ideaDao.insertIdea(
-            IdeaEntity(audioFileName = "other.m4a", title = "Other Idea")
+            IdeaEntity(title = "Other Idea")
         )
 
         trackDao.observeTracksForIdea(ideaId).test {

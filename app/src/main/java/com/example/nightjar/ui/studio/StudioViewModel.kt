@@ -412,7 +412,7 @@ class StudioViewModel @Inject constructor(
         playbackManager.prepare(tracks, ::getAudioFile)
     }
 
-    fun getAudioFile(name: String): File = ideaRepo.getAudioFile(name)
+    fun getAudioFile(name: String): File = recordingStorage.getAudioFile(name)
 
     override fun onCleared() {
         super.onCleared()

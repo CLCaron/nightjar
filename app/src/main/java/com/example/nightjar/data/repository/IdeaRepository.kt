@@ -35,18 +35,13 @@ class IdeaRepository(
     /**
      * Creates an [IdeaEntity] and its first [TrackEntity] in a single transaction.
      *
-     * Both the idea and track reference the same [audioFile] — the idea keeps
-     * `audioFileName` for backward compatibility with Overview/Library until
-     * Phase 1 Step 3 removes it.
+     * The idea is a pure metadata container; only the track references [audioFile].
      */
     suspend fun createIdeaWithTrack(audioFile: File, durationMs: Long): Long {
         val title = defaultTitle()
         return database.withTransaction {
             val idea = IdeaEntity(
-                audioFileName = audioFile.name,
                 title = title,
-                notes = "",
-                isFavorite = false,
                 createdAtEpochMs = System.currentTimeMillis()
             )
             val ideaId = ideaDao.insertIdea(idea)
@@ -107,13 +102,20 @@ class IdeaRepository(
         tagDao.removeTagFromIdea(ideaId, tagId)
 
     suspend fun deleteIdeaAndAudio(id: Long) {
-        val idea = ideaDao.getIdeaById(id) ?: return
-        ideaDao.deleteIdeaById(id)
-        storage.deleteAudioFile(idea.audioFileName)
+        val tracks = trackDao.getTracksForIdea(id)
+        ideaDao.deleteIdeaById(id) // cascade deletes track rows
+        tracks.forEach { storage.deleteAudioFile(it.audioFileName) }
     }
 
-    fun getAudioFile(name: String): File =
-        storage.getAudioFile(name)
+    /**
+     * Returns the audio file for the first track (by sort index) of the given idea,
+     * or null if the idea has no tracks.
+     */
+    suspend fun getFirstTrackFile(ideaId: Long): File? {
+        val tracks = trackDao.getTracksForIdea(ideaId)
+        val first = tracks.minByOrNull { it.sortIndex } ?: return null
+        return storage.getAudioFile(first.audioFileName)
+    }
 
     // ── Library ──────────────────────────────────────────────────────────
 

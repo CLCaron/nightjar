@@ -51,10 +51,9 @@ abstract class AppModule {
         @Provides
         @Singleton
         fun provideStudioRepository(
-            ideaDao: IdeaDao,
             trackDao: TrackDao,
             storage: RecordingStorage
-        ): StudioRepository = StudioRepository(ideaDao, trackDao, storage)
+        ): StudioRepository = StudioRepository(trackDao, storage)
 
     }
 }

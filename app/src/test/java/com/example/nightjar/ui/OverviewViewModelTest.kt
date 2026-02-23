@@ -30,7 +30,6 @@ class OverviewViewModelTest {
         val repo = mockk<IdeaRepository>()
         val idea = IdeaEntity(
             id = 9,
-            audioFileName = "idea.m4a",
             title = "Idea Title",
             notes = "Notes"
         )
@@ -53,7 +52,6 @@ class OverviewViewModelTest {
         val repo = mockk<IdeaRepository>()
         val idea = IdeaEntity(
             id = 10,
-            audioFileName = "idea.m4a",
             title = "Original",
             notes = ""
         )
@@ -78,7 +76,6 @@ class OverviewViewModelTest {
         val repo = mockk<IdeaRepository>()
         val idea = IdeaEntity(
             id = 11,
-            audioFileName = "idea.m4a",
             title = "Idea",
             notes = "",
             isFavorite = false
@@ -103,7 +100,6 @@ class OverviewViewModelTest {
         val repo = mockk<IdeaRepository>()
         val idea = IdeaEntity(
             id = 12,
-            audioFileName = "idea.m4a",
             title = "Idea",
             notes = ""
         )
@@ -128,7 +124,6 @@ class OverviewViewModelTest {
         val repo = mockk<IdeaRepository>()
         val idea = IdeaEntity(
             id = 13,
-            audioFileName = "idea.m4a",
             title = "Idea",
             notes = ""
         )
