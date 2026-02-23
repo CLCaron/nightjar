@@ -40,8 +40,10 @@ abstract class AppModule {
         fun provideIdeaRepository(
             ideaDao: IdeaDao,
             tagDao: TagDao,
-            storage: RecordingStorage
-        ): IdeaRepository = IdeaRepository(ideaDao, tagDao, storage)
+            trackDao: TrackDao,
+            storage: RecordingStorage,
+            database: NightjarDatabase
+        ): IdeaRepository = IdeaRepository(ideaDao, tagDao, trackDao, storage, database)
 
         @Provides
         fun provideTrackDao(db: NightjarDatabase): TrackDao = db.trackDao()

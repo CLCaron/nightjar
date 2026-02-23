@@ -77,7 +77,7 @@ class RecordViewModelTest {
         val saved = File("saved.wav")
         val result = WavRecordingResult(file = saved, durationMs = 3000L)
         every { recorder.stop() } returns result
-        coEvery { repo.createIdeaForRecordingFile(saved) } returns 42L
+        coEvery { repo.createIdeaWithTrack(saved, 3000L) } returns 42L
 
         val viewModel = RecordViewModel(recorder, storage, repo)
 

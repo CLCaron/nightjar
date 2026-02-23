@@ -88,7 +88,7 @@ class RecordViewModel @Inject constructor(
 
         viewModelScope.launch {
             try {
-                val ideaId = repo.createIdeaForRecordingFile(result.file)
+                val ideaId = repo.createIdeaWithTrack(result.file, result.durationMs)
                 _state.value = _state.value.copy(lastSavedFileName = result.file.name)
                 _effects.emit(RecordEffect.OpenOverview(ideaId))
             } catch (e: Exception) {

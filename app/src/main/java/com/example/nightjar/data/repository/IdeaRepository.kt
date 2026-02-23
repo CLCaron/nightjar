@@ -1,10 +1,14 @@
 package com.example.nightjar.data.repository
 
+import androidx.room.withTransaction
 import com.example.nightjar.data.db.IdeaTagCrossRef
+import com.example.nightjar.data.db.NightjarDatabase
 import com.example.nightjar.data.db.dao.IdeaDao
 import com.example.nightjar.data.db.dao.TagDao
+import com.example.nightjar.data.db.dao.TrackDao
 import com.example.nightjar.data.db.entity.IdeaEntity
 import com.example.nightjar.data.db.entity.TagEntity
+import com.example.nightjar.data.db.entity.TrackEntity
 import com.example.nightjar.data.storage.RecordingStorage
 import java.io.File
 import java.text.SimpleDateFormat
@@ -21,21 +25,43 @@ import java.util.Locale
 class IdeaRepository(
     private val ideaDao: IdeaDao,
     private val tagDao: TagDao,
-    private val storage: RecordingStorage
+    private val trackDao: TrackDao,
+    private val storage: RecordingStorage,
+    private val database: NightjarDatabase
 ) {
 
     // ── Record ──────────────────────────────────────────────────────────
 
-    suspend fun createIdeaForRecordingFile(saved: File): Long {
+    /**
+     * Creates an [IdeaEntity] and its first [TrackEntity] in a single transaction.
+     *
+     * Both the idea and track reference the same [audioFile] — the idea keeps
+     * `audioFileName` for backward compatibility with Overview/Library until
+     * Phase 1 Step 3 removes it.
+     */
+    suspend fun createIdeaWithTrack(audioFile: File, durationMs: Long): Long {
         val title = defaultTitle()
-        val idea = IdeaEntity(
-            audioFileName = saved.name,
-            title = title,
-            notes = "",
-            isFavorite = false,
-            createdAtEpochMs = System.currentTimeMillis()
-        )
-        return ideaDao.insertIdea(idea)
+        return database.withTransaction {
+            val idea = IdeaEntity(
+                audioFileName = audioFile.name,
+                title = title,
+                notes = "",
+                isFavorite = false,
+                createdAtEpochMs = System.currentTimeMillis()
+            )
+            val ideaId = ideaDao.insertIdea(idea)
+
+            val track = TrackEntity(
+                ideaId = ideaId,
+                audioFileName = audioFile.name,
+                displayName = "Track 1",
+                sortIndex = 0,
+                durationMs = durationMs
+            )
+            trackDao.insertTrack(track)
+
+            ideaId
+        }
     }
 
     private fun defaultTitle(): String {
