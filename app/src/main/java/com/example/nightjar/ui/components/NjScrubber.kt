@@ -12,6 +12,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -45,6 +46,7 @@ fun NjScrubber(
     val thumbColor = NjAccent
 
     var canvasWidth by remember { mutableFloatStateOf(0f) }
+    var lastScrubMs by remember { mutableLongStateOf(0L) }
 
     Column(modifier = modifier.fillMaxWidth()) {
         Canvas(
@@ -57,21 +59,25 @@ fun NjScrubber(
                             canvasWidth = size.width.toFloat()
                             if (canvasWidth > 0f) {
                                 val frac = (offset.x / canvasWidth).coerceIn(0f, 1f)
-                                onScrub((frac * safeDuration).toLong())
+                                val posMs = (frac * safeDuration).toLong()
+                                lastScrubMs = posMs
+                                onScrub(posMs)
                             }
                         },
                         onHorizontalDrag = { change, _ ->
                             change.consume()
                             if (canvasWidth > 0f) {
                                 val frac = (change.position.x / canvasWidth).coerceIn(0f, 1f)
-                                onScrub((frac * safeDuration).toLong())
+                                val posMs = (frac * safeDuration).toLong()
+                                lastScrubMs = posMs
+                                onScrub(posMs)
                             }
                         },
                         onDragEnd = {
-                            onScrubFinished(safePos)
+                            onScrubFinished(lastScrubMs)
                         },
                         onDragCancel = {
-                            onScrubFinished(safePos)
+                            onScrubFinished(lastScrubMs)
                         }
                     )
                 }
