@@ -48,4 +48,19 @@ interface TrackDao {
 
     @Query("SELECT COUNT(*) FROM tracks WHERE ideaId = :ideaId")
     suspend fun getTrackCount(ideaId: Long): Int
+
+    /**
+     * Returns the total playback duration for every idea in a single query.
+     *
+     * Each idea's duration is the farthest endpoint across its tracks:
+     * `MAX(offsetMs + durationMs - trimStartMs - trimEndMs)`.
+     */
+    @Query(
+        """
+        SELECT ideaId, MAX(offsetMs + durationMs - trimStartMs - trimEndMs) AS durationMs
+        FROM tracks
+        GROUP BY ideaId
+        """
+    )
+    suspend fun getIdeaDurations(): List<IdeaDuration>
 }

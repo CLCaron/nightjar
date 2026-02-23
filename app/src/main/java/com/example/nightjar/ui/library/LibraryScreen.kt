@@ -35,10 +35,11 @@ import java.text.DateFormat
 import java.util.Date
 import kotlinx.coroutines.flow.collectLatest
 
-/** A single idea card in the library list — shows title, favorite star, and creation date. */
+/** A single idea card in the library list — shows title, favorite star, duration, and creation date. */
 @Composable
 private fun IdeaRow(
     idea: IdeaEntity,
+    durationMs: Long?,
     onClick: () -> Unit
 ) {
     Card(
@@ -65,13 +66,34 @@ private fun IdeaRow(
 
             Spacer(Modifier.padding(top = 4.dp))
 
-            Text(
-                "Created: ${DateFormat.getDateTimeInstance().format(Date(idea.createdAtEpochMs))}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
+                        .format(Date(idea.createdAtEpochMs)),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
+                )
+                if (durationMs != null && durationMs > 0L) {
+                    Text(
+                        formatDuration(durationMs),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
+                    )
+                }
+            }
         }
     }
+}
+
+/** Formats milliseconds as `m:ss` (e.g. 72300 → "1:12"). */
+private fun formatDuration(ms: Long): String {
+    val totalSeconds = (ms + 500) / 1000
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return "%d:%02d".format(minutes, seconds)
 }
 
 /**
@@ -199,6 +221,7 @@ fun LibraryScreen(
                     items(state.ideas, key = { it.id }) { idea ->
                         IdeaRow(
                             idea = idea,
+                            durationMs = state.durations[idea.id],
                             onClick = { onOpenOverview(idea.id) }
                         )
                     }

@@ -7,6 +7,7 @@ import com.example.nightjar.data.db.entity.TagEntity
 data class LibraryUiState(
     val usedTags: List<TagEntity> = emptyList(),
     val ideas: List<IdeaEntity> = emptyList(),
+    val durations: Map<Long, Long> = emptyMap(),
     val selectedTagNormalized: String? = null,
     val sortMode: SortMode = SortMode.NEWEST,
     val isLoading: Boolean = true,
