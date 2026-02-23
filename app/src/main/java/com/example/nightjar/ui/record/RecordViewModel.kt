@@ -2,15 +2,18 @@ package com.example.nightjar.ui.record
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.nightjar.audio.AudioRecorder
+import com.example.nightjar.audio.WavRecorder
 import com.example.nightjar.data.repository.IdeaRepository
+import com.example.nightjar.data.storage.RecordingStorage
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * ViewModel for the Record screen.
@@ -21,7 +24,8 @@ import javax.inject.Inject
  */
 @HiltViewModel
 class RecordViewModel @Inject constructor(
-    private val recorder: AudioRecorder,
+    private val recorder: WavRecorder,
+    private val recordingStorage: RecordingStorage,
     private val repo: IdeaRepository
 ) : ViewModel() {
 
@@ -30,6 +34,8 @@ class RecordViewModel @Inject constructor(
 
     private val _effects = MutableSharedFlow<RecordEffect>()
     val effects = _effects.asSharedFlow()
+
+    private var startJob: Job? = null
 
     fun onAction(action: RecordAction) {
         when (action) {
@@ -40,26 +46,31 @@ class RecordViewModel @Inject constructor(
     }
 
     fun startRecording() {
-        _state.value = _state.value.copy(errorMessage = null)
-        try {
-            recorder.start()
-            _state.value = _state.value.copy(
-                isRecording = true,
-                errorMessage = null
-            )
-        } catch (e: Exception) {
-            _state.value = _state.value.copy(
-                isRecording = false,
-                errorMessage = e.message ?: "Failed to start recording."
-            )
+        _state.value = _state.value.copy(isRecording = true, errorMessage = null)
+        startJob = viewModelScope.launch {
+            try {
+                val file = recordingStorage.createRecordingFile()
+                recorder.start(file)
+                recorder.awaitFirstBuffer()
+                recorder.markWriting()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.value = _state.value.copy(
+                    isRecording = false,
+                    errorMessage = e.message ?: "Failed to start recording."
+                )
+            }
         }
     }
 
 
     private fun stopAndSave() {
+        startJob?.cancel()
+        startJob = null
         _state.value = _state.value.copy(errorMessage = null)
 
-        val saved = try {
+        val result = try {
             recorder.stop()
         } catch (e: Exception) {
             val msg = e.message ?: "Failed to stop/save recording."
@@ -70,20 +81,20 @@ class RecordViewModel @Inject constructor(
 
         _state.value = _state.value.copy(isRecording = false)
 
-        if (saved == null) {
+        if (result == null) {
             _state.value = _state.value.copy(errorMessage = "Failed to save audio.")
             return
         }
 
         viewModelScope.launch {
             try {
-                val ideaId = repo.createIdeaForRecordingFile(saved)
-                _state.value = _state.value.copy(lastSavedFileName = saved.name)
+                val ideaId = repo.createIdeaWithTrack(result.file, result.durationMs)
+                _state.value = _state.value.copy(lastSavedFileName = result.file.name)
                 _effects.emit(RecordEffect.OpenOverview(ideaId))
             } catch (e: Exception) {
                 val msg = e.message ?: "Saved audio, but failed to create idea."
                 _state.value = _state.value.copy(
-                    lastSavedFileName = saved.name,
+                    lastSavedFileName = result.file.name,
                     errorMessage = msg
                 )
                 _effects.emit(RecordEffect.ShowError(msg))
@@ -94,16 +105,20 @@ class RecordViewModel @Inject constructor(
     private fun stopForBackground() {
         if (!_state.value.isRecording) return
 
-        val saved = recorder.stop()
+        startJob?.cancel()
+        startJob = null
+
+        val result = recorder.stop()
 
         _state.value = _state.value.copy(
             isRecording = false,
-            lastSavedFileName = saved?.name
+            lastSavedFileName = result?.file?.name
         )
     }
 
     override fun onCleared() {
         super.onCleared()
-        recorder.stop()
+        startJob?.cancel()
+        recorder.release()
     }
 }
