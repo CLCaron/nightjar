@@ -127,7 +127,10 @@ fun RecordScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            NjStarfield(Modifier.fillMaxSize())
+            NjStarfield(
+                modifier = Modifier.fillMaxSize(),
+                isRecording = state.isRecording
+            )
 
             Column(
                 modifier = Modifier

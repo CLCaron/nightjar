@@ -21,7 +21,7 @@ val NjMidnight = Color(0xFF080F21)          // deep midnight blue — studio tra
 val NjMidnight2 = Color(0xFF131720)          // slightly lifted midnight — track block bg
 val NjStarlight = Color(0xFF8493C8)          // silver-blue — waveforms, subtle highlights
 
-val NjStardust = Color(0xFFC8C8D8)          // warm silver-white — starfield base
+val NjStardust = Color(0xFFE2E0EE)          // bright silver-white — starfield base
 
 val NjOutline = Color(0xFF1A2235)          // subtle borders
 val NjError = Color(0xFFD4727A)          // muted rose
