@@ -2,6 +2,7 @@ package com.example.nightjar.ui.record
 
 import com.example.nightjar.ui.components.NjPrimaryButton
 import com.example.nightjar.ui.components.NjSecondaryButton
+import com.example.nightjar.ui.components.NjStarfield
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -121,15 +122,21 @@ fun RecordScreen(
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
     ) { padding ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .navigationBarsPadding()
-                .padding(horizontal = 20.dp, vertical = 18.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            NjStarfield(Modifier.fillMaxSize())
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 20.dp, vertical = 18.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
             Text(
                 text = "Nightjar",
                 style = MaterialTheme.typography.headlineSmall,
@@ -194,6 +201,7 @@ fun RecordScreen(
                     minHeight = 56.dp
                 )
             }
+            }
         }
     }
 }
@@ -242,13 +250,16 @@ private fun RecordButton(
         label = "innerSize"
     )
 
-    // Pulse the outer ring while recording
-    val pulseTransition = rememberInfiniteTransition(label = "pulse")
-    val ringAlpha by pulseTransition.animateFloat(
-        initialValue = 0.15f,
-        targetValue = if (isRecording) 0.5f else 0.15f,
+    // Ring animation — slow gentle breathing when idle, faster pulse when recording
+    val ringTransition = rememberInfiniteTransition(label = "ring")
+    val ringAlpha by ringTransition.animateFloat(
+        initialValue = if (isRecording) 0.15f else 0.10f,
+        targetValue = if (isRecording) 0.5f else 0.22f,
         animationSpec = infiniteRepeatable(
-            animation = tween(900, easing = LinearEasing),
+            animation = tween(
+                durationMillis = if (isRecording) 900 else 5_000,
+                easing = LinearEasing
+            ),
             repeatMode = RepeatMode.Reverse
         ),
         label = "ringAlpha"
@@ -270,9 +281,17 @@ private fun RecordButton(
             val center = Offset(size.width / 2f, size.height / 2f)
             val moonRadius = size.minDimension * 0.72f / 2f
 
-            // Outer ring (halo)
+            // Opaque backing — blocks starfield behind the button
             drawCircle(
-                color = if (isRecording) accent.copy(alpha = ringAlpha) else ring,
+                color = bg,
+                radius = size.minDimension / 2f,
+                center = center
+            )
+
+            // Outer ring — breathes gently when idle, pulses when recording
+            drawCircle(
+                color = if (isRecording) accent.copy(alpha = ringAlpha)
+                        else ring.copy(alpha = ringAlpha),
                 radius = (size.minDimension / 2f) - (strokeWidth / 2f),
                 style = Stroke(width = strokeWidth)
             )

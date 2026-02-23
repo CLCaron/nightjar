@@ -61,7 +61,10 @@ fun NjSecondaryButton(
             .then(modifier)
             .heightIn(min = minHeight),
         shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)),
+        colors = ButtonDefaults.outlinedButtonColors(
+            containerColor = MaterialTheme.colorScheme.background
+        )
     ) {
         Text(text, style = MaterialTheme.typography.labelLarge)
     }
