@@ -211,5 +211,5 @@ class OverviewViewModel @Inject constructor(
         }
     }
 
-    fun getAudioFile(name: String): File = repo.getAudioFile(name)
+    suspend fun getFirstTrackFile(ideaId: Long): File? = repo.getFirstTrackFile(ideaId)
 }

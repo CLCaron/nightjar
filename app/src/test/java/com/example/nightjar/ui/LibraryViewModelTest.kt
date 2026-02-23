@@ -27,7 +27,7 @@ class LibraryViewModelTest {
     fun `init loads tags and newest ideas`() = runTest(mainDispatcherRule.dispatcher.scheduler) {
         val repo = mockk<IdeaRepository>()
         val tags = listOf(TagEntity(id = 1, name = "Rock", nameNormalized = "rock"))
-        val ideas = listOf(IdeaEntity(id = 2, audioFileName = "idea.m4a", title = "Idea", isFavorite = false))
+        val ideas = listOf(IdeaEntity(id = 2, title = "Idea", isFavorite = false))
 
         coEvery { repo.getAllUsedTags() } returns tags
         coEvery { repo.getIdeasNewest() } returns ideas
@@ -49,7 +49,6 @@ class LibraryViewModelTest {
         val filteredIdeas = listOf(
             IdeaEntity(
                 id = 3,
-                audioFileName = "tagged.m4a",
                 title = "Tagged",
                 notes = "",
                 isFavorite = false

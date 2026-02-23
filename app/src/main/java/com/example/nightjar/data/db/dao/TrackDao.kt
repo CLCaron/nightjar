@@ -31,6 +31,9 @@ interface TrackDao {
     @Query("UPDATE tracks SET volume = :volume WHERE id = :id")
     suspend fun updateVolume(id: Long, volume: Float)
 
+    @Query("UPDATE tracks SET durationMs = :durationMs WHERE id = :id")
+    suspend fun updateDuration(id: Long, durationMs: Long)
+
     @Query("DELETE FROM tracks WHERE id = :id")
     suspend fun deleteTrackById(id: Long)
 

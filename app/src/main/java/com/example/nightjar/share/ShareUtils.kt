@@ -16,7 +16,7 @@ object ShareUtils {
         )
 
         val shareIntent = Intent(Intent.ACTION_SEND).apply {
-            type = "audio/mp4"
+            type = "audio/wav"
             putExtra(Intent.EXTRA_STREAM, uri)
             putExtra(Intent.EXTRA_SUBJECT, title)
             putExtra(Intent.EXTRA_TEXT, "Nightjar export: $title")

@@ -1,7 +1,6 @@
 package com.example.nightjar.data.repository
 
 import android.media.MediaMetadataRetriever
-import com.example.nightjar.data.db.dao.IdeaDao
 import com.example.nightjar.data.db.dao.TrackDao
 import com.example.nightjar.data.db.entity.TrackEntity
 import com.example.nightjar.data.storage.RecordingStorage
@@ -11,13 +10,11 @@ import java.io.File
 /**
  * Repository for multi-track Studio projects.
  *
- * Handles project initialization (promoting the original idea recording to
- * Track 1), track CRUD, timeline edits (move, trim, reorder), and mix
- * controls (mute, volume). All operations are non-destructive — audio
- * files are never modified in place.
+ * Handles project initialization, track CRUD, timeline edits (move, trim,
+ * reorder), and mix controls (mute, volume). All operations are
+ * non-destructive — audio files are never modified in place.
  */
 class StudioRepository(
-    private val ideaDao: IdeaDao,
     private val trackDao: TrackDao,
     private val storage: RecordingStorage
 ) {
@@ -25,28 +22,26 @@ class StudioRepository(
     // ── Project lifecycle ───────────────────────────────────────────────
 
     /**
-     * Ensures the idea has at least one track.  On first call the original
-     * [IdeaEntity.audioFileName] is promoted to Track 1.  Subsequent calls
-     * are a no-op and simply return the existing track list.
+     * Returns existing tracks for the idea, fixing up any zero-duration
+     * tracks left behind by the v3→v4 migration.
      */
     suspend fun ensureProjectInitialized(ideaId: Long): List<TrackEntity> {
         val existing = trackDao.getTracksForIdea(ideaId)
-        if (existing.isNotEmpty()) return existing
+        if (existing.isEmpty()) return emptyList()
 
-        val idea = ideaDao.getIdeaById(ideaId) ?: return emptyList()
-
-        val file = storage.getAudioFile(idea.audioFileName)
-        val durationMs = resolveFileDurationMs(file)
-
-        val track = TrackEntity(
-            ideaId = ideaId,
-            audioFileName = idea.audioFileName,
-            displayName = "Track 1",
-            sortIndex = 0,
-            durationMs = durationMs
-        )
-        trackDao.insertTrack(track)
-        return trackDao.getTracksForIdea(ideaId)
+        // Fix up tracks with unknown duration (from v3→v4 migration)
+        var needsRefresh = false
+        for (track in existing) {
+            if (track.durationMs == 0L) {
+                val file = storage.getAudioFile(track.audioFileName)
+                val duration = resolveFileDurationMs(file)
+                if (duration > 0L) {
+                    trackDao.updateDuration(track.id, duration)
+                    needsRefresh = true
+                }
+            }
+        }
+        return if (needsRefresh) trackDao.getTracksForIdea(ideaId) else existing
     }
 
     // ── Track CRUD ────────────────────────────────────────────────────────

@@ -39,7 +39,6 @@ class StudioViewModelTest {
 
     private val idea = IdeaEntity(
         id = 1L,
-        audioFileName = "original.m4a",
         title = "My Song"
     )
 

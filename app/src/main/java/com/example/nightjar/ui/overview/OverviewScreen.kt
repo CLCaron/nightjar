@@ -108,12 +108,16 @@ fun OverviewScreen(
         onDispose { vm.onAction(OverviewAction.FlushPendingSaves) }
     }
 
-    val audioFile = loaded?.let { vm.getAudioFile(it.audioFileName) }
+    var audioFile by remember { mutableStateOf<java.io.File?>(null) }
+    LaunchedEffect(loaded?.id) {
+        audioFile = loaded?.let { vm.getFirstTrackFile(it.id) }
+    }
 
+    val currentAudioFile = audioFile
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         bottomBar = {
-            if (loaded != null && audioFile != null) {
+            if (loaded != null && currentAudioFile != null) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -136,7 +140,7 @@ fun OverviewScreen(
                             onClick = {
                                 ShareUtils.shareAudioFile(
                                     context = context,
-                                    file = audioFile,
+                                    file = currentAudioFile,
                                     title = loaded.title
                                 )
                             },
@@ -166,7 +170,7 @@ fun OverviewScreen(
                 Text(msg, color = MaterialTheme.colorScheme.error)
             }
 
-            if (loaded == null || audioFile == null) {
+            if (loaded == null || currentAudioFile == null) {
                 Text(
                     "Loading…",
                     style = MaterialTheme.typography.bodyMedium,
@@ -223,7 +227,7 @@ fun OverviewScreen(
                 )
                 NjPrimaryButton(
                     text = if (isPlaying) "Resume" else "Play",
-                    onClick = { playbackViewModel.playFile(audioFile) },
+                    onClick = { playbackViewModel.playFile(currentAudioFile) },
                     modifier = Modifier.weight(1f),
                     fullWidth = false,
                     colors = quietColors
@@ -238,7 +242,7 @@ fun OverviewScreen(
             }
 
             Text(
-                "File: ${loaded.audioFileName}",
+                "File: ${audioFile?.name ?: "—"}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
             )
