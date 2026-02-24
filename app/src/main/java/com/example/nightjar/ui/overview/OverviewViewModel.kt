@@ -2,12 +2,17 @@ package com.example.nightjar.ui.overview
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.nightjar.audio.extractCompositeWaveform
 import com.example.nightjar.data.repository.IdeaRepository
+import com.example.nightjar.data.repository.StudioRepository
+import com.example.nightjar.data.storage.RecordingStorage
+import com.example.nightjar.player.StudioPlaybackManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -18,13 +23,17 @@ import javax.inject.Inject
 /**
  * ViewModel for the Overview screen.
  *
- * Manages editing of a single idea's metadata (title, notes, tags, favorite).
+ * Manages editing of a single idea's metadata (title, notes, tags, favorite)
+ * and multi-track playback via [StudioPlaybackManager].
  * Title and notes changes are debounced (600 ms) to avoid excessive writes.
  * Pending saves are flushed when the screen is disposed.
  */
 @HiltViewModel
 class OverviewViewModel @Inject constructor(
-    private val repo: IdeaRepository
+    private val repo: IdeaRepository,
+    private val studioRepo: StudioRepository,
+    private val playbackManager: StudioPlaybackManager,
+    private val recordingStorage: RecordingStorage
 ) : ViewModel() {
 
     private var currentIdeaId: Long? = null
@@ -34,8 +43,16 @@ class OverviewViewModel @Inject constructor(
     private val _effects = MutableSharedFlow<OverviewEffect>()
     val effects = _effects.asSharedFlow()
 
+    val isPlaying: StateFlow<Boolean> = playbackManager.isPlaying
+    val globalPositionMs: StateFlow<Long> = playbackManager.globalPositionMs
+    val totalDurationMs: StateFlow<Long> = playbackManager.totalDurationMs
+
     private var titleSaveJob: Job? = null
     private var notesSaveJob: Job? = null
+
+    init {
+        playbackManager.setScope(viewModelScope)
+    }
 
     fun onAction(action: OverviewAction) {
         when (action) {
@@ -47,6 +64,10 @@ class OverviewViewModel @Inject constructor(
             is OverviewAction.RemoveTag -> removeTag(action.tagId)
             OverviewAction.DeleteIdea -> deleteIdea()
             OverviewAction.FlushPendingSaves -> flushPendingSaves()
+            OverviewAction.Play -> playbackManager.play()
+            OverviewAction.Pause -> playbackManager.pause()
+            is OverviewAction.SeekTo -> playbackManager.seekTo(action.positionMs)
+            OverviewAction.RefreshTracks -> refreshTracks()
         }
     }
 
@@ -73,6 +94,14 @@ class OverviewViewModel @Inject constructor(
                 }
 
                 refreshTags()
+
+                val tracks = studioRepo.ensureProjectInitialized(ideaId)
+                _state.update { it.copy(hasTracks = tracks.isNotEmpty()) }
+                if (tracks.isNotEmpty()) {
+                    playbackManager.prepare(tracks, ::getAudioFile)
+                    val waveform = extractCompositeWaveform(tracks, ::getAudioFile)
+                    _state.update { it.copy(compositeWaveform = waveform) }
+                }
             } catch (e: Exception) {
                 val msg = e.message ?: "Failed to load idea."
                 _state.update { it.copy(errorMessage = msg) }
@@ -80,6 +109,27 @@ class OverviewViewModel @Inject constructor(
             }
         }
     }
+
+    private fun refreshTracks() {
+        val ideaId = currentIdeaId ?: return
+        viewModelScope.launch {
+            try {
+                val tracks = studioRepo.ensureProjectInitialized(ideaId)
+                _state.update { it.copy(hasTracks = tracks.isNotEmpty()) }
+                if (tracks.isNotEmpty()) {
+                    playbackManager.prepare(tracks, ::getAudioFile)
+                    val waveform = extractCompositeWaveform(tracks, ::getAudioFile)
+                    _state.update { it.copy(compositeWaveform = waveform) }
+                }
+            } catch (e: Exception) {
+                val msg = e.message ?: "Failed to refresh tracks."
+                _effects.emit(OverviewEffect.ShowError(msg))
+            }
+        }
+    }
+
+    private fun getAudioFile(name: String): File =
+        recordingStorage.getAudioFile(name)
 
     private suspend fun refreshTags() {
         val id = currentIdeaId ?: return
@@ -212,4 +262,9 @@ class OverviewViewModel @Inject constructor(
     }
 
     suspend fun getFirstTrackFile(ideaId: Long): File? = repo.getFirstTrackFile(ideaId)
+
+    override fun onCleared() {
+        super.onCleared()
+        playbackManager.release()
+    }
 }

@@ -1,10 +1,12 @@
 package com.example.nightjar.ui.components
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -12,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.nightjar.audio.extractWaveform
@@ -34,6 +37,8 @@ import java.io.File
  *                       sections still show a thin line).
  * @param startFraction  Start of the visible region as a fraction of total audio (0–1).
  * @param endFraction    End of the visible region as a fraction of total audio (0–1).
+ * @param onScrub        Called during a horizontal drag with the fraction (0–1). Null disables scrubbing.
+ * @param onScrubFinished Called when the drag ends with the final fraction (0–1). Null disables scrubbing.
  */
 @Composable
 fun NjWaveform(
@@ -45,7 +50,9 @@ fun NjWaveform(
     startFraction: Float = 0f,
     endFraction: Float = 1f,
     progressFraction: Float = -1f,
-    playheadColor: Color = NjAccent
+    playheadColor: Color = NjAccent,
+    onScrub: ((Float) -> Unit)? = null,
+    onScrubFinished: ((Float) -> Unit)? = null
 ) {
     var amplitudes by remember(audioFile.absolutePath) {
         mutableStateOf<FloatArray?>(null)
@@ -55,11 +62,106 @@ fun NjWaveform(
         amplitudes = extractWaveform(audioFile, WAVEFORM_SAMPLE_COUNT)
     }
 
-    val amps = amplitudes
+    NjWaveformContent(
+        amps = amplitudes,
+        modifier = modifier,
+        height = height,
+        barColor = barColor,
+        minBarFraction = minBarFraction,
+        startFraction = startFraction,
+        endFraction = endFraction,
+        progressFraction = progressFraction,
+        playheadColor = playheadColor,
+        onScrub = onScrub,
+        onScrubFinished = onScrubFinished
+    )
+}
+
+/**
+ * Renders a pre-computed waveform from [amplitudes]. Use this overload when
+ * amplitudes are composited from multiple tracks by the ViewModel rather
+ * than extracted from a single file.
+ */
+@Composable
+fun NjWaveform(
+    amplitudes: FloatArray,
+    modifier: Modifier = Modifier,
+    height: Dp = 48.dp,
+    barColor: Color = NjStarlight.copy(alpha = 0.65f),
+    minBarFraction: Float = 0.05f,
+    startFraction: Float = 0f,
+    endFraction: Float = 1f,
+    progressFraction: Float = -1f,
+    playheadColor: Color = NjAccent,
+    onScrub: ((Float) -> Unit)? = null,
+    onScrubFinished: ((Float) -> Unit)? = null
+) {
+    NjWaveformContent(
+        amps = amplitudes,
+        modifier = modifier,
+        height = height,
+        barColor = barColor,
+        minBarFraction = minBarFraction,
+        startFraction = startFraction,
+        endFraction = endFraction,
+        progressFraction = progressFraction,
+        playheadColor = playheadColor,
+        onScrub = onScrub,
+        onScrubFinished = onScrubFinished
+    )
+}
+
+/**
+ * Shared rendering logic for both the file-based and pre-computed overloads.
+ */
+@Composable
+private fun NjWaveformContent(
+    amps: FloatArray?,
+    modifier: Modifier,
+    height: Dp,
+    barColor: Color,
+    minBarFraction: Float,
+    startFraction: Float,
+    endFraction: Float,
+    progressFraction: Float,
+    playheadColor: Color,
+    onScrub: ((Float) -> Unit)?,
+    onScrubFinished: ((Float) -> Unit)?
+) {
+    var lastScrubFraction by remember { mutableFloatStateOf(0f) }
+
+    val scrubModifier = if (onScrub != null || onScrubFinished != null) {
+        Modifier.pointerInput(Unit) {
+            detectHorizontalDragGestures(
+                onDragStart = { offset ->
+                    val w = size.width.toFloat()
+                    if (w > 0f) {
+                        val frac = (offset.x / w).coerceIn(0f, 1f)
+                        lastScrubFraction = frac
+                        onScrub?.invoke(frac)
+                    }
+                },
+                onHorizontalDrag = { change, _ ->
+                    change.consume()
+                    val w = size.width.toFloat()
+                    if (w > 0f) {
+                        val frac = (change.position.x / w).coerceIn(0f, 1f)
+                        lastScrubFraction = frac
+                        onScrub?.invoke(frac)
+                    }
+                },
+                onDragEnd = { onScrubFinished?.invoke(lastScrubFraction) },
+                onDragCancel = { onScrubFinished?.invoke(lastScrubFraction) }
+            )
+        }
+    } else {
+        Modifier
+    }
 
     Canvas(
         modifier = modifier
             .height(height)
+            .then(scrubModifier)
     ) {
         if (amps == null || amps.isEmpty()) return@Canvas
 

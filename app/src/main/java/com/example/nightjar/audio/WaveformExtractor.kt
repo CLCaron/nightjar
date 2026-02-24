@@ -3,6 +3,7 @@ package com.example.nightjar.audio
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
+import com.example.nightjar.data.db.entity.TrackEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -11,6 +12,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.min
 
 /**
  * Decodes an audio file to PCM and returns a normalized amplitude list
@@ -164,4 +166,77 @@ private fun bucketize(peaks: List<Float>, bars: Int): FloatArray {
     }
 
     return result
+}
+
+/**
+ * Extracts waveform data from multiple tracks and composites them into a
+ * single [FloatArray] representing the mixed output. Each track's amplitude
+ * is positioned according to its offset and trim, scaled by its volume, and
+ * muted tracks are excluded. The result is normalized to 0–1.
+ *
+ * This operates purely on float arrays in memory — no audio file is created.
+ *
+ * @param tracks       The tracks to composite.
+ * @param getAudioFile Resolves a track's [TrackEntity.audioFileName] to a [File].
+ * @param bars         The desired number of amplitude bars in the output.
+ * @return A [FloatArray] of size [bars] with values in 0f..1f.
+ */
+suspend fun extractCompositeWaveform(
+    tracks: List<TrackEntity>,
+    getAudioFile: (String) -> File,
+    bars: Int = 1000
+): FloatArray = withContext(Dispatchers.Default) {
+    val activeTracks = tracks.filter { !it.isMuted }
+    if (activeTracks.isEmpty()) return@withContext FloatArray(0)
+
+    // Compute the total timeline duration (same logic as StudioPlaybackManager).
+    val totalDurationMs = activeTracks.maxOf { track ->
+        val effectiveDuration = track.durationMs - track.trimStartMs - track.trimEndMs
+        track.offsetMs + effectiveDuration.coerceAtLeast(0L)
+    }
+    if (totalDurationMs <= 0L) return@withContext FloatArray(0)
+
+    val msPerBar = totalDurationMs.toFloat() / bars
+    val composite = FloatArray(bars)
+
+    for (track in activeTracks) {
+        ensureActive()
+        val file = getAudioFile(track.audioFileName)
+        val rawAmps = extractWaveform(file, bars)
+        if (rawAmps.isEmpty()) continue
+
+        val effectiveDuration = (track.durationMs - track.trimStartMs - track.trimEndMs)
+            .coerceAtLeast(0L)
+        if (effectiveDuration <= 0L) continue
+
+        // Map each bar of the composite timeline to this track's amplitude.
+        val trackStartMs = track.offsetMs
+        val trackEndMs = trackStartMs + effectiveDuration
+
+        // Bar range that this track occupies on the composite timeline.
+        val barStart = ((trackStartMs / msPerBar).toInt()).coerceIn(0, bars)
+        val barEnd = ((trackEndMs / msPerBar).toInt()).coerceIn(barStart, bars)
+
+        // The raw waveform covers the full file. We need the trimmed region.
+        val trimStartFrac = track.trimStartMs.toFloat() / track.durationMs.coerceAtLeast(1L)
+        val trimEndFrac = 1f - (track.trimEndMs.toFloat() / track.durationMs.coerceAtLeast(1L))
+        val trimRange = trimEndFrac - trimStartFrac
+
+        for (i in barStart until barEnd) {
+            // Where in the trimmed audio does this bar fall?
+            val trackFrac = (i - barStart).toFloat() / (barEnd - barStart).coerceAtLeast(1)
+            // Map to the raw amplitude array (accounting for trim).
+            val rawFrac = trimStartFrac + trackFrac * trimRange
+            val ampIdx = (rawFrac * rawAmps.size).toInt().coerceIn(0, rawAmps.lastIndex)
+            composite[i] += rawAmps[ampIdx] * track.volume
+        }
+    }
+
+    // Normalize to 0..1.
+    val peak = composite.max()
+    if (peak > 0f) {
+        for (i in composite.indices) composite[i] = min(composite[i] / peak, 1f)
+    }
+
+    composite
 }

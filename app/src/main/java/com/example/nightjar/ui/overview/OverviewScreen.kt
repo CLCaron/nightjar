@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -32,30 +33,31 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.example.nightjar.player.PlaybackViewModel
 import com.example.nightjar.share.ShareUtils
-import androidx.compose.material3.ButtonDefaults
 import com.example.nightjar.ui.components.NjDestructiveButton
 import com.example.nightjar.ui.components.NjInlineAction
 import com.example.nightjar.ui.components.NjPrimaryButton
-import com.example.nightjar.ui.components.NjScrubber
 import com.example.nightjar.ui.components.NjSecondaryButton
 import com.example.nightjar.ui.components.NjSectionTitle
 import com.example.nightjar.ui.components.NjTagChip
 import com.example.nightjar.ui.components.NjTextField
 import com.example.nightjar.ui.components.NjTopBar
+import com.example.nightjar.ui.components.NjWaveform
 import kotlinx.coroutines.flow.collectLatest
 
 /**
  * Overview screen — view and edit a single idea.
  *
- * Provides playback controls, editable title and notes fields, tag
- * management, favorite toggle, sharing, and deletion. Title and notes
- * are auto-saved with a 600 ms debounce. The "Studio" button opens the
- * multi-track studio for this idea.
+ * Provides playback controls with waveform visualization, editable title and
+ * notes fields, tag management, favorite toggle, sharing, and deletion. Title
+ * and notes are auto-saved with a 600 ms debounce. The "Studio" button opens
+ * the multi-track studio for this idea.
  */
 @Composable
 fun OverviewScreen(
@@ -66,7 +68,6 @@ fun OverviewScreen(
     val context = LocalContext.current
 
     val vm: OverviewViewModel = hiltViewModel()
-    val playbackViewModel: PlaybackViewModel = hiltViewModel()
 
     LaunchedEffect(ideaId) {
         vm.onAction(OverviewAction.Load(ideaId))
@@ -78,20 +79,18 @@ fun OverviewScreen(
     val titleDraft = state.titleDraft
     val notesDraft = state.notesDraft
     val errorMessage = state.errorMessage
+    val compositeWaveform = state.compositeWaveform
+    val hasTracks = state.hasTracks
 
-    val isPlaying by playbackViewModel.isPlaying.collectAsState()
-    val durationMs by playbackViewModel.durationMs.collectAsState()
-    val positionMs by playbackViewModel.positionMs.collectAsState()
+    val isPlaying by vm.isPlaying.collectAsState()
+    val durationMs by vm.totalDurationMs.collectAsState()
+    val positionMs by vm.globalPositionMs.collectAsState()
 
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var newTagText by remember { mutableStateOf("") }
 
     var isScrubbing by remember { mutableStateOf(false) }
-    var scrubMs by remember { mutableStateOf(0L) }
-
-    LaunchedEffect(positionMs, isScrubbing, durationMs) {
-        if (!isScrubbing) scrubMs = positionMs.coerceIn(0L, durationMs.coerceAtLeast(1L))
-    }
+    var scrubFraction by remember { mutableStateOf(0f) }
 
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -108,16 +107,42 @@ fun OverviewScreen(
         onDispose { vm.onAction(OverviewAction.FlushPendingSaves) }
     }
 
-    var audioFile by remember { mutableStateOf<java.io.File?>(null) }
-    LaunchedEffect(loaded?.id) {
-        audioFile = loaded?.let { vm.getFirstTrackFile(it.id) }
+    // Pause playback when leaving the screen, refresh tracks when returning.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_STOP -> vm.onAction(OverviewAction.Pause)
+                Lifecycle.Event.ON_RESUME -> vm.onAction(OverviewAction.RefreshTracks)
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    val currentAudioFile = audioFile
+    // First track file is only needed for the share button.
+    var firstTrackFile by remember { mutableStateOf<java.io.File?>(null) }
+    LaunchedEffect(loaded?.id) {
+        firstTrackFile = loaded?.let { vm.getFirstTrackFile(it.id) }
+    }
+
+    val safeDuration = durationMs.coerceAtLeast(1L)
+    val displayFraction = if (isScrubbing) {
+        scrubFraction
+    } else {
+        positionMs.toFloat() / safeDuration.toFloat()
+    }
+    val displayMs = if (isScrubbing) {
+        (scrubFraction * safeDuration).toLong()
+    } else {
+        positionMs
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         bottomBar = {
-            if (loaded != null && currentAudioFile != null) {
+            if (loaded != null) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -135,18 +160,20 @@ fun OverviewScreen(
                             modifier = Modifier.weight(1f),
                             fullWidth = false
                         )
-                        NjSecondaryButton(
-                            text = "Share",
-                            onClick = {
-                                ShareUtils.shareAudioFile(
-                                    context = context,
-                                    file = currentAudioFile,
-                                    title = loaded.title
-                                )
-                            },
-                            modifier = Modifier.weight(1f),
-                            fullWidth = false
-                        )
+                        firstTrackFile?.let { file ->
+                            NjSecondaryButton(
+                                text = "Share",
+                                onClick = {
+                                    ShareUtils.shareAudioFile(
+                                        context = context,
+                                        file = file,
+                                        title = loaded.title
+                                    )
+                                },
+                                modifier = Modifier.weight(1f),
+                                fullWidth = false
+                            )
+                        }
                     }
                 }
             }
@@ -170,9 +197,9 @@ fun OverviewScreen(
                 Text(msg, color = MaterialTheme.colorScheme.error)
             }
 
-            if (loaded == null || currentAudioFile == null) {
+            if (loaded == null) {
                 Text(
-                    "Loading…",
+                    "Loading\u2026",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
                 )
@@ -184,7 +211,7 @@ fun OverviewScreen(
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 NjInlineAction(
-                    text = if (loaded.isFavorite) "★ Favorited" else "☆ Favorite",
+                    text = if (loaded.isFavorite) "\u2605 Favorited" else "\u2606 Favorite",
                     onClick = { vm.onAction(OverviewAction.ToggleFavorite) },
                     emphasized = loaded.isFavorite
                 )
@@ -204,18 +231,45 @@ fun OverviewScreen(
 
             NjSectionTitle("Playback")
 
-            NjScrubber(
-                positionMs = scrubMs,
-                durationMs = durationMs,
-                onScrub = { newMs ->
-                    isScrubbing = true
-                    scrubMs = newMs
-                },
-                onScrubFinished = { finalMs ->
-                    isScrubbing = false
-                    playbackViewModel.seekTo(finalMs)
+            if (compositeWaveform != null && compositeWaveform.isNotEmpty()) {
+                NjWaveform(
+                    amplitudes = compositeWaveform,
+                    modifier = Modifier.fillMaxWidth(),
+                    height = 64.dp,
+                    progressFraction = displayFraction,
+                    onScrub = { fraction ->
+                        isScrubbing = true
+                        scrubFraction = fraction
+                    },
+                    onScrubFinished = { fraction ->
+                        isScrubbing = false
+                        val seekMs = (fraction * safeDuration).toLong()
+                        vm.onAction(OverviewAction.SeekTo(seekMs))
+                    }
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        formatMs(displayMs),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
+                    )
+                    Text(
+                        formatMs(durationMs),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
+                    )
                 }
-            )
+            } else if (!hasTracks) {
+                Text(
+                    "No audio tracks yet.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
+                )
+            }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -226,26 +280,19 @@ fun OverviewScreen(
                     contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
                 )
                 NjPrimaryButton(
-                    text = if (isPlaying) "Resume" else "Play",
-                    onClick = { playbackViewModel.playFile(currentAudioFile) },
-                    modifier = Modifier.weight(1f),
-                    fullWidth = false,
-                    colors = quietColors
-                )
-                NjPrimaryButton(
-                    text = "Pause",
-                    onClick = { playbackViewModel.pause() },
-                    modifier = Modifier.weight(1f),
-                    fullWidth = false,
+                    text = if (isPlaying) "Pause" else "Play",
+                    onClick = {
+                        if (isPlaying) {
+                            vm.onAction(OverviewAction.Pause)
+                        } else {
+                            vm.onAction(OverviewAction.Play)
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    fullWidth = true,
                     colors = quietColors
                 )
             }
-
-            Text(
-                "File: ${audioFile?.name ?: "—"}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
-            )
 
             NjSectionTitle("Notes")
             NjTextField(
@@ -327,4 +374,11 @@ fun OverviewScreen(
             }
         }
     }
+}
+
+private fun formatMs(ms: Long): String {
+    val totalSec = (ms.coerceAtLeast(0L) / 1000L).toInt()
+    val m = totalSec / 60
+    val s = totalSec % 60
+    return "%d:%02d".format(m, s)
 }
