@@ -55,6 +55,9 @@ class StudioPlaybackManager @Inject constructor(
     /** The global position (ms) captured at the moment [play] started the clock. */
     private var clockBaseMs: Long = 0L
 
+    /** False until we sync the clock to ExoPlayer's actual position after startup. */
+    private var clockSynced = false
+
     // ── Public API ───────────────────────────────────────────────────────
 
     /** Bind this manager to a [CoroutineScope] (typically viewModelScope). */
@@ -155,6 +158,7 @@ class StudioPlaybackManager @Inject constructor(
 
         clockBaseMs = startMs
         clockStartNanos = System.nanoTime()
+        clockSynced = false
         _isPlaying.value = true
         _globalPositionMs.value = startMs
 
@@ -210,6 +214,7 @@ class StudioPlaybackManager @Inject constructor(
         if (wasPlaying) {
             clockBaseMs = clamped
             clockStartNanos = System.nanoTime()
+            clockSynced = false
             for (slot in slots) {
                 if (slot.track.isMuted) continue
                 startSlotForGlobalPosition(slot, clamped)
@@ -276,12 +281,24 @@ class StudioPlaybackManager @Inject constructor(
                     }
                 }
 
-                delay(32L) // ~30 fps playhead refresh
+                delay(16L) // ~60 fps playhead refresh
             }
         }
     }
 
     private fun currentClockMs(): Long {
+        // One-time sync: once ExoPlayer confirms it's rendering audio,
+        // correct the clock base to eliminate startup buffering delay.
+        // After this point the monotonic clock tracks real time accurately.
+        if (!clockSynced) {
+            val activeSlot = slots.firstOrNull { !it.track.isMuted && it.player.isPlaying }
+            if (activeSlot != null) {
+                clockBaseMs = activeSlot.track.offsetMs + activeSlot.player.currentPosition
+                clockStartNanos = System.nanoTime()
+                clockSynced = true
+            }
+        }
+
         val elapsed = (System.nanoTime() - clockStartNanos) / 1_000_000L
         val raw = clockBaseMs + elapsed
         // When recording, allow the clock to advance past existing tracks.

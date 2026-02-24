@@ -2,7 +2,6 @@ package com.example.nightjar.ui.components
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.height
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -10,10 +9,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.nightjar.audio.extractWaveform
@@ -22,20 +20,20 @@ import com.example.nightjar.ui.theme.NjStarlight
 import java.io.File
 
 /**
- * Loads waveform data from [audioFile] off the main thread and renders it
- * as a horizontal bar waveform on a [Canvas].
+ * Loads waveform data from [audioFile] off the main thread and renders a
+ * continuous filled waveform (mirrored envelope around the centre line).
  *
- * The waveform fills its entire available width edge-to-edge so that bars
- * align exactly with the timeline ruler and playhead.
+ * The waveform fills its entire available width edge-to-edge so that the
+ * shape aligns exactly with the timeline ruler and playhead.
  *
- * @param audioFile  The audio file to extract waveform from.
- * @param modifier   Layout modifier (should supply width; height defaults to [height]).
- * @param height     The composable height.
- * @param barColor   Color of the waveform bars.
- * @param barWidthDp Width of each bar.
- * @param gapDp      Gap between bars.
- * @param minBarFraction Minimum bar height as a fraction of total height (so silent
+ * @param audioFile      The audio file to extract waveform from.
+ * @param modifier       Layout modifier (should supply width; height defaults to [height]).
+ * @param height         The composable height.
+ * @param barColor       Fill colour for the waveform body.
+ * @param minBarFraction Minimum amplitude as a fraction of height (so silent
  *                       sections still show a thin line).
+ * @param startFraction  Start of the visible region as a fraction of total audio (0–1).
+ * @param endFraction    End of the visible region as a fraction of total audio (0–1).
  */
 @Composable
 fun NjWaveform(
@@ -43,13 +41,12 @@ fun NjWaveform(
     modifier: Modifier = Modifier,
     height: Dp = 48.dp,
     barColor: Color = NjStarlight.copy(alpha = 0.65f),
-    barWidthDp: Dp = 2.dp,
-    gapDp: Dp = 1.dp,
     minBarFraction: Float = 0.05f,
+    startFraction: Float = 0f,
+    endFraction: Float = 1f,
     progressFraction: Float = -1f,
     playheadColor: Color = NjAccent
 ) {
-    // Extract a generous number of samples; we resample to canvas width at draw time.
     var amplitudes by remember(audioFile.absolutePath) {
         mutableStateOf<FloatArray?>(null)
     }
@@ -68,34 +65,40 @@ fun NjWaveform(
 
         val canvasW = size.width
         val canvasH = size.height
+        val centerY = canvasH / 2f
 
-        val barWidth = barWidthDp.toPx()
-        val gap = gapDp.toPx()
-        val step = barWidth + gap
+        // Determine the sub-range of the amplitude array to render.
+        val rangeStart = (startFraction * amps.size).toInt().coerceIn(0, amps.size)
+        val rangeEnd = (endFraction * amps.size).toInt().coerceIn(rangeStart, amps.size)
+        val rangeLen = rangeEnd - rangeStart
+        if (rangeLen <= 0) return@Canvas
 
-        // Derive bar count from available canvas width — fill edge-to-edge.
-        val visibleBars = ((canvasW + gap) / step).toInt()
-        if (visibleBars <= 0) return@Canvas
+        val columns = canvasW.toInt().coerceAtLeast(1)
 
-        val cornerRadius = CornerRadius(barWidth / 2f, barWidth / 2f)
+        // Build a mirrored envelope path — top edge left-to-right, then
+        // bottom edge right-to-left — and fill it in one draw call.
+        val path = Path()
 
-        for (i in 0 until visibleBars) {
-            // Resample: map visible bar index into the amplitude array.
-            val ampIndex = (i.toLong() * amps.size / visibleBars).toInt()
-                .coerceIn(0, amps.lastIndex)
-            val amp = amps[ampIndex].coerceIn(minBarFraction, 1f)
-
-            val barH = amp * canvasH
-            val x = i * step
-            val y = (canvasH - barH) / 2f  // vertically centered
-
-            drawRoundRect(
-                color = barColor,
-                topLeft = Offset(x, y),
-                size = Size(barWidth, barH),
-                cornerRadius = cornerRadius
-            )
+        // Top edge
+        for (x in 0..columns) {
+            val frac = x.toFloat() / columns
+            val ampIdx = (rangeStart + (frac * rangeLen).toInt()).coerceIn(0, amps.lastIndex)
+            val amp = amps[ampIdx].coerceIn(minBarFraction, 1f)
+            val y = centerY - amp * centerY
+            if (x == 0) path.moveTo(0f, y) else path.lineTo(x.toFloat(), y)
         }
+
+        // Bottom edge (mirrored, right to left)
+        for (x in columns downTo 0) {
+            val frac = x.toFloat() / columns
+            val ampIdx = (rangeStart + (frac * rangeLen).toInt()).coerceIn(0, amps.lastIndex)
+            val amp = amps[ampIdx].coerceIn(minBarFraction, 1f)
+            val y = centerY + amp * centerY
+            path.lineTo(x.toFloat(), y)
+        }
+
+        path.close()
+        drawPath(path, color = barColor)
 
         // Draw playhead
         if (progressFraction in 0f..1f && canvasW > 0f) {
@@ -111,5 +114,5 @@ fun NjWaveform(
     }
 }
 
-/** Number of amplitude samples to extract. Resampled to canvas width at draw time. */
-private const val WAVEFORM_SAMPLE_COUNT = 500
+/** Number of amplitude samples to extract. Higher = more detail at wide zoom. */
+private const val WAVEFORM_SAMPLE_COUNT = 1000
