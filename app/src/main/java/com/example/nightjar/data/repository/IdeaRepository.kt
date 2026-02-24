@@ -133,4 +133,8 @@ class IdeaRepository(
 
     suspend fun getIdeasForTag(tagNormalized: String): List<IdeaEntity> =
         ideaDao.getIdeasForTag(tagNormalized)
+
+    /** Returns a map of idea ID → total playback duration in milliseconds. */
+    suspend fun getIdeaDurations(): Map<Long, Long> =
+        trackDao.getIdeaDurations().associate { it.ideaId to it.durationMs }
 }

@@ -53,7 +53,17 @@ class LibraryViewModel @Inject constructor(
         viewModelScope.launch {
             _state.update { it.copy(errorMessage = null) }
             refreshUsedTags()
+            refreshDurations()
             refreshIdeas()
+        }
+    }
+
+    private suspend fun refreshDurations() {
+        try {
+            val durations = repo.getIdeaDurations()
+            _state.update { it.copy(durations = durations) }
+        } catch (e: Exception) {
+            // Non-critical — cards render fine without durations.
         }
     }
 
