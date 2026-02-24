@@ -349,8 +349,17 @@ class StudioViewModel @Inject constructor(
     }
 
     private fun finishTrim(trackId: Long, trimStartMs: Long, trimEndMs: Long) {
+        val track = _state.value.tracks.firstOrNull { it.id == trackId }
         _state.update { it.copy(trimState = null) }
         viewModelScope.launch {
+            // When the left trim moves, the visible block shifts right on the
+            // timeline.  Adjust offsetMs by the same delta so the audio samples
+            // keep their global-timeline positions after commit.
+            if (track != null && trimStartMs != track.trimStartMs) {
+                val offsetDelta = trimStartMs - track.trimStartMs
+                val newOffsetMs = (track.offsetMs + offsetDelta).coerceAtLeast(0L)
+                studioRepo.moveTrack(trackId, newOffsetMs)
+            }
             studioRepo.trimTrack(trackId, trimStartMs, trimEndMs)
             reloadAndPrepare()
         }

@@ -2,8 +2,12 @@ package com.example.nightjar.ui.studio
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
+import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
+import androidx.compose.foundation.gestures.drag
+import androidx.compose.foundation.gestures.horizontalDrag
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -35,9 +39,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -61,6 +65,7 @@ private val RULER_HEIGHT = 28.dp
 private val TIMELINE_END_PADDING_DP = 120.dp
 private const val MIN_EFFECTIVE_DURATION_MS = 200L
 private val TRIM_HANDLE_WIDTH = 12.dp
+private val TRIM_TOUCH_ZONE = 36.dp
 
 /**
  * The main timeline UI — a horizontally scrollable panel showing a time
@@ -264,7 +269,11 @@ private fun TimelineTrackLane(
     val effectiveDurationMs = (track.durationMs - effectiveTrimStartMs - effectiveTrimEndMs)
         .coerceAtLeast(MIN_EFFECTIVE_DURATION_MS)
 
-    val offsetDp = (effectiveOffsetMs / msPerDp).dp
+    // During a left trim, shift the block right so the RIGHT edge stays fixed
+    // and the LEFT handle follows the user's finger.
+    val trimDelta = effectiveTrimStartMs - track.trimStartMs
+    val visualOffsetMs = effectiveOffsetMs + trimDelta
+    val offsetDp = (visualOffsetMs / msPerDp).dp
     val widthDp = (effectiveDurationMs / msPerDp).dp
 
     val bgAlpha = when {
@@ -281,7 +290,7 @@ private fun TimelineTrackLane(
             .width(timelineWidth)
             .height(laneHeight)
     ) {
-        // Waveform block positioned at offset
+        // Waveform block — unified gesture: edges → trim, center → long-press drag
         Box(
             modifier = Modifier
                 .offset(x = offsetDp)
@@ -295,34 +304,104 @@ private fun TimelineTrackLane(
                         .alpha(0.85f)
                     else Modifier
                 )
-                // Long-press drag to reposition — keys include offsetMs so lambda
-                // refreshes after a successful move commits to DB.
-                .pointerInput(track.id, track.offsetMs, msPerDp) {
-                    detectDragGesturesAfterLongPress(
-                        onDragStart = {
-                            dragAccumulatedPx = 0f
-                            onAction(StudioAction.StartDragTrack(track.id))
-                        },
-                        onDrag = { change, dragAmount ->
-                            change.consume()
-                            dragAccumulatedPx += dragAmount.x
-                            val deltaDp = dragAccumulatedPx / density.density
-                            val newOffsetMs = (track.offsetMs + (deltaDp * msPerDp).toLong())
-                                .coerceAtLeast(0L)
-                            onAction(StudioAction.UpdateDragTrack(newOffsetMs))
-                        },
-                        onDragEnd = {
-                            val deltaDp = dragAccumulatedPx / density.density
-                            val newOffsetMs = (track.offsetMs + (deltaDp * msPerDp).toLong())
-                                .coerceAtLeast(0L)
-                            onAction(StudioAction.FinishDragTrack(track.id, newOffsetMs))
-                            dragAccumulatedPx = 0f
-                        },
-                        onDragCancel = {
-                            onAction(StudioAction.CancelDrag)
-                            dragAccumulatedPx = 0f
+                .pointerInput(track.id, track.offsetMs, track.trimStartMs, track.trimEndMs, msPerDp) {
+                    val trimZonePx = TRIM_TOUCH_ZONE.toPx()
+                        .coerceAtMost(size.width / 3f)
+
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val touchX = down.position.x
+
+                        when {
+                            // ── Left trim zone ──
+                            touchX <= trimZonePx -> {
+                                down.consume()
+                                var trimAccPx = 0f
+                                val slop = awaitHorizontalTouchSlopOrCancellation(down.id) { change, over ->
+                                    change.consume()
+                                    trimAccPx += over
+                                }
+                                if (slop != null) {
+                                    onAction(StudioAction.StartTrim(track.id, TrimEdge.LEFT))
+                                    val completed = horizontalDrag(slop.id) { change ->
+                                        val delta = change.positionChange()
+                                        change.consume()
+                                        trimAccPx += delta.x
+                                        val deltaDp = trimAccPx / density.density
+                                        val deltaMs = (deltaDp * msPerDp).toLong()
+                                        val (newStart, newEnd) = computeTrimValues(TrimEdge.LEFT, track, deltaMs)
+                                        onAction(StudioAction.UpdateTrim(newStart, newEnd))
+                                    }
+                                    val deltaDp = trimAccPx / density.density
+                                    val deltaMs = (deltaDp * msPerDp).toLong()
+                                    val (newStart, newEnd) = computeTrimValues(TrimEdge.LEFT, track, deltaMs)
+                                    if (completed) {
+                                        onAction(StudioAction.FinishTrim(track.id, newStart, newEnd))
+                                    } else {
+                                        onAction(StudioAction.CancelTrim)
+                                    }
+                                }
+                            }
+
+                            // ── Right trim zone ──
+                            touchX >= size.width - trimZonePx -> {
+                                down.consume()
+                                var trimAccPx = 0f
+                                val slop = awaitHorizontalTouchSlopOrCancellation(down.id) { change, over ->
+                                    change.consume()
+                                    trimAccPx += over
+                                }
+                                if (slop != null) {
+                                    onAction(StudioAction.StartTrim(track.id, TrimEdge.RIGHT))
+                                    val completed = horizontalDrag(slop.id) { change ->
+                                        val delta = change.positionChange()
+                                        change.consume()
+                                        trimAccPx += delta.x
+                                        val deltaDp = trimAccPx / density.density
+                                        val deltaMs = (deltaDp * msPerDp).toLong()
+                                        val (newStart, newEnd) = computeTrimValues(TrimEdge.RIGHT, track, deltaMs)
+                                        onAction(StudioAction.UpdateTrim(newStart, newEnd))
+                                    }
+                                    val deltaDp = trimAccPx / density.density
+                                    val deltaMs = (deltaDp * msPerDp).toLong()
+                                    val (newStart, newEnd) = computeTrimValues(TrimEdge.RIGHT, track, deltaMs)
+                                    if (completed) {
+                                        onAction(StudioAction.FinishTrim(track.id, newStart, newEnd))
+                                    } else {
+                                        onAction(StudioAction.CancelTrim)
+                                    }
+                                }
+                            }
+
+                            // ── Center — long-press to reposition ──
+                            else -> {
+                                // Don't consume down — lets horizontalScroll handle quick swipes
+                                val longPress = awaitLongPressOrCancellation(down.id)
+                                if (longPress != null) {
+                                    dragAccumulatedPx = 0f
+                                    onAction(StudioAction.StartDragTrack(track.id))
+                                    val completed = drag(longPress.id) { change ->
+                                        val delta = change.positionChange()
+                                        change.consume()
+                                        dragAccumulatedPx += delta.x
+                                        val deltaDp = dragAccumulatedPx / density.density
+                                        val newOffsetMs = (track.offsetMs + (deltaDp * msPerDp).toLong())
+                                            .coerceAtLeast(0L)
+                                        onAction(StudioAction.UpdateDragTrack(newOffsetMs))
+                                    }
+                                    if (completed) {
+                                        val deltaDp = dragAccumulatedPx / density.density
+                                        val newOffsetMs = (track.offsetMs + (deltaDp * msPerDp).toLong())
+                                            .coerceAtLeast(0L)
+                                        onAction(StudioAction.FinishDragTrack(track.id, newOffsetMs))
+                                    } else {
+                                        onAction(StudioAction.CancelDrag)
+                                    }
+                                    dragAccumulatedPx = 0f
+                                }
+                            }
                         }
-                    )
+                    }
                 }
                 .padding(vertical = 4.dp)
         ) {
@@ -332,47 +411,39 @@ private fun TimelineTrackLane(
                 NjStarlight.copy(alpha = 0.65f)
             }
 
-            // Waveform fills edge-to-edge — no horizontal padding so bars
-            // align exactly with the block boundaries (and the ruler/playhead).
+            // Show only the trimmed portion of the audio — peaks stay at
+            // correct timeline positions without any width or offset tricks.
+            val startFrac = if (track.durationMs > 0)
+                effectiveTrimStartMs.toFloat() / track.durationMs else 0f
+            val endFrac = if (track.durationMs > 0)
+                1f - effectiveTrimEndMs.toFloat() / track.durationMs else 1f
+
             NjWaveform(
                 audioFile = getAudioFile(track.audioFileName),
                 modifier = Modifier.fillMaxWidth(),
                 barColor = barColor,
-                height = laneHeight - 8.dp
+                height = laneHeight - 8.dp,
+                startFraction = startFrac,
+                endFraction = endFrac
             )
 
-            // Trim handles overlaid on top of the waveform at each edge
+            // Visual-only trim handles at each edge
             TrimHandle(
                 edge = TrimEdge.LEFT,
-                track = track,
-                msPerDp = msPerDp,
-                onAction = onAction,
                 modifier = Modifier.align(Alignment.CenterStart)
             )
-
             TrimHandle(
                 edge = TrimEdge.RIGHT,
-                track = track,
-                msPerDp = msPerDp,
-                onAction = onAction,
                 modifier = Modifier.align(Alignment.CenterEnd)
             )
         }
     }
 }
 
-/** Draggable handle on the left or right edge of a track for non-destructive trimming. */
+/** Visual trim-handle indicator on the left or right edge of a track. */
+@Suppress("UNUSED_PARAMETER")
 @Composable
-private fun TrimHandle(
-    edge: TrimEdge,
-    track: TrackEntity,
-    msPerDp: Float,
-    onAction: (StudioAction) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val density = LocalDensity.current
-    var trimAccumulatedPx by remember { mutableFloatStateOf(0f) }
-
+private fun TrimHandle(edge: TrimEdge, modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
             .width(TRIM_HANDLE_WIDTH)
@@ -380,35 +451,6 @@ private fun TrimHandle(
             .padding(vertical = 8.dp)
             .clip(RoundedCornerShape(4.dp))
             .background(NjStarlight.copy(alpha = 0.45f))
-            // Keys include the current trim values so the lambda is always fresh
-            // after a committed trim reloads tracks from the DB.
-            .pointerInput(track.id, track.trimStartMs, track.trimEndMs, edge, msPerDp) {
-                detectHorizontalDragGestures(
-                    onDragStart = {
-                        trimAccumulatedPx = 0f
-                        onAction(StudioAction.StartTrim(track.id, edge))
-                    },
-                    onDragEnd = {
-                        val deltaDp = trimAccumulatedPx / density.density
-                        val deltaMs = (deltaDp * msPerDp).toLong()
-                        val (newStart, newEnd) = computeTrimValues(edge, track, deltaMs)
-                        onAction(StudioAction.FinishTrim(track.id, newStart, newEnd))
-                        trimAccumulatedPx = 0f
-                    },
-                    onDragCancel = {
-                        onAction(StudioAction.CancelTrim)
-                        trimAccumulatedPx = 0f
-                    },
-                    onHorizontalDrag = { change, dragAmount ->
-                        change.consume()
-                        trimAccumulatedPx += dragAmount
-                        val deltaDp = trimAccumulatedPx / density.density
-                        val deltaMs = (deltaDp * msPerDp).toLong()
-                        val (newStart, newEnd) = computeTrimValues(edge, track, deltaMs)
-                        onAction(StudioAction.UpdateTrim(newStart, newEnd))
-                    }
-                )
-            }
     )
 }
 
