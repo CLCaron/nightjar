@@ -55,7 +55,7 @@ fun NjTopBar(
 
             Text(
                 text = title,
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
                 modifier = Modifier.weight(1f)
             )
@@ -93,7 +93,13 @@ fun NjTopBar(
     }
 }
 
-/** Thin chevron drawn on Canvas — subtle, geometric, fits the waveform visual language. */
+/**
+ * Soft rounded chevron pointing left — the Nightjar back button.
+ *
+ * Two lines meeting at a rounded point, drawn with [StrokeCap.Round]
+ * and [StrokeJoin.Round] for a gentle, hand-crafted feel. Starlight
+ * silver-blue at a warm alpha pairs with the Josefin Sans titles.
+ */
 @Composable
 private fun BackChevron(
     onClick: () -> Unit,
@@ -110,26 +116,29 @@ private fun BackChevron(
             ),
         contentAlignment = Alignment.Center
     ) {
-        Canvas(Modifier.size(16.dp, 14.dp)) {
-            val strokeWidth = 1.5.dp.toPx()
-            val color = NjStarlight.copy(alpha = 0.55f)
-            val midY = size.height / 2f
-            val tipX = 1.dp.toPx()
+        Canvas(Modifier.size(18.dp)) {
+            val color = NjStarlight.copy(alpha = 0.7f)
+            val strokePx = 2.dp.toPx()
 
-            // Top arm of chevron
+            val cx = size.width * 0.42f   // tip sits slightly left of center
+            val cy = size.height / 2f
+            val armX = size.width * 0.82f  // right end of both arms
+            val armY = size.height * 0.38f // vertical spread from center
+
+            // Upper arm: top-right → center-left
             drawLine(
                 color = color,
-                start = Offset(size.width, 0f),
-                end = Offset(tipX, midY),
-                strokeWidth = strokeWidth,
+                start = Offset(armX, cy - armY),
+                end = Offset(cx, cy),
+                strokeWidth = strokePx,
                 cap = StrokeCap.Round
             )
-            // Bottom arm of chevron
+            // Lower arm: center-left → bottom-right
             drawLine(
                 color = color,
-                start = Offset(tipX, midY),
-                end = Offset(size.width, size.height),
-                strokeWidth = strokeWidth,
+                start = Offset(cx, cy),
+                end = Offset(armX, cy + armY),
+                strokeWidth = strokePx,
                 cap = StrokeCap.Round
             )
         }

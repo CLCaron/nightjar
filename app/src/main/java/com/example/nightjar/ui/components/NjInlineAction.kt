@@ -3,7 +3,9 @@ package com.example.nightjar.ui.components
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -20,7 +22,8 @@ fun NjInlineAction(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    emphasized: Boolean = false
+    emphasized: Boolean = false,
+    leadingIcon: @Composable (() -> Unit)? = null
 ) {
     val container = if (emphasized) {
         MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
@@ -49,6 +52,10 @@ fun NjInlineAction(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            if (leadingIcon != null) {
+                leadingIcon()
+                Spacer(Modifier.width(6.dp))
+            }
             Text(
                 text = text,
                 style = MaterialTheme.typography.labelLarge,

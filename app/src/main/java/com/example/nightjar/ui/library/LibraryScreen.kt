@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.nightjar.data.db.entity.IdeaEntity
 import com.example.nightjar.ui.components.NjSelectableChip
+import com.example.nightjar.ui.components.NjStarburst
 import com.example.nightjar.ui.components.NjTopBar
 import com.example.nightjar.ui.library.LibraryViewModel
 import com.example.nightjar.ui.library.SortMode
@@ -60,7 +61,7 @@ private fun IdeaRow(
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.92f)
                 )
                 if (idea.isFavorite) {
-                    Text("★", style = MaterialTheme.typography.bodyLarge)
+                    NjStarburst(filled = true, size = 16.dp)
                 }
             }
 
