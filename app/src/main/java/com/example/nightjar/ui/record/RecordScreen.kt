@@ -146,14 +146,6 @@ fun RecordScreen(
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
             )
 
-            Spacer(Modifier.height(6.dp))
-
-            Text(
-                text = "Capture now. Write later.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.60f)
-            )
-
             Spacer(Modifier.height(28.dp))
 
             if (!hasMicPermission) {

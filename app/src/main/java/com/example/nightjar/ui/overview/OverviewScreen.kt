@@ -42,6 +42,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.nightjar.share.ShareUtils
 import com.example.nightjar.ui.components.NjDestructiveButton
 import com.example.nightjar.ui.components.NjInlineAction
+import com.example.nightjar.ui.components.NjStarburst
 import com.example.nightjar.ui.components.NjPrimaryButton
 import com.example.nightjar.ui.components.NjSecondaryButton
 import com.example.nightjar.ui.components.NjSectionTitle
@@ -211,9 +212,10 @@ fun OverviewScreen(
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 NjInlineAction(
-                    text = if (loaded.isFavorite) "\u2605 Favorited" else "\u2606 Favorite",
+                    text = if (loaded.isFavorite) "Favorited" else "Favorite",
                     onClick = { vm.onAction(OverviewAction.ToggleFavorite) },
-                    emphasized = loaded.isFavorite
+                    emphasized = loaded.isFavorite,
+                    leadingIcon = { NjStarburst(filled = loaded.isFavorite, size = 16.dp) }
                 )
                 NjInlineAction(
                     text = "Studio",
