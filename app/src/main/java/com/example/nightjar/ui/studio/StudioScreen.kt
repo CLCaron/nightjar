@@ -1,11 +1,14 @@
 package com.example.nightjar.ui.studio
 
+import com.example.nightjar.audio.AudioLatencyEstimator
 import com.example.nightjar.ui.components.NjPrimaryButton
 import com.example.nightjar.ui.components.NjSectionTitle
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,6 +21,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -29,6 +33,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,6 +41,8 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -46,6 +53,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.nightjar.ui.components.NjScrubber
 import com.example.nightjar.ui.components.NjTopBar
 import com.example.nightjar.ui.theme.NjAccent
+import com.example.nightjar.ui.theme.NjStarlight
 import kotlinx.coroutines.flow.collectLatest
 
 /**
@@ -150,7 +158,18 @@ fun StudioScreen(
         ) {
             NjTopBar(
                 title = state.ideaTitle.ifBlank { "Studio" },
-                onBack = onBack
+                onBack = onBack,
+                trailing = {
+                    IconButton(
+                        onClick = { vm.onAction(StudioAction.ShowLatencySetup) }
+                    ) {
+                        Text(
+                            "Setup",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+                        )
+                    }
+                }
             )
 
             state.errorMessage?.let { msg ->
@@ -306,4 +325,186 @@ fun StudioScreen(
             }
         )
     }
+
+    if (state.showLatencySetupDialog) {
+        LatencySetupDialog(
+            diagnostics = state.latencyDiagnostics,
+            manualOffsetMs = state.manualOffsetMs,
+            onOffsetChange = { vm.onAction(StudioAction.SetManualOffset(it)) },
+            onClearOffset = { vm.onAction(StudioAction.ClearManualOffset) },
+            onDismiss = { vm.onAction(StudioAction.DismissLatencySetup) }
+        )
+    }
+}
+
+@Composable
+private fun LatencySetupDialog(
+    diagnostics: AudioLatencyEstimator.LatencyDiagnostics?,
+    manualOffsetMs: Long,
+    onOffsetChange: (Long) -> Unit,
+    onClearOffset: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Audio Sync") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (diagnostics != null) {
+                    // Device type
+                    Text(
+                        text = diagnostics.deviceType.displayName,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = NjAccent
+                    )
+
+                    // Auto-estimated latency breakdown
+                    Text(
+                        text = "${diagnostics.estimatedOutputMs}ms output + " +
+                                "${diagnostics.estimatedInputMs}ms input",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    )
+
+                    Spacer(Modifier.height(4.dp))
+
+                    // Manual offset slider
+                    Text(
+                        text = "Manual offset",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
+                    )
+
+                    OffsetSlider(
+                        offsetMs = manualOffsetMs,
+                        onOffsetChange = onOffsetChange,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    // Offset value display
+                    Text(
+                        text = "${manualOffsetMs}ms",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (manualOffsetMs != 0L) NjAccent
+                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                    )
+
+                    Text(
+                        text = "If overdubs sound late, drag left (negative)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                    )
+                } else {
+                    Text(
+                        "Loading…",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Done")
+            }
+        },
+        dismissButton = {
+            if (manualOffsetMs != 0L) {
+                TextButton(onClick = onClearOffset) {
+                    Text("Reset")
+                }
+            }
+        }
+    )
+}
+
+/**
+ * Offset slider for manual latency adjustment.
+ *
+ * Range: -500ms to +500ms. Gold fill from center to thumb. Snaps to
+ * 0 when within ±15ms of center.
+ */
+@Composable
+private fun OffsetSlider(
+    offsetMs: Long,
+    onOffsetChange: (Long) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var canvasWidth by remember { mutableFloatStateOf(0f) }
+
+    // Map -500..+500 to 0.0..1.0
+    val fraction = ((offsetMs + 500f) / 1000f).coerceIn(0f, 1f)
+
+    Canvas(
+        modifier = modifier
+            .height(40.dp)
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures(
+                    onDragStart = { offset ->
+                        canvasWidth = size.width.toFloat()
+                        if (canvasWidth > 0f) {
+                            val raw = ((offset.x / canvasWidth) * 1000f - 500f).toLong()
+                            onOffsetChange(snapToCenter(raw))
+                        }
+                    },
+                    onHorizontalDrag = { change, _ ->
+                        change.consume()
+                        if (canvasWidth > 0f) {
+                            val raw = ((change.position.x / canvasWidth) * 1000f - 500f).toLong()
+                            onOffsetChange(snapToCenter(raw))
+                        }
+                    },
+                    onDragEnd = {},
+                    onDragCancel = {}
+                )
+            }
+    ) {
+        canvasWidth = size.width
+        val centerY = size.height / 2f
+        val trackHeight = 2.dp.toPx()
+        val thumbRadius = 6.dp.toPx()
+        val centerX = size.width / 2f
+        val thumbX = size.width * fraction
+
+        // Full track background
+        drawLine(
+            color = NjStarlight.copy(alpha = 0.15f),
+            start = Offset(0f, centerY),
+            end = Offset(size.width, centerY),
+            strokeWidth = trackHeight
+        )
+
+        // Center tick mark
+        drawLine(
+            color = NjStarlight.copy(alpha = 0.3f),
+            start = Offset(centerX, centerY - 6.dp.toPx()),
+            end = Offset(centerX, centerY + 6.dp.toPx()),
+            strokeWidth = 1.dp.toPx()
+        )
+
+        // Gold fill from center to thumb
+        if (thumbX != centerX) {
+            val fillStart = minOf(centerX, thumbX)
+            val fillEnd = maxOf(centerX, thumbX)
+            drawLine(
+                color = NjAccent.copy(alpha = 0.6f),
+                start = Offset(fillStart, centerY),
+                end = Offset(fillEnd, centerY),
+                strokeWidth = trackHeight
+            )
+        }
+
+        // Thumb
+        drawCircle(
+            color = NjAccent,
+            radius = thumbRadius,
+            center = Offset(thumbX, centerY)
+        )
+    }
+}
+
+/** Snap to 0 when within ±15ms of center, then clamp to range. */
+private fun snapToCenter(rawMs: Long): Long {
+    val snapped = if (rawMs in -15L..15L) 0L else rawMs
+    return snapped.coerceIn(-500L, 500L)
 }

@@ -50,7 +50,8 @@ class StudioRepository(
         ideaId: Long,
         audioFile: File,
         durationMs: Long,
-        offsetMs: Long = 0L
+        offsetMs: Long = 0L,
+        trimStartMs: Long = 0L
     ): Long {
         val nextIndex = trackDao.getTrackCount(ideaId)
         val track = TrackEntity(
@@ -59,7 +60,8 @@ class StudioRepository(
             displayName = "Track ${nextIndex + 1}",
             sortIndex = nextIndex,
             durationMs = durationMs,
-            offsetMs = offsetMs
+            offsetMs = offsetMs,
+            trimStartMs = trimStartMs
         )
         return trackDao.insertTrack(track)
     }

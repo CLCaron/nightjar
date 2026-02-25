@@ -1,10 +1,13 @@
 package com.example.nightjar.ui
 
 import app.cash.turbine.test
+import com.example.nightjar.audio.AudioLatencyEstimator
+import com.example.nightjar.audio.WavRecorder
 import com.example.nightjar.data.db.entity.IdeaEntity
 import com.example.nightjar.data.db.entity.TrackEntity
 import com.example.nightjar.data.repository.StudioRepository
 import com.example.nightjar.data.repository.IdeaRepository
+import com.example.nightjar.data.storage.RecordingStorage
 import com.example.nightjar.player.StudioPlaybackManager
 import com.example.nightjar.ui.studio.StudioAction
 import com.example.nightjar.ui.studio.StudioEffect
@@ -62,6 +65,19 @@ class StudioViewModelTest {
         return manager
     }
 
+    private fun createViewModel(
+        ideaRepo: IdeaRepository = mockk(),
+        studioRepo: StudioRepository = mockk(),
+        playbackManager: StudioPlaybackManager = mockPlaybackManager()
+    ): StudioViewModel = StudioViewModel(
+        ideaRepo = ideaRepo,
+        studioRepo = studioRepo,
+        playbackManager = playbackManager,
+        wavRecorder = mockk<WavRecorder>(relaxed = true),
+        recordingStorage = mockk<RecordingStorage>(relaxed = true),
+        latencyEstimator = mockk<AudioLatencyEstimator>(relaxed = true)
+    )
+
     @Test
     fun `load populates title and tracks`() = runTest(mainDispatcherRule.dispatcher.scheduler) {
         val ideaRepo = mockk<IdeaRepository>()
@@ -70,7 +86,7 @@ class StudioViewModelTest {
         coEvery { ideaRepo.getIdeaById(1L) } returns idea
         coEvery { studioRepo.ensureProjectInitialized(1L) } returns tracks
 
-        val vm = StudioViewModel(ideaRepo, studioRepo, mockPlaybackManager())
+        val vm = createViewModel(ideaRepo, studioRepo)
         vm.onAction(StudioAction.Load(1L))
         advanceUntilIdle()
 
@@ -88,7 +104,7 @@ class StudioViewModelTest {
 
         coEvery { ideaRepo.getIdeaById(99L) } returns null
 
-        val vm = StudioViewModel(ideaRepo, studioRepo, mockPlaybackManager())
+        val vm = createViewModel(ideaRepo, studioRepo)
         vm.onAction(StudioAction.Load(99L))
         advanceUntilIdle()
 
@@ -104,7 +120,7 @@ class StudioViewModelTest {
 
         coEvery { ideaRepo.getIdeaById(1L) } throws RuntimeException("db error")
 
-        val vm = StudioViewModel(ideaRepo, studioRepo, mockPlaybackManager())
+        val vm = createViewModel(ideaRepo, studioRepo)
 
         vm.effects.test {
             vm.onAction(StudioAction.Load(1L))
@@ -126,7 +142,7 @@ class StudioViewModelTest {
         coEvery { ideaRepo.getIdeaById(1L) } returns idea
         coEvery { studioRepo.ensureProjectInitialized(1L) } returns tracks
 
-        val vm = StudioViewModel(ideaRepo, studioRepo, mockPlaybackManager())
+        val vm = createViewModel(ideaRepo, studioRepo)
         vm.onAction(StudioAction.Load(1L))
         vm.onAction(StudioAction.Load(1L))
         advanceUntilIdle()
@@ -136,7 +152,7 @@ class StudioViewModelTest {
 
     @Test
     fun `initial state has playback fields at defaults`() = runTest(mainDispatcherRule.dispatcher.scheduler) {
-        val vm = StudioViewModel(mockk(), mockk(), mockPlaybackManager())
+        val vm = createViewModel()
         val state = vm.state.value
 
         assertFalse(state.isPlaying)
@@ -147,7 +163,7 @@ class StudioViewModelTest {
     @Test
     fun `play action delegates to playback manager`() = runTest(mainDispatcherRule.dispatcher.scheduler) {
         val manager = mockPlaybackManager()
-        val vm = StudioViewModel(mockk(), mockk(), manager)
+        val vm = createViewModel(playbackManager = manager)
 
         vm.onAction(StudioAction.Play)
 
@@ -157,7 +173,7 @@ class StudioViewModelTest {
     @Test
     fun `pause action delegates to playback manager`() = runTest(mainDispatcherRule.dispatcher.scheduler) {
         val manager = mockPlaybackManager()
-        val vm = StudioViewModel(mockk(), mockk(), manager)
+        val vm = createViewModel(playbackManager = manager)
 
         vm.onAction(StudioAction.Pause)
 
@@ -167,7 +183,7 @@ class StudioViewModelTest {
     @Test
     fun `seek action delegates to playback manager`() = runTest(mainDispatcherRule.dispatcher.scheduler) {
         val manager = mockPlaybackManager()
-        val vm = StudioViewModel(mockk(), mockk(), manager)
+        val vm = createViewModel(playbackManager = manager)
 
         vm.onAction(StudioAction.SeekFinished(5000L))
 
