@@ -18,7 +18,9 @@ import kotlin.coroutines.cancellation.CancellationException
 /**
  * ViewModel for the Record screen.
  *
- * Manages the record → stop → save → navigate-to-overview flow.
+ * Manages the record → stop → post-recording → navigate flow.
+ * After stopping, the user stays on the Record screen and can choose
+ * to open Overview, open Studio, or start a new recording.
  * Handles lifecycle edge cases like the app being backgrounded
  * mid-recording.
  */
@@ -42,11 +44,14 @@ class RecordViewModel @Inject constructor(
             RecordAction.StartRecording -> startRecording()
             RecordAction.StopAndSave -> stopAndSave()
             RecordAction.StopForBackground -> stopForBackground()
+            RecordAction.GoToOverview -> goToOverview()
+            RecordAction.GoToStudio -> goToStudio()
         }
     }
 
     fun startRecording() {
-        _state.value = _state.value.copy(isRecording = true, errorMessage = null)
+        // Clear any post-recording state — starting fresh
+        _state.value = RecordUiState(isRecording = true)
         startJob = viewModelScope.launch {
             try {
                 val file = recordingStorage.createRecordingFile()
@@ -63,7 +68,6 @@ class RecordViewModel @Inject constructor(
             }
         }
     }
-
 
     private fun stopAndSave() {
         startJob?.cancel()
@@ -89,14 +93,15 @@ class RecordViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val ideaId = repo.createIdeaWithTrack(result.file, result.durationMs)
-                _state.value = _state.value.copy(lastSavedFileName = result.file.name)
-                _effects.emit(RecordEffect.OpenOverview(ideaId))
+                _state.value = _state.value.copy(
+                    postRecording = PostRecordingState(
+                        ideaId = ideaId,
+                        audioFile = result.file
+                    )
+                )
             } catch (e: Exception) {
                 val msg = e.message ?: "Saved audio, but failed to create idea."
-                _state.value = _state.value.copy(
-                    lastSavedFileName = result.file.name,
-                    errorMessage = msg
-                )
+                _state.value = _state.value.copy(errorMessage = msg)
                 _effects.emit(RecordEffect.ShowError(msg))
             }
         }
@@ -109,11 +114,35 @@ class RecordViewModel @Inject constructor(
         startJob = null
 
         val result = recorder.stop()
+        _state.value = _state.value.copy(isRecording = false)
 
-        _state.value = _state.value.copy(
-            isRecording = false,
-            lastSavedFileName = result?.file?.name
-        )
+        if (result != null) {
+            viewModelScope.launch {
+                try {
+                    val ideaId = repo.createIdeaWithTrack(result.file, result.durationMs)
+                    _state.value = _state.value.copy(
+                        postRecording = PostRecordingState(
+                            ideaId = ideaId,
+                            audioFile = result.file
+                        )
+                    )
+                } catch (_: Exception) {
+                    // Best-effort — file is saved on disk even if DB insert fails
+                }
+            }
+        }
+    }
+
+    private fun goToOverview() {
+        val post = _state.value.postRecording ?: return
+        _state.value = RecordUiState() // reset to idle
+        viewModelScope.launch { _effects.emit(RecordEffect.OpenOverview(post.ideaId)) }
+    }
+
+    private fun goToStudio() {
+        val post = _state.value.postRecording ?: return
+        _state.value = RecordUiState() // reset to idle
+        viewModelScope.launch { _effects.emit(RecordEffect.OpenStudio(post.ideaId)) }
     }
 
     override fun onCleared() {

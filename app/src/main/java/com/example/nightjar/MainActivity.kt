@@ -60,6 +60,9 @@ fun NightjarApp() {
                 onOpenLibrary = { navController.navigate(Routes.LIBRARY) },
                 onOpenOverview = { ideaId ->
                     navController.navigate("${Routes.OVERVIEW}/$ideaId")
+                },
+                onOpenStudio = { ideaId ->
+                    navController.navigate("${Routes.STUDIO}/$ideaId")
                 }
             )
         }

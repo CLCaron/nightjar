@@ -3,6 +3,7 @@ package com.example.nightjar.ui.record
 import com.example.nightjar.ui.components.NjPrimaryButton
 import com.example.nightjar.ui.components.NjSecondaryButton
 import com.example.nightjar.ui.components.NjStarfield
+import com.example.nightjar.ui.components.NjWaveform
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -20,8 +21,10 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -60,15 +63,17 @@ import kotlinx.coroutines.flow.collectLatest
 /**
  * Record screen — the app's landing page.
  *
- * Presents a single prominent button to start/stop recording. On save the
- * recording is persisted as an [IdeaEntity] and the user is navigated to
- * the Overview. Handles microphone permission requests and gracefully
- * saves when the app is backgrounded mid-recording.
+ * Presents a single prominent button to start/stop recording. After
+ * stopping, the user stays on this screen and sees a waveform of
+ * what they captured, with options to open Overview, open Studio,
+ * or start a new recording. Handles microphone permission requests
+ * and gracefully saves when the app is backgrounded mid-recording.
  */
 @Composable
 fun RecordScreen(
     onOpenLibrary: () -> Unit,
-    onOpenOverview: (Long) -> Unit
+    onOpenOverview: (Long) -> Unit,
+    onOpenStudio: (Long) -> Unit
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
@@ -95,6 +100,7 @@ fun RecordScreen(
         vm.effects.collectLatest { effect ->
             when (effect) {
                 is RecordEffect.OpenOverview -> onOpenOverview(effect.ideaId)
+                is RecordEffect.OpenStudio -> onOpenStudio(effect.ideaId)
                 is RecordEffect.ShowError -> {
                     snackbarHostState.showSnackbar(
                         message = effect.message,
@@ -174,18 +180,49 @@ fun RecordScreen(
 
                 Spacer(Modifier.height(14.dp))
 
-                Text(
-                    text = if (state.isRecording) "Recording…" else "Record",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f)
-                )
-
-                state.lastSavedFileName?.let { file ->
-                    Spacer(Modifier.height(10.dp))
+                val postRecording = state.postRecording
+                if (state.isRecording) {
                     Text(
-                        text = "Last saved: $file",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+                        text = "Recording\u2026",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f)
+                    )
+                } else if (postRecording != null) {
+                    Text(
+                        text = "Captured audio",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f)
+                    )
+
+                    Spacer(Modifier.height(16.dp))
+
+                    NjWaveform(
+                        audioFile = postRecording.audioFile,
+                        modifier = Modifier
+                            .fillMaxWidth(0.7f)
+                            .padding(horizontal = 8.dp),
+                        height = 48.dp
+                    )
+
+                    Spacer(Modifier.height(20.dp))
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        NjPrimaryButton(
+                            text = "Done",
+                            onClick = { vm.onAction(RecordAction.GoToOverview) }
+                        )
+                        NjSecondaryButton(
+                            text = "Open in Studio",
+                            onClick = { vm.onAction(RecordAction.GoToStudio) }
+                        )
+                    }
+                } else {
+                    Text(
+                        text = "Record",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f)
                     )
                 }
 
