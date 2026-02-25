@@ -3,6 +3,7 @@ package com.example.nightjar.ui.studio
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.nightjar.audio.AudioLatencyEstimator
 import com.example.nightjar.audio.WavRecorder
 import com.example.nightjar.data.repository.StudioRepository
 import com.example.nightjar.data.repository.IdeaRepository
@@ -41,7 +42,8 @@ class StudioViewModel @Inject constructor(
     private val studioRepo: StudioRepository,
     private val playbackManager: StudioPlaybackManager,
     private val wavRecorder: WavRecorder,
-    private val recordingStorage: RecordingStorage
+    private val recordingStorage: RecordingStorage,
+    private val latencyEstimator: AudioLatencyEstimator
 ) : ViewModel() {
 
     private var currentIdeaId: Long? = null
@@ -60,6 +62,7 @@ class StudioViewModel @Inject constructor(
 
     private var recordingStartGlobalMs: Long = 0L
     private var recordingStartNanos: Long = 0L
+    private var recordingTrimStartMs: Long = 0L
     private var recordingTickJob: Job? = null
     private var recordingFile: File? = null
 
@@ -153,6 +156,29 @@ class StudioViewModel @Inject constructor(
             StudioAction.ToggleLoop -> toggleLoop()
             is StudioAction.UpdateLoopRegionStart -> updateLoopRegionStart(action.startMs)
             is StudioAction.UpdateLoopRegionEnd -> updateLoopRegionEnd(action.endMs)
+
+            // Latency setup
+            StudioAction.ShowLatencySetup -> {
+                val diagnostics = latencyEstimator.getDiagnostics()
+                _state.update {
+                    it.copy(
+                        showLatencySetupDialog = true,
+                        latencyDiagnostics = diagnostics,
+                        manualOffsetMs = diagnostics.manualOffsetMs
+                    )
+                }
+            }
+            StudioAction.DismissLatencySetup -> {
+                _state.update { it.copy(showLatencySetupDialog = false) }
+            }
+            is StudioAction.SetManualOffset -> {
+                latencyEstimator.saveManualOffsetMs(action.offsetMs)
+                _state.update { it.copy(manualOffsetMs = action.offsetMs) }
+            }
+            StudioAction.ClearManualOffset -> {
+                latencyEstimator.clearManualOffset()
+                _state.update { it.copy(manualOffsetMs = 0L) }
+            }
         }
     }
 
@@ -209,27 +235,36 @@ class StudioViewModel @Inject constructor(
                 // startup latency shifts the clock forward.
                 val intendedStartMs = playbackManager.globalPositionMs.value
 
+                // ── Pre-roll capture protocol ────────────────────────────
+                // 1. Start AudioRecord and wait for pipeline to become hot
                 wavRecorder.start(file)
-
-                // Wait for the audio pipeline to deliver its first buffer,
-                // confirming the mic is actually capturing. Buffers read
-                // before markWriting() are discarded to avoid pre-roll desync.
                 wavRecorder.awaitFirstBuffer()
 
-                // Start playback, then wait for ExoPlayer to actually render
-                // audio to the speaker. awaitPlaybackRendering() resets the
-                // monotonic clock when rendering is confirmed, eliminating
-                // startup latency from the timeline position.
+                // 2. Open write gate BEFORE playback — captures pre-roll
+                //    silence that serves as a safety buffer for compensation
+                wavRecorder.markWriting()
+                val writeGateNanos = System.nanoTime()
+
+                // 3. Start playback and await rendering
+                val hasPlayableTracks = _state.value.tracks.any { !it.isMuted }
                 playbackManager.setRecording(true)
                 playbackManager.play()
                 playbackManager.awaitPlaybackRendering()
 
-                // Open the write gate — the WAV captures from the moment
-                // playback is audible. Use the intended start position
-                // (before startup latency), not the clock position.
-                wavRecorder.markWriting()
+                // 4. Measure pre-roll and compute total compensation
+                val preRollMs = (System.nanoTime() - writeGateNanos) / 1_000_000L
+                val compensation = latencyEstimator.computeCompensationMs(
+                    preRollMs = preRollMs,
+                    hasPlayableTracks = hasPlayableTracks
+                )
+
                 recordingStartGlobalMs = intendedStartMs
+                recordingTrimStartMs = compensation
                 recordingStartNanos = System.nanoTime()
+
+                Log.d(TAG, "Overdub started: intendedStart=${intendedStartMs}ms, " +
+                    "preRoll=${preRollMs}ms, compensation=${compensation}ms, " +
+                    "hasPlayableTracks=$hasPlayableTracks")
 
                 _state.update {
                     it.copy(isRecording = true, recordingElapsedMs = 0L)
@@ -259,8 +294,6 @@ class StudioViewModel @Inject constructor(
         recordingTickJob = null
 
         val result = wavRecorder.stop()
-        Log.d(TAG, "Recording stopped: file=${result?.file?.name}, " +
-            "durationMs=${result?.durationMs}, offsetMs=$recordingStartGlobalMs")
 
         _state.update { it.copy(isRecording = false, recordingElapsedMs = 0L) }
 
@@ -271,13 +304,23 @@ class StudioViewModel @Inject constructor(
             return
         }
 
+        // Clamp trimStartMs so it never exceeds what would leave less than
+        // MIN_EFFECTIVE_DURATION_MS of audible audio.
+        val maxTrim = (result.durationMs - MIN_EFFECTIVE_DURATION_MS).coerceAtLeast(0L)
+        val safeTrimStartMs = recordingTrimStartMs.coerceIn(0L, maxTrim)
+
+        Log.d(TAG, "Recording stopped: file=${result.file.name}, " +
+            "durationMs=${result.durationMs}, offsetMs=$recordingStartGlobalMs, " +
+            "trimStartMs=$safeTrimStartMs (raw=${recordingTrimStartMs})")
+
         viewModelScope.launch {
             try {
                 studioRepo.addTrack(
                     ideaId = ideaId,
                     audioFile = result.file,
                     durationMs = result.durationMs,
-                    offsetMs = recordingStartGlobalMs
+                    offsetMs = recordingStartGlobalMs,
+                    trimStartMs = safeTrimStartMs
                 )
 
                 reloadAndPrepare()

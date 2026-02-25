@@ -1,5 +1,6 @@
 package com.example.nightjar.ui.studio
 
+import com.example.nightjar.audio.AudioLatencyEstimator
 import com.example.nightjar.data.db.entity.TrackEntity
 
 /** UI state for the Studio (multi-track workspace) screen. */
@@ -21,7 +22,10 @@ data class StudioUiState(
     val settingsTrackId: Long? = null,
     val loopStartMs: Long? = null,
     val loopEndMs: Long? = null,
-    val isLoopEnabled: Boolean = false
+    val isLoopEnabled: Boolean = false,
+    val showLatencySetupDialog: Boolean = false,
+    val latencyDiagnostics: AudioLatencyEstimator.LatencyDiagnostics? = null,
+    val manualOffsetMs: Long = 0L
 ) {
     val hasLoopRegion: Boolean get() = loopStartMs != null && loopEndMs != null
 }
@@ -72,6 +76,12 @@ sealed interface StudioAction {
     data object ToggleLoop : StudioAction
     data class UpdateLoopRegionStart(val startMs: Long) : StudioAction
     data class UpdateLoopRegionEnd(val endMs: Long) : StudioAction
+
+    // Latency setup
+    data object ShowLatencySetup : StudioAction
+    data object DismissLatencySetup : StudioAction
+    data class SetManualOffset(val offsetMs: Long) : StudioAction
+    data object ClearManualOffset : StudioAction
 }
 
 /** One-shot side effects emitted by [StudioViewModel]. */

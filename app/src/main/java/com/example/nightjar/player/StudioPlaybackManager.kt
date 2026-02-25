@@ -13,6 +13,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import android.util.Log
 import java.io.File
 import javax.inject.Inject
 
@@ -93,15 +94,32 @@ class StudioPlaybackManager @Inject constructor(
     /**
      * Suspends until at least one non-muted ExoPlayer slot reports
      * [ExoPlayer.isPlaying] == true, meaning audio is actually being
-     * rendered to the speaker. Returns the global playback position at
-     * that moment.
+     * rendered to the speaker.
      *
-     * Falls through immediately if no eligible slots exist, or after
-     * [timeoutMs] to avoid hanging indefinitely.
+     * Returns a [RenderingResult] with the global position and whether
+     * rendering was confirmed. When no slot would start immediately at
+     * the current clock position (e.g., all tracks have offsetMs > playhead),
+     * returns early with [RenderingResult.renderingConfirmed] = false instead
+     * of waiting for the full timeout — this fixes the ~2s offset bug.
      */
-    suspend fun awaitPlaybackRendering(timeoutMs: Long = 2_000L): Long {
+    suspend fun awaitPlaybackRendering(timeoutMs: Long = 2_000L): RenderingResult {
         val hasEligibleSlot = slots.any { !it.track.isMuted }
-        if (!hasEligibleSlot) return _globalPositionMs.value
+        if (!hasEligibleSlot) {
+            return RenderingResult(_globalPositionMs.value, renderingConfirmed = false)
+        }
+
+        // Check if any non-muted slot would be actively playing right now.
+        // If all tracks start later (offsetMs > clockBaseMs), no ExoPlayer
+        // will report isPlaying — waiting would just burn the full timeout.
+        val hasImmediateSlot = slots.any { slot ->
+            if (slot.track.isMuted) return@any false
+            val localMs = clockBaseMs - slot.track.offsetMs
+            localMs in 0 until slot.effectiveDuration
+        }
+        if (!hasImmediateSlot) {
+            Log.d(TAG, "awaitPlaybackRendering: no immediate slot at ${clockBaseMs}ms, skipping wait")
+            return RenderingResult(clockBaseMs, renderingConfirmed = false)
+        }
 
         val deadline = System.nanoTime() + timeoutMs * 1_000_000L
         while (System.nanoTime() < deadline) {
@@ -112,12 +130,13 @@ class StudioPlaybackManager @Inject constructor(
                 // to be offset from their intended start position.
                 clockStartNanos = System.nanoTime()
                 _globalPositionMs.value = clockBaseMs
-                return clockBaseMs
+                return RenderingResult(clockBaseMs, renderingConfirmed = true)
             }
             delay(5L)
         }
         // Timed out — return best-effort position.
-        return _globalPositionMs.value
+        Log.w(TAG, "awaitPlaybackRendering: timed out after ${timeoutMs}ms")
+        return RenderingResult(_globalPositionMs.value, renderingConfirmed = false)
     }
 
     /**
@@ -391,4 +410,14 @@ class StudioPlaybackManager @Inject constructor(
         val effectiveDuration: Long,
         val audioFile: File
     )
+
+    companion object {
+        private const val TAG = "StudioPlaybackMgr"
+    }
 }
+
+/** Result of [StudioPlaybackManager.awaitPlaybackRendering]. */
+data class RenderingResult(
+    val globalPositionMs: Long,
+    val renderingConfirmed: Boolean
+)
