@@ -50,6 +50,8 @@ class RecordViewModel @Inject constructor(
             RecordAction.StopForBackground -> stopForBackground()
             RecordAction.GoToOverview -> goToOverview()
             RecordAction.GoToStudio -> goToStudio()
+            RecordAction.CreateWriteIdea -> createWriteIdea()
+            RecordAction.CreateStudioIdea -> createStudioIdea()
         }
     }
 
@@ -171,6 +173,30 @@ class RecordViewModel @Inject constructor(
         val post = _state.value.postRecording ?: return
         _state.value = RecordUiState() // reset to idle
         viewModelScope.launch { _effects.emit(RecordEffect.OpenStudio(post.ideaId)) }
+    }
+
+    private fun createWriteIdea() {
+        viewModelScope.launch {
+            try {
+                val ideaId = repo.createEmptyIdea()
+                _effects.emit(RecordEffect.OpenOverview(ideaId))
+            } catch (e: Exception) {
+                val msg = e.message ?: "Failed to create idea."
+                _effects.emit(RecordEffect.ShowError(msg))
+            }
+        }
+    }
+
+    private fun createStudioIdea() {
+        viewModelScope.launch {
+            try {
+                val ideaId = repo.createEmptyIdea()
+                _effects.emit(RecordEffect.OpenStudio(ideaId))
+            } catch (e: Exception) {
+                val msg = e.message ?: "Failed to create idea."
+                _effects.emit(RecordEffect.ShowError(msg))
+            }
+        }
     }
 
     override fun onCleared() {

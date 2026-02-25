@@ -257,6 +257,21 @@ fun RecordScreen(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f)
                     )
+
+                    Spacer(Modifier.height(20.dp))
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        NjSecondaryButton(
+                            text = "Write",
+                            onClick = { vm.onAction(RecordAction.CreateWriteIdea) }
+                        )
+                        NjSecondaryButton(
+                            text = "Studio",
+                            onClick = { vm.onAction(RecordAction.CreateStudioIdea) }
+                        )
+                    }
                 }
 
                 Spacer(Modifier.height(26.dp))

@@ -43,6 +43,10 @@ sealed interface RecordAction {
     data object GoToOverview : RecordAction
     /** Navigate to Studio for the captured idea. */
     data object GoToStudio : RecordAction
+    /** Create an empty idea and open Overview for notes/title entry. */
+    data object CreateWriteIdea : RecordAction
+    /** Create an empty idea and open Studio directly. */
+    data object CreateStudioIdea : RecordAction
 }
 
 /** One-shot side effects emitted by [RecordViewModel]. */
