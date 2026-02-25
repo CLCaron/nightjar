@@ -7,8 +7,8 @@ val NjBg = Color(0xFF090E1C)          // warm near-black
 val NjSurface = Color(0xFF0E1420)          // base surface
 val NjSurface2 = Color(0xFF141A28)          // elevated surface
 
-val NjPrimary = Color(0xFF767EB2)          // dusty lavender
-val NjPrimary2 = Color(0xFF939AC8)          // soft secondary lavender
+val NjPrimary = Color(0xFF4A6A8F)          // deep steel blue — buttons, accents
+val NjPrimary2 = Color(0xFF5C7DA0)          // muted steel blue — secondary accent
 
 val NjAccent = Color(0xFFC9A96E)          // muted gold — record button, active states
 
