@@ -28,11 +28,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -40,10 +42,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.platform.ViewConfiguration
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -58,6 +63,7 @@ import com.example.nightjar.ui.theme.NjStarlight
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import java.io.File
+import kotlin.math.abs
 
 // ── Layout constants ────────────────────────────────────────────────────
 private val HEADER_WIDTH = 100.dp
@@ -67,6 +73,7 @@ private val TIMELINE_END_PADDING_DP = 120.dp
 private const val MIN_EFFECTIVE_DURATION_MS = 200L
 private val TRIM_HANDLE_WIDTH = 12.dp
 private val TRIM_TOUCH_ZONE = 36.dp
+private const val FAST_LONG_PRESS_MS = 200L
 
 /**
  * The main timeline UI — a horizontally scrollable panel showing a time
@@ -85,6 +92,9 @@ fun TimelinePanel(
     isPlaying: Boolean,
     dragState: TrackDragState?,
     trimState: TrackTrimState?,
+    loopStartMs: Long?,
+    loopEndMs: Long?,
+    isLoopEnabled: Boolean,
     getAudioFile: (String) -> File,
     onAction: (StudioAction) -> Unit,
     modifier: Modifier = Modifier
@@ -158,6 +168,29 @@ fun TimelinePanel(
                 }
             }
 
+            // Loop region overlay — visual only (fill, borders, triangle handles)
+            if (loopStartMs != null && loopEndMs != null) {
+                LoopRegionOverlay(
+                    loopStartMs = loopStartMs,
+                    loopEndMs = loopEndMs,
+                    isLoopEnabled = isLoopEnabled,
+                    msPerDp = msPerDp,
+                    height = RULER_HEIGHT + totalTrackHeight
+                )
+            }
+
+            // Loop gesture layer — confined to the ruler area so it never
+            // blocks track lane gestures (trim, drag). Handles both creating
+            // new regions and adjusting existing handles via the triangles.
+            LoopRulerGestureLayer(
+                loopStartMs = loopStartMs,
+                loopEndMs = loopEndMs,
+                msPerDp = msPerDp,
+                totalDurationMs = totalDurationMs,
+                timelineWidth = timelineWidthDp,
+                onAction = onAction
+            )
+
             // Playhead spans from ruler top to bottom of last track
             PlayheadLine(
                 globalPositionMs = globalPositionMs,
@@ -189,8 +222,6 @@ private fun TimeRuler(
     ) {
         val totalMs = totalDurationMs.coerceAtLeast(1L)
 
-        // Convert milliseconds → pixel x-position.
-        // dp = ms / msPerDp, px = dp * density
         fun msToX(ms: Long): Float = (ms / msPerDp) * density
 
         val tickIntervalMs = 1000L
@@ -286,6 +317,15 @@ private fun TimelineTrackLane(
     // Accumulated drag offset in px for the body drag gesture
     var dragAccumulatedPx by remember { mutableFloatStateOf(0f) }
 
+    // Faster long-press for track drag — 200ms instead of the default 400ms.
+    val baseViewConfig = LocalViewConfiguration.current
+    val fastViewConfig = remember(baseViewConfig) {
+        object : ViewConfiguration by baseViewConfig {
+            override val longPressTimeoutMillis: Long get() = FAST_LONG_PRESS_MS
+        }
+    }
+
+    CompositionLocalProvider(LocalViewConfiguration provides fastViewConfig) {
     Box(
         modifier = Modifier
             .width(timelineWidth)
@@ -439,6 +479,7 @@ private fun TimelineTrackLane(
             )
         }
     }
+    } // CompositionLocalProvider
 }
 
 /** Visual trim-handle indicator on the left or right edge of a track. */
@@ -543,6 +584,174 @@ fun TimelinePlaceholder(message: String) {
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
         )
     }
+}
+
+/**
+ * Visual-only loop region overlay — gold fill, boundary lines, and
+ * corner triangle handles. All gesture handling lives in [LoopGestureLayer].
+ */
+@Composable
+private fun LoopRegionOverlay(
+    loopStartMs: Long,
+    loopEndMs: Long,
+    isLoopEnabled: Boolean,
+    msPerDp: Float,
+    height: Dp
+) {
+    val startDp = (loopStartMs / msPerDp).dp
+    val regionWidthDp = ((loopEndMs - loopStartMs) / msPerDp).dp
+    val fillAlpha = if (isLoopEnabled) 0.08f else 0.04f
+    val borderAlpha = if (isLoopEnabled) 0.35f else 0.15f
+    val handleAlpha = if (isLoopEnabled) 0.7f else 0.35f
+
+    Box(
+        modifier = Modifier
+            .offset(x = startDp)
+            .width(regionWidthDp)
+            .height(height)
+    ) {
+        // Semi-transparent gold fill
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .background(NjAccent.copy(alpha = fillAlpha))
+        )
+
+        // Left boundary line
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .width(2.dp)
+                .fillMaxHeight()
+                .background(NjAccent.copy(alpha = borderAlpha))
+        )
+
+        // Right boundary line
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .width(2.dp)
+                .fillMaxHeight()
+                .background(NjAccent.copy(alpha = borderAlpha))
+        )
+
+        // Triangle handle indicators at the top corners
+        Canvas(modifier = Modifier.matchParentSize()) {
+            val triW = 10.dp.toPx()
+            val triH = 8.dp.toPx()
+            val handleColor = NjAccent.copy(alpha = handleAlpha)
+
+            // Left corner triangle — points inward and down
+            val leftPath = Path().apply {
+                moveTo(0f, 0f)
+                lineTo(triW, 0f)
+                lineTo(0f, triH)
+                close()
+            }
+            drawPath(leftPath, handleColor)
+
+            // Right corner triangle — points inward and down
+            val rightPath = Path().apply {
+                moveTo(size.width, 0f)
+                lineTo(size.width - triW, 0f)
+                lineTo(size.width, triH)
+                close()
+            }
+            drawPath(rightPath, handleColor)
+        }
+    }
+}
+
+/** Drag mode for the loop ruler gesture layer. */
+private enum class LoopDragMode { NEW_SELECTION, ADJUST_START, ADJUST_END }
+
+/**
+ * Ruler-height gesture layer for all loop interactions. Confined to
+ * [RULER_HEIGHT] so it never overlaps track lanes — trim, drag, and
+ * scroll gestures below the ruler work unimpeded.
+ *
+ * - Touch near a loop handle triangle → drag that edge
+ * - Touch elsewhere on the ruler → drag to create a new region
+ */
+@Composable
+private fun LoopRulerGestureLayer(
+    loopStartMs: Long?,
+    loopEndMs: Long?,
+    msPerDp: Float,
+    totalDurationMs: Long,
+    timelineWidth: Dp,
+    onAction: (StudioAction) -> Unit
+) {
+    val density = LocalDensity.current
+    val currentStartMs by rememberUpdatedState(loopStartMs)
+    val currentEndMs by rememberUpdatedState(loopEndMs)
+    val currentTotalMs by rememberUpdatedState(totalDurationMs)
+    val currentOnAction by rememberUpdatedState(onAction)
+
+    Box(
+        modifier = Modifier
+            .width(timelineWidth)
+            .height(RULER_HEIGHT)
+            .pointerInput(msPerDp) {
+                val handleHitZonePx = 32.dp.toPx()
+
+                fun pxToMs(px: Float): Long =
+                    ((px / density.density) * msPerDp).toLong()
+                        .coerceIn(0L, currentTotalMs)
+
+                fun msToPx(ms: Long): Float =
+                    (ms / msPerDp) * density.density
+
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    down.consume()
+                    val touchX = down.position.x
+
+                    val sMs = currentStartMs
+                    val eMs = currentEndMs
+                    val hasRegion = sMs != null && eMs != null
+                    val startPx = if (hasRegion) msToPx(sMs!!) else 0f
+                    val endPx = if (hasRegion) msToPx(eMs!!) else 0f
+
+                    val nearStart = hasRegion &&
+                            abs(touchX - startPx) <= handleHitZonePx
+                    val nearEnd = hasRegion &&
+                            abs(touchX - endPx) <= handleHitZonePx
+
+                    val dragMode = when {
+                        nearStart && nearEnd -> {
+                            if (abs(touchX - startPx) <= abs(touchX - endPx))
+                                LoopDragMode.ADJUST_START else LoopDragMode.ADJUST_END
+                        }
+                        nearStart -> LoopDragMode.ADJUST_START
+                        nearEnd -> LoopDragMode.ADJUST_END
+                        else -> LoopDragMode.NEW_SELECTION
+                    }
+
+                    val slop = awaitHorizontalTouchSlopOrCancellation(down.id) { change, _ ->
+                        change.consume()
+                    }
+                    if (slop != null) {
+                        val anchorMs = pxToMs(down.position.x)
+                        horizontalDrag(slop.id) { change ->
+                            change.consume()
+                            val fingerMs = pxToMs(change.position.x)
+                            when (dragMode) {
+                                LoopDragMode.ADJUST_START ->
+                                    currentOnAction(StudioAction.UpdateLoopRegionStart(fingerMs))
+                                LoopDragMode.ADJUST_END ->
+                                    currentOnAction(StudioAction.UpdateLoopRegionEnd(fingerMs))
+                                LoopDragMode.NEW_SELECTION -> {
+                                    val leftMs = minOf(anchorMs, fingerMs)
+                                    val rightMs = maxOf(anchorMs, fingerMs)
+                                    currentOnAction(StudioAction.SetLoopRegion(leftMs, rightMs))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+    )
 }
 
 /** Vertical white line indicating the current playback position on the timeline. */

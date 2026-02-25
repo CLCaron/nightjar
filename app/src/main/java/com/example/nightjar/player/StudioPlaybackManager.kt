@@ -49,6 +49,10 @@ class StudioPlaybackManager @Inject constructor(
     /** True while the ViewModel is recording an overdub. */
     private var isRecording = false
 
+    /** Loop region boundaries — null when no loop is set. */
+    private var loopStartMs: Long? = null
+    private var loopEndMs: Long? = null
+
     /** Nanosecond timestamp when [play] was last called. */
     private var clockStartNanos: Long = 0L
 
@@ -72,6 +76,18 @@ class StudioPlaybackManager @Inject constructor(
      */
     fun setRecording(active: Boolean) {
         isRecording = active
+    }
+
+    /** Set the loop region boundaries. */
+    fun setLoopRegion(startMs: Long, endMs: Long) {
+        loopStartMs = startMs
+        loopEndMs = endMs
+    }
+
+    /** Clear the loop region — playback will no longer loop. */
+    fun clearLoopRegion() {
+        loopStartMs = null
+        loopEndMs = null
     }
 
     /**
@@ -153,8 +169,12 @@ class StudioPlaybackManager @Inject constructor(
 
         val globalMs = _globalPositionMs.value.coerceIn(0L, _totalDurationMs.value)
 
-        // If we were at the end, restart from 0.
-        val startMs = if (globalMs >= _totalDurationMs.value) 0L else globalMs
+        // If we were at the end, restart from loop start (if looping) or 0.
+        val startMs = when {
+            globalMs >= _totalDurationMs.value && loopStartMs != null -> loopStartMs!!
+            globalMs >= _totalDurationMs.value -> 0L
+            else -> globalMs
+        }
 
         clockBaseMs = startMs
         clockStartNanos = System.nanoTime()
@@ -264,6 +284,16 @@ class StudioPlaybackManager @Inject constructor(
                 val pos = currentClockMs()
                 _globalPositionMs.value = pos
 
+                // Loop check — jump back before the end-of-timeline check
+                val lEnd = loopEndMs
+                val lStart = loopStartMs
+                if (lEnd != null && lStart != null && pos >= lEnd) {
+                    performLoopSeek(lStart)
+                    _globalPositionMs.value = lStart
+                    delay(16L)
+                    continue
+                }
+
                 if (pos >= _totalDurationMs.value) {
                     if (isRecording) {
                         // Recording is active — let the playhead keep advancing
@@ -282,6 +312,43 @@ class StudioPlaybackManager @Inject constructor(
                 }
 
                 delay(16L) // ~60 fps playhead refresh
+            }
+        }
+    }
+
+    /**
+     * Seek all players to [globalMs] without stopping playback.
+     * Resets the monotonic clock and repositions every non-muted slot
+     * so the loop transition is tight (~16ms max latency).
+     */
+    private fun performLoopSeek(globalMs: Long) {
+        cancelDelayedJobs()
+        clockBaseMs = globalMs
+        clockStartNanos = System.nanoTime()
+        clockSynced = false
+
+        for (slot in slots) {
+            if (slot.track.isMuted) continue
+            val localMs = globalMs - slot.track.offsetMs
+            when {
+                localMs >= slot.effectiveDuration -> slot.player.pause()
+                localMs >= 0 -> {
+                    slot.player.seekTo(localMs)
+                    slot.player.play()
+                }
+                else -> {
+                    slot.player.pause()
+                    slot.player.seekTo(0L)
+                    val delayMs = -localMs
+                    val job = scope.launch {
+                        delay(delayMs)
+                        if (_isPlaying.value) {
+                            slot.player.seekTo(0L)
+                            slot.player.play()
+                        }
+                    }
+                    delayedStartJobs.add(job)
+                }
             }
         }
     }

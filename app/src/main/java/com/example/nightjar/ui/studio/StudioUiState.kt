@@ -18,8 +18,13 @@ data class StudioUiState(
     val dragState: TrackDragState? = null,
     val trimState: TrackTrimState? = null,
     val confirmingDeleteTrackId: Long? = null,
-    val settingsTrackId: Long? = null
-)
+    val settingsTrackId: Long? = null,
+    val loopStartMs: Long? = null,
+    val loopEndMs: Long? = null,
+    val isLoopEnabled: Boolean = false
+) {
+    val hasLoopRegion: Boolean get() = loopStartMs != null && loopEndMs != null
+}
 
 /** User-initiated actions on the Studio screen. */
 sealed interface StudioAction {
@@ -60,6 +65,13 @@ sealed interface StudioAction {
     data object DismissTrackSettings : StudioAction
     data class SetTrackMuted(val trackId: Long, val muted: Boolean) : StudioAction
     data class SetTrackVolume(val trackId: Long, val volume: Float) : StudioAction
+
+    // Loop
+    data class SetLoopRegion(val startMs: Long, val endMs: Long) : StudioAction
+    data object ClearLoopRegion : StudioAction
+    data object ToggleLoop : StudioAction
+    data class UpdateLoopRegionStart(val startMs: Long) : StudioAction
+    data class UpdateLoopRegionEnd(val endMs: Long) : StudioAction
 }
 
 /** One-shot side effects emitted by [StudioViewModel]. */
