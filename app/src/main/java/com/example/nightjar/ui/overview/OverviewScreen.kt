@@ -16,7 +16,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -277,10 +276,6 @@ fun OverviewScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                val quietColors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
-                )
                 NjPrimaryButton(
                     text = if (isPlaying) "Pause" else "Play",
                     onClick = {
@@ -290,9 +285,8 @@ fun OverviewScreen(
                             vm.onAction(OverviewAction.Play)
                         }
                     },
-                    modifier = Modifier.fillMaxWidth(),
-                    fullWidth = true,
-                    colors = quietColors
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
                 )
             }
 
@@ -350,10 +344,8 @@ fun OverviewScreen(
                     newTagText = ""
                     vm.onAction(OverviewAction.AddTagsFromInput(text))
                 },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
-                )
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
             )
 
             Spacer(Modifier.height(96.dp))

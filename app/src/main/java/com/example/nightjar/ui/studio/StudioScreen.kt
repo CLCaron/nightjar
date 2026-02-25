@@ -1,6 +1,5 @@
 package com.example.nightjar.ui.studio
 
-import androidx.compose.material3.ButtonDefaults
 import com.example.nightjar.ui.components.NjPrimaryButton
 import com.example.nightjar.ui.components.NjSectionTitle
 import android.Manifest
@@ -190,12 +189,9 @@ fun StudioScreen(
                                 vm.onAction(StudioAction.Play)
                             }
                         },
-                        fullWidth = false,
                         minHeight = 36.dp,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
-                        )
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
                     )
                 }
             }
