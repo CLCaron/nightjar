@@ -1,10 +1,13 @@
 package com.example.nightjar.ui.theme
 
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import com.example.nightjar.ui.components.NjStarTouchIndication
 
 private val DarkColorScheme = darkColorScheme(
     primary = NjPrimary,
@@ -43,7 +46,11 @@ fun NightjarTheme(
 
     MaterialTheme(
         colorScheme = colorScheme,
-        typography = Typography,
-        content = content
-    )
+        typography = Typography
+    ) {
+        CompositionLocalProvider(
+            LocalIndication provides NjStarTouchIndication,
+            content = content
+        )
+    }
 }

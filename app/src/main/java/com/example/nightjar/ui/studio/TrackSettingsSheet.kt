@@ -1,6 +1,7 @@
 package com.example.nightjar.ui.studio
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -90,7 +91,7 @@ fun TrackSettingsSheet(
                     .fillMaxWidth()
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
+                        indication = LocalIndication.current,
                         role = Role.Switch,
                         onClick = {
                             onAction(StudioAction.SetTrackMuted(track.id, !track.isMuted))
@@ -122,7 +123,7 @@ fun TrackSettingsSheet(
                     .fillMaxWidth()
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
+                        indication = LocalIndication.current,
                         onClick = {
                             onDismiss()
                             onAction(StudioAction.ConfirmDeleteTrack(track.id))

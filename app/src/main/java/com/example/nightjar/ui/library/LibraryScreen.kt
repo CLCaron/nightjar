@@ -1,6 +1,10 @@
 package com.example.nightjar.ui.library
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import com.example.nightjar.ui.components.collectIsPressedWithMinDuration
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,7 +15,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -28,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.nightjar.data.db.entity.IdeaEntity
 import com.example.nightjar.ui.components.NjSelectableChip
+import com.example.nightjar.ui.components.njBevel
 import com.example.nightjar.ui.components.NjStarburst
 import com.example.nightjar.ui.components.NjTopBar
 import com.example.nightjar.ui.library.LibraryViewModel
@@ -43,16 +47,18 @@ private fun IdeaRow(
     durationMs: Long?,
     onClick: () -> Unit
 ) {
-    Card(
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedWithMinDuration()
+
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 6.dp)
-            .clickable(onClick = onClick),
-        colors = androidx.compose.material3.CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f)
-        )
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f))
+            .njBevel(isPressed)
+            .clickable(interactionSource = interactionSource, indication = LocalIndication.current, onClick = onClick)
+            .padding(12.dp)
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = idea.title,
@@ -85,7 +91,6 @@ private fun IdeaRow(
                     )
                 }
             }
-        }
     }
 }
 

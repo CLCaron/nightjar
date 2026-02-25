@@ -160,6 +160,7 @@ fun RecordScreen(
                 NjPrimaryButton(
                     text = "Enable microphone",
                     onClick = { requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
+                    fullWidth = true,
                     minHeight = 56.dp
                 )
             } else {
