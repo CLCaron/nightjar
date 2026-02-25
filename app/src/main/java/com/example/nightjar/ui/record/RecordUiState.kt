@@ -11,9 +11,27 @@ data class PostRecordingState(
 /** UI state for the Record screen. */
 data class RecordUiState(
     val isRecording: Boolean = false,
+    val liveAmplitudes: FloatArray = FloatArray(0),
     val postRecording: PostRecordingState? = null,
     val errorMessage: String? = null
-)
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is RecordUiState) return false
+        return isRecording == other.isRecording &&
+                liveAmplitudes.contentEquals(other.liveAmplitudes) &&
+                postRecording == other.postRecording &&
+                errorMessage == other.errorMessage
+    }
+
+    override fun hashCode(): Int {
+        var result = isRecording.hashCode()
+        result = 31 * result + liveAmplitudes.contentHashCode()
+        result = 31 * result + (postRecording?.hashCode() ?: 0)
+        result = 31 * result + (errorMessage?.hashCode() ?: 0)
+        return result
+    }
+}
 
 /** User-initiated actions on the Record screen. */
 sealed interface RecordAction {

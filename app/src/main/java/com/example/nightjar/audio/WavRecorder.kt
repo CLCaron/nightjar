@@ -40,11 +40,21 @@ class WavRecorder @Inject constructor() {
     private var totalBytesWritten: Long = 0L
     private var firstBufferSignal: CompletableDeferred<Unit>? = null
 
+    /**
+     * Peak amplitude of the most recently read PCM buffer, normalised to 0–1.
+     * Updated on the IO thread, polled from the UI via ViewModel ticker.
+     * Zero-allocation, thread-safe via volatile.
+     */
+    @Volatile
+    var latestPeakAmplitude: Float = 0f
+        private set
+
     fun start(file: File) {
         if (isRecordingFlag.getAndSet(true)) return
 
         outputFile = file
         totalBytesWritten = 0L
+        latestPeakAmplitude = 0f
         isWritingFlag.set(false)
 
         val signal = CompletableDeferred<Unit>()
@@ -92,6 +102,7 @@ class WavRecorder @Inject constructor() {
                 while (isRecordingFlag.get()) {
                     val read = recorder.read(buffer, 0, buffer.size)
                     if (read > 0) {
+                        latestPeakAmplitude = computePeakAmplitude(buffer, read)
                         if (!pipelineHot) {
                             pipelineHot = true
                             Log.d(TAG, "Pipeline hot — first buffer ${read}B")
@@ -137,6 +148,7 @@ class WavRecorder @Inject constructor() {
         audioRecord?.stop()
         audioRecord?.release()
         audioRecord = null
+        latestPeakAmplitude = 0f
 
         val file = outputFile ?: return null
         outputFile = null
@@ -165,6 +177,19 @@ class WavRecorder @Inject constructor() {
             audioRecord?.release()
             audioRecord = null
         }
+    }
+
+    private fun computePeakAmplitude(buffer: ByteArray, byteCount: Int): Float {
+        var peak = 0
+        for (i in 0 until byteCount / 2) {
+            val offset = i * 2
+            val sample = (buffer[offset].toInt() and 0xFF) or
+                    (buffer[offset + 1].toInt() shl 8)
+            val signed = if (sample > 32767) sample - 65536 else sample
+            val abs = if (signed < 0) -signed else signed
+            if (abs > peak) peak = abs
+        }
+        return peak / 32768f
     }
 
     private fun patchWavHeader(file: File, dataSize: Long) {
