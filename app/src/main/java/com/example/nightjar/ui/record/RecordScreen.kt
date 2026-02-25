@@ -1,5 +1,6 @@
 package com.example.nightjar.ui.record
 
+import com.example.nightjar.ui.components.NjLiveWaveform
 import com.example.nightjar.ui.components.NjPrimaryButton
 import com.example.nightjar.ui.components.NjSecondaryButton
 import com.example.nightjar.ui.components.NjStarfield
@@ -186,6 +187,38 @@ fun RecordScreen(
                         text = "Recording\u2026",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f)
+                    )
+
+                    if (state.liveAmplitudes.isNotEmpty()) {
+                        Spacer(Modifier.height(16.dp))
+
+                        NjLiveWaveform(
+                            amplitudes = state.liveAmplitudes,
+                            modifier = Modifier
+                                .fillMaxWidth(0.7f)
+                                .padding(horizontal = 8.dp),
+                            height = 48.dp
+                        )
+                    }
+                } else if (!state.isRecording && postRecording == null &&
+                    state.liveAmplitudes.isNotEmpty()
+                ) {
+                    // Transitional state: recording just stopped, DB save in progress.
+                    // Show frozen live waveform as a visual bridge.
+                    Text(
+                        text = "Saving\u2026",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f)
+                    )
+
+                    Spacer(Modifier.height(16.dp))
+
+                    NjLiveWaveform(
+                        amplitudes = state.liveAmplitudes,
+                        modifier = Modifier
+                            .fillMaxWidth(0.7f)
+                            .padding(horizontal = 8.dp),
+                        height = 48.dp
                     )
                 } else if (postRecording != null) {
                     Text(
