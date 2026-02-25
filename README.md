@@ -1,75 +1,76 @@
 # Nightjar
 
-**Nightjar** is a zero-friction audio capture app for Android, built for musicians, songwriters, and anyone who needs to catch an idea before it's gone.
+Ideas don't wait. They show up in the middle of the night, in the shower, between conversations — and they leave just as fast. **Nightjar** is a zero-friction idea capture app for Android, built for musicians, songwriters, and anyone whose best ideas arrive at the worst times.
 
-Open the app. Hit record. That's it.
+Sing it. Say it. Write it down. Build it up. However the idea comes, Nightjar catches it — and gives you a place to develop it before you ever open a DAW.
 
-When you're ready, come back to title it, tag it, take notes, and — when inspiration strikes — layer new recordings on top in a lightweight multi-track studio.
+Named after a nocturnal songbird, this app is designed around late-night creativity but there for you any time of day.
 
 ---
 
-## Screens
+## How it works
 
-### Record
-The app opens straight to recording. One tap to start, one tap to stop. The recording is saved automatically and you're taken to the Overview.
+Open the app. You're already on the capture screen. Three ways to start:
 
-### Library
-Browse all your saved ideas. Sort by newest, oldest, or favorites. Filter by tag.
+- **Record** — tap the moon, sing your melody, tap again. Done. Live waveform while you record, preview when you stop.
+- **Write** — got a lyric, a chord progression, a half-formed thought? Capture it as text. No audio needed.
+- **Studio** — want to sketch something layered from scratch? Jump straight into the multi-track workspace. Soon, you can start with a drum track or a MIDI instrument..
+
+Every capture becomes an **idea** — a container you can come back to later, title, tag, annotate, and build on. Organize it how you need, whether it's a song, a thesis, or a book idea.
+
+---
+
+## Develop it
+
+When you're ready to do more with an idea, Nightjar gives you two workspaces:
 
 ### Overview
-The home screen for a single idea. Play it back, edit the title and notes, add tags, toggle favorite, share, or delete. Jump into the Studio when you're ready to build on it.
+The home screen for a single idea. Play it back, edit the title and notes (auto-saved as you type), add tags, mark favorites, share, or delete.
 
 ### Studio
-A simplified multi-track workspace. Your original recording appears as Track 1 on a horizontal timeline with a waveform. From here you can:
+A lightweight multi-track workspace. Not a replacement for professional tools, but the bridge between "I just thought of something" and "let me sit down and produce this." Layer recordings on top of each other, shift their timing, trim the edges, adjust volume and mute per track. Enough to know whether an idea is worth pursuing. Enough to jumpstart true production later.
 
-- **Overdub**: record a new audio layer while the existing tracks play back
-- **Reposition**: long-press and drag a track to shift its timing on the timeline
-- **Trim**: drag handles on the edges of a track to non-destructively trim the start or end
-- **Scrub**: drag the playhead or use the scrubber to seek through the project
+- **Overdub** — record new layers while existing tracks play back, with sample-accurate sync
+- **Drag to reposition** — long-press a track and slide it along the timeline
+- **Non-destructive trim** — drag handles on track edges
+- **Per-track controls** — volume, mute, delete
+
+---
+
+## Organize it
+
+The **Library** is where ideas live long-term. Sort by newest, oldest, or favorites. Filter by tag. Tap any idea to open its Overview.
 
 ---
 
 ## Tech Stack
 
 - Kotlin, Jetpack Compose (Material 3)
-- Room (SQLite) with migrations
+- Room (SQLite) with schema migrations
 - Hilt dependency injection
 - Coroutines + Flow
 - Navigation Compose
 - Media3 ExoPlayer (multi-track playback)
-- AudioRecord (WAV capture for overdub sync)
-- MediaRecorder (quick M4A capture on the Record screen)
+- AudioRecord via WavRecorder (16-bit PCM WAV at 44.1 kHz)
 
 ---
 
-## Audio
+## Status
 
-- **Record screen** captures M4A (AAC, 44.1 kHz) via MediaRecorder for fast, lightweight saves.
-- **Studio overdubs** capture 16-bit PCM WAV at 44.1 kHz via AudioRecord, with a three-phase sync protocol to eliminate pre-roll desync between playback and recording.
-- **Waveform visualization** decodes any supported format to PCM using MediaCodec, buckets peak amplitudes, and renders bar waveforms on Canvas.
-- **Multi-track playback** runs one ExoPlayer instance per track, with trim applied via ClippingMediaSource and a monotonic clock driving a shared timeline position at ~30 fps.
+Nightjar is in active development, working toward a v1.0 Play Store release.
 
----
+**What's working:**
+- Full capture → save → organize → multi-track workflow
+- Three entry points for idea creation (record, write, studio)
+- Live waveform during recording with post-recording preview
+- Multi-track overdub with sync, drag-to-reposition, non-destructive trim
+- Per-track volume, mute, and delete
+- Library with tag filtering and sort options
+- Overview with playback, waveform visualization, auto-saving notes, tags, sharing, and delete
 
-## Data Model
-
-- **Idea** — a container for a creative capture: title, notes, favorite flag, tags, timestamps
-- **Track** — an audio layer belonging to an idea: filename, display name, offset, trim bounds, duration, mute, volume, sort order
-- **Tag** — reusable labels linked to ideas via a junction table
-
----
-
-## Roadmap
-
-Near-term:
-- Mute / solo / volume controls per track in Studio
-- Track rename and delete in Studio
-- Waveform scrubbing on the Overview screen
-- WAV capture on the Record screen (replace M4A)
-- Export / mix-down of multi-track projects
-
-Longer-term:
-- Metronome / tap tempo
-- MIDI instrument tracks
-- Cloud backup
-- Play Store release
+**What's next:**
+- Solo toggle, track rename/reorder, track labels
+- Looping a timeline segment
+- Studio entrance animation
+- Library long-press menu
+- Play Store release prep
