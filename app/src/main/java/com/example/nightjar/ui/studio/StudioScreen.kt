@@ -45,6 +45,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.nightjar.ui.components.NjScrubber
 import com.example.nightjar.ui.components.NjTopBar
+import com.example.nightjar.ui.theme.NjAccent
 import kotlinx.coroutines.flow.collectLatest
 
 /**
@@ -180,19 +181,50 @@ fun StudioScreen(
                 NjSectionTitle("Timeline")
 
                 if (state.tracks.isNotEmpty() && !state.isRecording) {
-                    NjPrimaryButton(
-                        text = if (state.isPlaying) "Pause" else "Play",
-                        onClick = {
-                            if (state.isPlaying) {
-                                vm.onAction(StudioAction.Pause)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        NjPrimaryButton(
+                            text = if (state.isLoopEnabled) "Loop" else "Loop",
+                            onClick = { vm.onAction(StudioAction.ToggleLoop) },
+                            minHeight = 36.dp,
+                            containerColor = if (state.isLoopEnabled) {
+                                NjAccent.copy(alpha = 0.25f)
                             } else {
-                                vm.onAction(StudioAction.Play)
+                                MaterialTheme.colorScheme.surfaceVariant
+                            },
+                            contentColor = if (state.isLoopEnabled) {
+                                NjAccent
+                            } else {
+                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
                             }
-                        },
-                        minHeight = 36.dp,
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
-                    )
+                        )
+
+                        if (state.hasLoopRegion) {
+                            NjPrimaryButton(
+                                text = "Clear",
+                                onClick = { vm.onAction(StudioAction.ClearLoopRegion) },
+                                minHeight = 36.dp,
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+                            )
+                        }
+
+                        NjPrimaryButton(
+                            text = if (state.isPlaying) "Pause" else "Play",
+                            onClick = {
+                                if (state.isPlaying) {
+                                    vm.onAction(StudioAction.Pause)
+                                } else {
+                                    vm.onAction(StudioAction.Play)
+                                }
+                            },
+                            minHeight = 36.dp,
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+                        )
+                    }
                 }
             }
 
@@ -210,6 +242,9 @@ fun StudioScreen(
                     isPlaying = state.isPlaying,
                     dragState = state.dragState,
                     trimState = state.trimState,
+                    loopStartMs = state.loopStartMs,
+                    loopEndMs = state.loopEndMs,
+                    isLoopEnabled = state.isLoopEnabled,
                     getAudioFile = vm::getAudioFile,
                     onAction = vm::onAction
                 )

@@ -49,6 +49,7 @@ class StudioViewModel @Inject constructor(
     companion object {
         private const val TAG = "StudioVM"
         private const val MIN_EFFECTIVE_DURATION_MS = 200L
+        private const val MIN_LOOP_DURATION_MS = 500L
     }
 
     private val _state = MutableStateFlow(StudioUiState())
@@ -145,6 +146,13 @@ class StudioViewModel @Inject constructor(
             }
             is StudioAction.SetTrackMuted -> setTrackMuted(action.trackId, action.muted)
             is StudioAction.SetTrackVolume -> setTrackVolume(action.trackId, action.volume)
+
+            // Loop
+            is StudioAction.SetLoopRegion -> setLoopRegion(action.startMs, action.endMs)
+            StudioAction.ClearLoopRegion -> clearLoopRegion()
+            StudioAction.ToggleLoop -> toggleLoop()
+            is StudioAction.UpdateLoopRegionStart -> updateLoopRegionStart(action.startMs)
+            is StudioAction.UpdateLoopRegionEnd -> updateLoopRegionEnd(action.endMs)
         }
     }
 
@@ -184,6 +192,12 @@ class StudioViewModel @Inject constructor(
 
     private fun startOverdubRecording() {
         val ideaId = currentIdeaId ?: return
+
+        // Disable looping during recording — Step C will change this
+        if (_state.value.isLoopEnabled) {
+            _state.update { it.copy(isLoopEnabled = false) }
+            playbackManager.clearLoopRegion()
+        }
 
         viewModelScope.launch {
             try {
@@ -412,6 +426,60 @@ class StudioViewModel @Inject constructor(
         }
     }
 
+    // ── Loop ───────────────────────────────────────────────────────────
+
+    private fun setLoopRegion(startMs: Long, endMs: Long) {
+        val total = _state.value.totalDurationMs
+        val cStart = startMs.coerceIn(0L, total)
+        val cEnd = endMs.coerceIn(0L, total)
+        // Ensure minimum duration
+        if (cEnd - cStart < MIN_LOOP_DURATION_MS) return
+        _state.update { it.copy(loopStartMs = cStart, loopEndMs = cEnd, isLoopEnabled = true) }
+        playbackManager.setLoopRegion(cStart, cEnd)
+    }
+
+    private fun clearLoopRegion() {
+        _state.update { it.copy(loopStartMs = null, loopEndMs = null, isLoopEnabled = false) }
+        playbackManager.clearLoopRegion()
+    }
+
+    private fun toggleLoop() {
+        val current = _state.value
+        if (current.isLoopEnabled) {
+            // Disable looping but keep the region visible
+            _state.update { it.copy(isLoopEnabled = false) }
+            playbackManager.clearLoopRegion()
+        } else {
+            // Enable looping — use existing region or default to full timeline
+            val start = current.loopStartMs ?: 0L
+            val end = current.loopEndMs ?: current.totalDurationMs
+            if (end - start < MIN_LOOP_DURATION_MS) return
+            _state.update { it.copy(loopStartMs = start, loopEndMs = end, isLoopEnabled = true) }
+            playbackManager.setLoopRegion(start, end)
+        }
+    }
+
+    private fun updateLoopRegionStart(startMs: Long) {
+        val current = _state.value
+        val end = current.loopEndMs ?: return
+        val clamped = startMs.coerceIn(0L, (end - MIN_LOOP_DURATION_MS).coerceAtLeast(0L))
+        _state.update { it.copy(loopStartMs = clamped) }
+        if (current.isLoopEnabled) {
+            playbackManager.setLoopRegion(clamped, end)
+        }
+    }
+
+    private fun updateLoopRegionEnd(endMs: Long) {
+        val current = _state.value
+        val start = current.loopStartMs ?: return
+        val total = current.totalDurationMs
+        val clamped = endMs.coerceIn(start + MIN_LOOP_DURATION_MS, total)
+        _state.update { it.copy(loopEndMs = clamped) }
+        if (current.isLoopEnabled) {
+            playbackManager.setLoopRegion(start, clamped)
+        }
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────
 
     private suspend fun reloadAndPrepare() {
@@ -419,6 +487,28 @@ class StudioViewModel @Inject constructor(
         val tracks = studioRepo.getTracks(ideaId)
         _state.update { it.copy(tracks = tracks) }
         playbackManager.prepare(tracks, ::getAudioFile)
+
+        // Clamp loop region if total duration changed
+        val total = playbackManager.totalDurationMs.value
+        val current = _state.value
+        if (current.loopStartMs != null && current.loopEndMs != null) {
+            val clampedEnd = current.loopEndMs.coerceAtMost(total)
+            val clampedStart = current.loopStartMs.coerceAtMost(
+                (clampedEnd - MIN_LOOP_DURATION_MS).coerceAtLeast(0L)
+            )
+            if (clampedEnd - clampedStart < MIN_LOOP_DURATION_MS) {
+                // Region no longer valid — clear it
+                clearLoopRegion()
+            } else if (clampedStart != current.loopStartMs || clampedEnd != current.loopEndMs) {
+                _state.update { it.copy(loopStartMs = clampedStart, loopEndMs = clampedEnd) }
+                if (current.isLoopEnabled) {
+                    playbackManager.setLoopRegion(clampedStart, clampedEnd)
+                }
+            } else if (current.isLoopEnabled) {
+                // Re-sync after prepare (prepare resets playback manager state)
+                playbackManager.setLoopRegion(clampedStart, clampedEnd)
+            }
+        }
     }
 
     fun getAudioFile(name: String): File = recordingStorage.getAudioFile(name)
