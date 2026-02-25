@@ -42,20 +42,21 @@ private data class Star(
     val alpha: Float,
     val twinkles: Boolean,
     val anchor: Boolean,
+    val beacon: Boolean,
     val phase: Float,
     val speed: Float,
     val color: Color,
     val shape: StarShape
 )
 
-/** Stars per dp-squared — yields ~1,200 on a Fold 4 cover, ~1,950 unfolded. */
-private const val DENSITY_FACTOR = 0.0039f
+/** Stars per dp-squared — yields ~2,400 on a Fold 4 cover, ~3,900 unfolded. */
+private const val DENSITY_FACTOR = 0.0078f
 
 /** Baseline count used to scale minimum distance proportionally. */
-private const val BASE_COUNT = 1200f
+private const val BASE_COUNT = 2400f
 
 /** Minimum distance (normalized 0–1) between stars at the baseline count. */
-private const val BASE_MIN_DIST = 0.015f
+private const val BASE_MIN_DIST = 0.009f
 
 /**
  * Pre-computed unit-circle vertices for the 8-point starburst shape.
@@ -88,8 +89,10 @@ private val STARBURST_UNIT_VERTICES: List<Pair<Float, Float>> = buildList {
  * so the layout stays stable across recompositions.
  *
  * Most stars are plain circles. Medium-bright stars get subtle diffraction
- * rays (crosshair lines through center). The brightest anchor stars are
- * rendered as 8-point starbursts matching [NjStarburst]'s shape language.
+ * rays (crosshair lines through center). Anchor stars are rendered as
+ * 8-point starbursts. A rare ~2% of stars are "beacons" — noticeably
+ * larger and brighter starbursts with a persistent soft glow halo that
+ * makes them pop against the field.
  *
  * When [isRecording] is true the sky "holds its breath" — most twinkling
  * stars settle to a steady dim glow while a few anchor stars brighten
@@ -168,8 +171,23 @@ fun NjStarfield(modifier: Modifier = Modifier, isRecording: Boolean = false) {
                 }
 
                 StarShape.STARBURST -> {
-                    // Anchor glow during recording — soft radial gradient behind the star
-                    if (star.anchor && settle > 0f) {
+                    if (star.beacon) {
+                        // Beacon glow — always visible, soft halo
+                        val glowRadius = radiusPx * 2.2f
+                        drawCircle(
+                            brush = Brush.radialGradient(
+                                colors = listOf(
+                                    star.color.copy(alpha = a * 0.3f),
+                                    Color.Transparent
+                                ),
+                                center = center,
+                                radius = glowRadius
+                            ),
+                            radius = glowRadius,
+                            center = center
+                        )
+                    } else if (star.anchor && settle > 0f) {
+                        // Anchor glow during recording — soft radial gradient behind the star
                         val glowRadius = radiusPx * 1.4f
                         drawCircle(
                             brush = Brush.radialGradient(
@@ -213,7 +231,12 @@ private fun DrawScope.drawStarburst(
 
 /** Compute the current alpha for a star given animation time and settle progress. */
 private fun computeAlpha(star: Star, time: Float, settle: Float): Float {
-    return if (star.twinkles) {
+    return if (star.beacon) {
+        // Beacons: twinkle between a dim baseline and their bright peak
+        val sine = sin(time * 0.7f + star.phase) * 0.5f + 0.5f
+        val t = sine.pow(3f)
+        0.12f + star.alpha * t
+    } else if (star.twinkles) {
         val sine = sin(time * star.speed + star.phase) * 0.5f + 0.5f
         val exp = 5f + settle * 9f
         val t = sine.pow(exp)
@@ -255,7 +278,7 @@ private fun generateStars(targetCount: Int): List<Star> {
     val minDist = BASE_MIN_DIST / sqrt(targetCount / BASE_COUNT)
     val minDistSq = minDist * minDist
     var attempts = 0
-    val maxAttempts = targetCount * 3
+    val maxAttempts = targetCount * 5
 
     while (placed.size < targetCount && attempts < maxAttempts) {
         attempts++
@@ -269,12 +292,15 @@ private fun generateStars(targetCount: Int): List<Star> {
         }
         if (tooClose) continue
 
-        val isLarge = rng.nextFloat() < 0.08f
-        val twinkles = rng.nextFloat() < 0.25f
-        val isAnchor = isLarge && !twinkles
+        val roll = rng.nextFloat()
+        val isBeacon = roll < 0.007f
+        val isLarge = roll < 0.08f
+        val twinkles = !isBeacon && rng.nextFloat() < 0.25f
+        val isAnchor = isLarge && !twinkles && !isBeacon
         val shift = rng.nextFloat() * 2f - 1f
 
         val shape = when {
+            isBeacon -> StarShape.STARBURST
             isAnchor -> StarShape.STARBURST
             isLarge -> StarShape.RAYS
             else -> StarShape.CIRCLE
@@ -283,18 +309,23 @@ private fun generateStars(targetCount: Int): List<Star> {
         placed += Star(
             x = x,
             y = y,
-            radiusDp = if (isAnchor)
+            radiusDp = if (isBeacon)
+                rng.nextFloat() * 0.4f + 1.6f
+            else if (isAnchor)
                 rng.nextFloat() * 0.3f + 1.1f
             else if (isLarge)
                 rng.nextFloat() * 0.4f + 0.6f
             else
                 rng.nextFloat() * 0.4f + 0.3f,
-            alpha = if (twinkles)
+            alpha = if (isBeacon)
+                rng.nextFloat() * 0.15f + 0.75f
+            else if (twinkles)
                 rng.nextFloat() * 0.25f + 0.45f
             else
                 rng.nextFloat() * 0.22f + 0.10f,
             twinkles = twinkles,
             anchor = isAnchor,
+            beacon = isBeacon,
             phase = rng.nextFloat() * 2f * PI.toFloat(),
             speed = if (twinkles)
                 rng.nextFloat() * 0.6f + 0.5f
