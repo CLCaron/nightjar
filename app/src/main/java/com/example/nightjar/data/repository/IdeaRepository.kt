@@ -64,6 +64,15 @@ class IdeaRepository(
         return "Idea ${fmt.format(Date())}"
     }
 
+    /** Creates an [IdeaEntity] with no tracks — used by Write and Studio shortcuts. */
+    suspend fun createEmptyIdea(): Long {
+        val idea = IdeaEntity(
+            title = defaultTitle(),
+            createdAtEpochMs = System.currentTimeMillis()
+        )
+        return ideaDao.insertIdea(idea)
+    }
+
     // ── Overview ─────────────────────────────────────────────────────────
 
     suspend fun getIdeaById(id: Long): IdeaEntity? =
