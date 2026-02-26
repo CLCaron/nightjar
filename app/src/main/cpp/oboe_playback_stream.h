@@ -32,6 +32,14 @@ public:
     /** Returns true if the stream is open and started. */
     bool isStreamOpen() const { return stream_ != nullptr; }
 
+    /**
+     * Returns the output pipeline latency in ms via hardware timestamps.
+     * Uses AAudio's getTimestamp() under the hood (API 26+).
+     * Returns -1 if timestamps are not available (OpenSL ES fallback
+     * on API 24–25, or stream not open).
+     */
+    int64_t getOutputLatencyMs() const;
+
     // ── Oboe callbacks ──────────────────────────────────────────────────
 
     oboe::DataCallbackResult onAudioReady(

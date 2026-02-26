@@ -63,6 +63,13 @@ public:
         return active_.load(std::memory_order_acquire);
     }
 
+    /**
+     * Returns the input pipeline latency in ms via hardware timestamps.
+     * Uses AAudio's getTimestamp() under the hood (API 26+).
+     * Returns -1 if timestamps are not available or stream not active.
+     */
+    int64_t getInputLatencyMs() const;
+
     /** Peak amplitude of the most recent audio callback, normalised to 0–1. */
     float getLatestPeakAmplitude() const {
         return peakAmplitude_.load(std::memory_order_relaxed);

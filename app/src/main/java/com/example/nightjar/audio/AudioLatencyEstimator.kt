@@ -13,20 +13,24 @@ import javax.inject.Singleton
 /**
  * Estimates audio pipeline latency for overdub compensation.
  *
- * **Tier 1 (auto-estimate)**: Uses [AudioManager] properties and
- * [AudioRecord] buffer sizes to estimate output and input pipeline
- * latency. Detects Bluetooth output and applies additional codec
- * latency. Applied automatically on every overdub.
+ * **Primary source**: Hardware timestamps from the Oboe/AAudio streams
+ * via [OboeAudioEngine.getOutputLatencyMs] and [getInputLatencyMs].
+ * These give device-specific, runtime-accurate latency — including
+ * Bluetooth codec delay — with no guessing.
+ *
+ * **Fallback**: When hardware timestamps are unavailable (API <26,
+ * stream not active, or OpenSL ES backend), falls back to heuristic
+ * estimation using [AudioManager] properties and [AudioRecord] buffer
+ * sizes, with additional Bluetooth codec constants.
  *
  * **Manual offset**: Users can apply an additional offset (±500ms) via
- * a slider in the Audio Sync dialog to fine-tune alignment for their
- * specific device and output configuration. Persisted in SharedPreferences.
- *
- * Compensation values are persisted in SharedPreferences per device.
+ * a slider in the Audio Sync dialog to fine-tune alignment. Persisted
+ * in SharedPreferences.
  */
 @Singleton
 class AudioLatencyEstimator @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val audioEngine: OboeAudioEngine
 ) {
 
     private val prefs by lazy {
@@ -105,15 +109,25 @@ class AudioLatencyEstimator @Inject constructor(
     // ── Latency estimation ───────────────────────────────────────────────
 
     /**
-     * Estimates the output pipeline latency (speaker/earphone side).
+     * Returns the output pipeline latency (speaker/earphone side).
      *
-     * Uses the device's native frames-per-buffer and sample rate from
-     * [AudioManager]. For Bluetooth A2DP, adds codec latency on top of
-     * the local buffer estimate.
+     * Prefers hardware timestamps from the Oboe output stream (precise,
+     * accounts for actual device including Bluetooth codec delay).
+     * Falls back to heuristic estimation from [AudioManager] properties
+     * when timestamps are unavailable.
      */
     fun estimateOutputLatencyMs(
         deviceType: OutputDeviceType = detectOutputDeviceType()
     ): Long {
+        // Try hardware timestamps first (API 26+ with AAudio)
+        val hardwareMs = audioEngine.getOutputLatencyMs()
+        if (hardwareMs > 0) {
+            Log.d(TAG, "Output latency from hardware: ${hardwareMs}ms " +
+                    "[device=${deviceType.displayName}]")
+            return hardwareMs
+        }
+
+        // Fallback: heuristic estimation
         val framesPerBuffer = audioManager
             .getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER)
             ?.toLongOrNull()
@@ -134,24 +148,33 @@ class AudioLatencyEstimator @Inject constructor(
         return if (deviceType == OutputDeviceType.BLUETOOTH_A2DP) {
             val btEstimate = baseEstimateMs + BT_CODEC_LATENCY_MS
             val clamped = btEstimate.coerceIn(MIN_BT_OUTPUT_MS, MAX_BT_OUTPUT_MS)
-            Log.d(TAG, "BT output latency estimate: ${btEstimate}ms (clamped: ${clamped}ms) " +
+            Log.d(TAG, "BT output latency (heuristic): ${btEstimate}ms (clamped: ${clamped}ms) " +
                     "[base=${baseEstimateMs}ms, btCodec=${BT_CODEC_LATENCY_MS}ms]")
             clamped
         } else {
             val clamped = baseEstimateMs.coerceIn(MIN_OUTPUT_MS, MAX_OUTPUT_MS)
-            Log.d(TAG, "Output latency estimate: ${baseEstimateMs}ms (clamped: ${clamped}ms) " +
+            Log.d(TAG, "Output latency (heuristic): ${baseEstimateMs}ms (clamped: ${clamped}ms) " +
                     "[framesPerBuffer=$framesPerBuffer, sampleRate=$nativeSampleRate]")
             clamped
         }
     }
 
     /**
-     * Estimates the input pipeline latency (microphone side).
+     * Returns the input pipeline latency (microphone side).
      *
-     * Uses [AudioRecord.getMinBufferSize] to gauge how much audio the
-     * input pipeline buffers before delivering to the app.
+     * Prefers hardware timestamps from the Oboe input stream (only
+     * available while recording is active on API 26+).
+     * Falls back to heuristic estimation from [AudioRecord.getMinBufferSize].
      */
     fun estimateInputLatencyMs(): Long {
+        // Try hardware timestamps first (API 26+ with AAudio, recording active)
+        val hardwareMs = audioEngine.getInputLatencyMs()
+        if (hardwareMs > 0) {
+            Log.d(TAG, "Input latency from hardware: ${hardwareMs}ms")
+            return hardwareMs
+        }
+
+        // Fallback: heuristic estimation
         val minBufferBytes = AudioRecord.getMinBufferSize(
             SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
@@ -166,7 +189,7 @@ class AudioLatencyEstimator @Inject constructor(
         // bytes → duration: bytes / (sampleRate * bytesPerSample)
         val estimateMs = (minBufferBytes * 1000L) / (SAMPLE_RATE * BYTES_PER_SAMPLE)
         val clamped = estimateMs.coerceIn(MIN_INPUT_MS, MAX_INPUT_MS)
-        Log.d(TAG, "Input latency estimate: ${estimateMs}ms (clamped: ${clamped}ms) " +
+        Log.d(TAG, "Input latency (heuristic): ${estimateMs}ms (clamped: ${clamped}ms) " +
                 "[minBufferBytes=$minBufferBytes]")
         return clamped
     }
@@ -228,13 +251,17 @@ class AudioLatencyEstimator @Inject constructor(
 
     // ── Diagnostics ──────────────────────────────────────────────────────
 
-    /** Snapshot of current latency estimation values for the UI. */
+    /** Snapshot of current latency values for the UI. */
     data class LatencyDiagnostics(
         val deviceType: OutputDeviceType,
         val estimatedOutputMs: Long,
         val estimatedInputMs: Long,
         val manualOffsetMs: Long,
-        val totalAutoEstimateMs: Long
+        val totalAutoEstimateMs: Long,
+        /** True if output latency came from AAudio hardware timestamps. */
+        val outputIsHardwareMeasured: Boolean,
+        /** True if input latency came from AAudio hardware timestamps. */
+        val inputIsHardwareMeasured: Boolean
     )
 
     /** Builds a diagnostics snapshot for display in the Audio Sync dialog. */
@@ -248,7 +275,9 @@ class AudioLatencyEstimator @Inject constructor(
             estimatedOutputMs = outputMs,
             estimatedInputMs = inputMs,
             manualOffsetMs = manualOffset,
-            totalAutoEstimateMs = outputMs + inputMs
+            totalAutoEstimateMs = outputMs + inputMs,
+            outputIsHardwareMeasured = audioEngine.getOutputLatencyMs() > 0,
+            inputIsHardwareMeasured = audioEngine.getInputLatencyMs() > 0
         )
     }
 

@@ -190,6 +190,20 @@ Java_com_example_nightjar_audio_OboeAudioEngine_nativeSetRecording(
     if (sEngine) sEngine->setRecording(static_cast<bool>(active));
 }
 
-// ── Sync stubs (Phase 4) ────────────────────────────────────────────────
+// ── Hardware latency measurement ────────────────────────────────────────
+
+JNIEXPORT jlong JNICALL
+Java_com_example_nightjar_audio_OboeAudioEngine_nativeGetOutputLatencyMs(
+        JNIEnv* /* env */, jobject /* thiz */) {
+    if (!sEngine) return -1;
+    return static_cast<jlong>(sEngine->getOutputLatencyMs());
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_example_nightjar_audio_OboeAudioEngine_nativeGetInputLatencyMs(
+        JNIEnv* /* env */, jobject /* thiz */) {
+    if (!sEngine) return -1;
+    return static_cast<jlong>(sEngine->getInputLatencyMs());
+}
 
 }  // extern "C"

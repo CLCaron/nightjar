@@ -69,9 +69,9 @@ public:
     // ── Overdub support ─────────────────────────────────────────────────
     void setRecording(bool active);
 
-    // ── Sync (Phase 4) ──────────────────────────────────────────────────
-    // int64_t getOutputLatencyMs() const;
-    // int64_t getInputLatencyMs() const;
+    // ── Hardware latency measurement ──────────────────────────────────
+    int64_t getOutputLatencyMs() const;
+    int64_t getInputLatencyMs() const;
 
 private:
     std::atomic<bool> initialized_{false};

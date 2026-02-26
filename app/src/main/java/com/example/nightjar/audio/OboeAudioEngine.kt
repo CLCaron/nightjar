@@ -141,10 +141,21 @@ class OboeAudioEngine @Inject constructor() {
 
     fun setRecording(active: Boolean) = nativeSetRecording(active)
 
-    // ── Sync (Phase 4) ─────────────────────────────────────────────────────
+    // ── Hardware latency measurement ──────────────────────────────────────
 
-    // fun getOutputLatencyMs(): Long
-    // fun getInputLatencyMs(): Long
+    /**
+     * Returns the output pipeline latency in ms measured via AAudio
+     * hardware timestamps. Returns -1 if timestamps are unavailable
+     * (API <26 / OpenSL ES fallback, or output stream not active).
+     */
+    fun getOutputLatencyMs(): Long = nativeGetOutputLatencyMs()
+
+    /**
+     * Returns the input pipeline latency in ms measured via AAudio
+     * hardware timestamps. Returns -1 if timestamps are unavailable
+     * or no recording is in progress.
+     */
+    fun getInputLatencyMs(): Long = nativeGetInputLatencyMs()
 
     // ── Native method declarations ─────────────────────────────────────────
 
@@ -186,6 +197,10 @@ class OboeAudioEngine @Inject constructor() {
 
     // Overdub
     private external fun nativeSetRecording(active: Boolean)
+
+    // Hardware latency
+    private external fun nativeGetOutputLatencyMs(): Long
+    private external fun nativeGetInputLatencyMs(): Long
 
     companion object {
         private const val TAG = "OboeAudioEngine"

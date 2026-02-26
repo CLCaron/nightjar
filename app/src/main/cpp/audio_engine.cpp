@@ -221,4 +221,16 @@ void AudioEngine::setRecording(bool active) {
     }
 }
 
+// ── Hardware latency measurement ────────────────────────────────────
+
+int64_t AudioEngine::getOutputLatencyMs() const {
+    if (!playbackStream_) return -1;
+    return playbackStream_->getOutputLatencyMs();
+}
+
+int64_t AudioEngine::getInputLatencyMs() const {
+    if (!recordingStream_) return -1;
+    return recordingStream_->getInputLatencyMs();
+}
+
 }  // namespace nightjar

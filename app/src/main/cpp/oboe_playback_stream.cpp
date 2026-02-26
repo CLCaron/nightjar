@@ -63,6 +63,15 @@ bool OboePlaybackStream::openStream() {
     return true;
 }
 
+int64_t OboePlaybackStream::getOutputLatencyMs() const {
+    if (!stream_) return -1;
+    auto result = stream_->calculateLatencyMillis();
+    if (result) {
+        return static_cast<int64_t>(result.value());
+    }
+    return -1;
+}
+
 // ── Audio callback (real-time thread) ──────────────────────────────────
 
 oboe::DataCallbackResult OboePlaybackStream::onAudioReady(
