@@ -19,3 +19,9 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# Keep native method declarations for the Oboe audio engine JNI bridge.
+# R8 must not rename or strip these — they are called from C++ via JNI.
+-keep class com.example.nightjar.audio.OboeAudioEngine {
+    native <methods>;
+}

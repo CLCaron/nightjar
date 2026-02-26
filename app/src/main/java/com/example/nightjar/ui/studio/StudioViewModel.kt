@@ -275,9 +275,9 @@ class StudioViewModel @Inject constructor(
                 audioEngine.play()
 
                 // 4. Measure pre-roll and compute total compensation
-                // With Oboe output, playback starts nearly instantly — no need
-                // to await rendering like we did with ExoPlayer. The pre-roll
-                // is just the time between write gate and play.
+                // With Oboe, playback starts nearly instantly from the audio
+                // callback. The pre-roll is just the time between write gate
+                // and play.
                 val preRollMs = (System.nanoTime() - writeGateNanos) / 1_000_000L
                 val compensation = latencyEstimator.computeCompensationMs(
                     preRollMs = preRollMs,
