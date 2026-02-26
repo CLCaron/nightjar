@@ -264,6 +264,8 @@ fun StudioScreen(
                     loopStartMs = state.loopStartMs,
                     loopEndMs = state.loopEndMs,
                     isLoopEnabled = state.isLoopEnabled,
+                    expandedTrackId = state.expandedTrackId,
+                    soloedTrackIds = state.soloedTrackIds,
                     getAudioFile = vm::getAudioFile,
                     onAction = vm::onAction
                 )
@@ -291,17 +293,6 @@ fun StudioScreen(
             onSelect = { type -> vm.onAction(StudioAction.SelectNewTrackType(type)) },
             onDismiss = { vm.onAction(StudioAction.DismissAddTrackSheet) }
         )
-    }
-
-    if (state.settingsTrackId != null) {
-        val settingsTrack = state.tracks.find { it.id == state.settingsTrackId }
-        if (settingsTrack != null) {
-            TrackSettingsSheet(
-                track = settingsTrack,
-                onAction = vm::onAction,
-                onDismiss = { vm.onAction(StudioAction.DismissTrackSettings) }
-            )
-        }
     }
 
     if (state.confirmingDeleteTrackId != null) {

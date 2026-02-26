@@ -19,7 +19,8 @@ data class StudioUiState(
     val dragState: TrackDragState? = null,
     val trimState: TrackTrimState? = null,
     val confirmingDeleteTrackId: Long? = null,
-    val settingsTrackId: Long? = null,
+    val expandedTrackId: Long? = null,
+    val soloedTrackIds: Set<Long> = emptySet(),
     val loopStartMs: Long? = null,
     val loopEndMs: Long? = null,
     val isLoopEnabled: Boolean = false,
@@ -64,11 +65,11 @@ sealed interface StudioAction {
     data object DismissDeleteTrack : StudioAction
     data object ExecuteDeleteTrack : StudioAction
 
-    // Track settings
+    // Track drawer (inline settings panel)
     data class OpenTrackSettings(val trackId: Long) : StudioAction
-    data object DismissTrackSettings : StudioAction
     data class SetTrackMuted(val trackId: Long, val muted: Boolean) : StudioAction
     data class SetTrackVolume(val trackId: Long, val volume: Float) : StudioAction
+    data class ToggleSolo(val trackId: Long) : StudioAction
 
     // Loop
     data class SetLoopRegion(val startMs: Long, val endMs: Long) : StudioAction
