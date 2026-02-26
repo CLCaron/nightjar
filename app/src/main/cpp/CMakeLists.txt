@@ -11,7 +11,10 @@ add_library(nightjar-audio SHARED
     jni_bridge.cpp
     audio_engine.cpp
     oboe_recording_stream.cpp
+    oboe_playback_stream.cpp
     wav_writer.cpp
+    wav_track_source.cpp
+    track_mixer.cpp
 )
 
 target_link_libraries(nightjar-audio

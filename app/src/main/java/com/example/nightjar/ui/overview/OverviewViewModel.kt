@@ -2,11 +2,11 @@ package com.example.nightjar.ui.overview
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.nightjar.audio.OboeAudioEngine
 import com.example.nightjar.audio.extractCompositeWaveform
 import com.example.nightjar.data.repository.IdeaRepository
 import com.example.nightjar.data.repository.StudioRepository
 import com.example.nightjar.data.storage.RecordingStorage
-import com.example.nightjar.player.StudioPlaybackManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
 import javax.inject.Inject
@@ -24,7 +25,7 @@ import javax.inject.Inject
  * ViewModel for the Overview screen.
  *
  * Manages editing of a single idea's metadata (title, notes, tags, favorite)
- * and multi-track playback via [StudioPlaybackManager].
+ * and multi-track playback via [OboeAudioEngine].
  * Title and notes changes are debounced (600 ms) to avoid excessive writes.
  * Pending saves are flushed when the screen is disposed.
  */
@@ -32,7 +33,7 @@ import javax.inject.Inject
 class OverviewViewModel @Inject constructor(
     private val repo: IdeaRepository,
     private val studioRepo: StudioRepository,
-    private val playbackManager: StudioPlaybackManager,
+    private val audioEngine: OboeAudioEngine,
     private val recordingStorage: RecordingStorage
 ) : ViewModel() {
 
@@ -43,15 +44,27 @@ class OverviewViewModel @Inject constructor(
     private val _effects = MutableSharedFlow<OverviewEffect>()
     val effects = _effects.asSharedFlow()
 
-    val isPlaying: StateFlow<Boolean> = playbackManager.isPlaying
-    val globalPositionMs: StateFlow<Long> = playbackManager.globalPositionMs
-    val totalDurationMs: StateFlow<Long> = playbackManager.totalDurationMs
+    val isPlaying: StateFlow<Boolean> = audioEngine.isPlaying
+    val globalPositionMs: StateFlow<Long> = audioEngine.positionMs
+    val totalDurationMs: StateFlow<Long> = audioEngine.totalDurationMs
 
     private var titleSaveJob: Job? = null
     private var notesSaveJob: Job? = null
+    private var tickJob: Job? = null
 
     init {
-        playbackManager.setScope(viewModelScope)
+        startTick()
+    }
+
+    /** Poll native engine state at ~60fps. */
+    private fun startTick() {
+        tickJob?.cancel()
+        tickJob = viewModelScope.launch {
+            while (isActive) {
+                audioEngine.pollState()
+                delay(TICK_MS)
+            }
+        }
     }
 
     fun onAction(action: OverviewAction) {
@@ -64,9 +77,9 @@ class OverviewViewModel @Inject constructor(
             is OverviewAction.RemoveTag -> removeTag(action.tagId)
             OverviewAction.DeleteIdea -> deleteIdea()
             OverviewAction.FlushPendingSaves -> flushPendingSaves()
-            OverviewAction.Play -> playbackManager.play()
-            OverviewAction.Pause -> playbackManager.pause()
-            is OverviewAction.SeekTo -> playbackManager.seekTo(action.positionMs)
+            OverviewAction.Play -> audioEngine.play()
+            OverviewAction.Pause -> audioEngine.pause()
+            is OverviewAction.SeekTo -> audioEngine.seekTo(action.positionMs)
             OverviewAction.RefreshTracks -> refreshTracks()
         }
     }
@@ -98,7 +111,7 @@ class OverviewViewModel @Inject constructor(
                 val tracks = studioRepo.ensureProjectInitialized(ideaId)
                 _state.update { it.copy(hasTracks = tracks.isNotEmpty()) }
                 if (tracks.isNotEmpty()) {
-                    playbackManager.prepare(tracks, ::getAudioFile)
+                    loadTracksIntoEngine(tracks)
                     val waveform = extractCompositeWaveform(tracks, ::getAudioFile)
                     _state.update { it.copy(compositeWaveform = waveform) }
                 }
@@ -117,7 +130,7 @@ class OverviewViewModel @Inject constructor(
                 val tracks = studioRepo.ensureProjectInitialized(ideaId)
                 _state.update { it.copy(hasTracks = tracks.isNotEmpty()) }
                 if (tracks.isNotEmpty()) {
-                    playbackManager.prepare(tracks, ::getAudioFile)
+                    loadTracksIntoEngine(tracks)
                     val waveform = extractCompositeWaveform(tracks, ::getAudioFile)
                     _state.update { it.copy(compositeWaveform = waveform) }
                 }
@@ -125,6 +138,25 @@ class OverviewViewModel @Inject constructor(
                 val msg = e.message ?: "Failed to refresh tracks."
                 _effects.emit(OverviewEffect.ShowError(msg))
             }
+        }
+    }
+
+    private fun loadTracksIntoEngine(
+        tracks: List<com.example.nightjar.data.db.entity.TrackEntity>
+    ) {
+        audioEngine.removeAllTracks()
+        for (track in tracks) {
+            val file = getAudioFile(track.audioFileName)
+            audioEngine.addTrack(
+                trackId = track.id.toInt(),
+                filePath = file.absolutePath,
+                durationMs = track.durationMs,
+                offsetMs = track.offsetMs,
+                trimStartMs = track.trimStartMs,
+                trimEndMs = track.trimEndMs,
+                volume = track.volume,
+                isMuted = track.isMuted
+            )
         }
     }
 
@@ -265,6 +297,11 @@ class OverviewViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
-        playbackManager.release()
+        tickJob?.cancel()
+        audioEngine.removeAllTracks()
+    }
+
+    private companion object {
+        const val TICK_MS = 16L // ~60fps
     }
 }

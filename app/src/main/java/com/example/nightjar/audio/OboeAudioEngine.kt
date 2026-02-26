@@ -16,19 +16,13 @@ import javax.inject.Singleton
  * ms-to-frame conversions.
  *
  * Thread safety: JNI calls are safe from any thread. The native engine
- * uses atomics for all cross-thread state. StateFlow updates happen on
- * the calling coroutine's thread (typically viewModelScope).
+ * uses atomics for all cross-thread state. StateFlow updates happen via
+ * [pollState] called from the ViewModel's tick coroutine.
  *
  * ## Lifecycle
  * - [initialize] once from [com.example.nightjar.NightjarApplication.onCreate]
  * - [shutdown] from Application.onTerminate
  * - The engine is a singleton — ViewModels do NOT own or release it
- *
- * ## Phases
- * - Phase 1: init/shutdown skeleton
- * - Phase 2: recording (startRecording, awaitFirstBuffer, openWriteGate, stopRecording)
- * - Phase 3: playback + mixer (addTrack, play, pause, seek, pollState)
- * - Phase 4: hardware sync (getOutputLatencyMs, getInputLatencyMs)
  */
 @Singleton
 class OboeAudioEngine @Inject constructor() {
@@ -46,46 +40,27 @@ class OboeAudioEngine @Inject constructor() {
 
     // ── Lifecycle ──────────────────────────────────────────────────────────
 
-    /** Initialize the native engine. Returns true on success. */
     fun initialize(): Boolean {
         val result = nativeInit()
         Log.d(TAG, "initialize() → $result")
         return result
     }
 
-    /** Shut down the native engine. Safe to call multiple times. */
     fun shutdown() {
         Log.d(TAG, "shutdown()")
         nativeShutdown()
     }
 
-    /** Returns true if the native engine is initialized. */
     fun isInitialized(): Boolean = nativeIsInitialized()
 
-    // ── Recording (Phase 2) ────────────────────────────────────────────────
+    // ── Recording ──────────────────────────────────────────────────────────
 
-    /**
-     * Start recording to [filePath]. Opens the Oboe input stream and WAV
-     * file writer. Audio flows but is NOT written to disk until
-     * [openWriteGate] is called.
-     *
-     * @return true if recording started successfully.
-     */
     fun startRecording(filePath: String): Boolean {
         val ok = nativeStartRecording(filePath)
         Log.d(TAG, "startRecording($filePath) → $ok")
         return ok
     }
 
-    /**
-     * Suspend until the recording stream's first audio callback has fired,
-     * confirming the hardware audio pipeline is hot. Call after [startRecording]
-     * and before [openWriteGate].
-     *
-     * Runs on [Dispatchers.IO] since the native call blocks via sleep loop.
-     *
-     * @return true if the pipeline is hot, false on timeout.
-     */
     suspend fun awaitFirstBuffer(timeoutMs: Int = 2000): Boolean =
         withContext(Dispatchers.IO) {
             val hot = nativeAwaitFirstBuffer(timeoutMs)
@@ -93,65 +68,83 @@ class OboeAudioEngine @Inject constructor() {
             hot
         }
 
-    /**
-     * Open the write gate. From this point forward captured audio is
-     * written to the WAV file on disk. Call this right when playback
-     * starts so the WAV is synchronised with playback.
-     */
     fun openWriteGate() {
         nativeOpenWriteGate()
         Log.d(TAG, "openWriteGate()")
     }
 
-    /**
-     * Stop recording. Closes the Oboe stream, drains the ring buffer,
-     * patches the WAV header.
-     *
-     * @return duration of captured audio in ms, or -1 if nothing captured.
-     */
     fun stopRecording(): Long {
         val durationMs = nativeStopRecording()
         Log.d(TAG, "stopRecording() → ${durationMs}ms")
         return durationMs
     }
 
-    /** Returns true if a recording is in progress. */
     fun isRecordingActive(): Boolean = nativeIsRecordingActive()
 
-    /**
-     * Peak amplitude of the most recent audio callback, normalised to 0–1.
-     * Polled from the UI via ViewModel ticker for live waveform.
-     */
     fun getLatestPeakAmplitude(): Float = nativeGetLatestPeakAmplitude()
 
-    /** Duration of audio written to disk so far, in ms. */
     fun getRecordedDurationMs(): Long = nativeGetRecordedDurationMs()
 
-    // ── Playback (Phase 3) ─────────────────────────────────────────────────
+    // ── Playback ───────────────────────────────────────────────────────────
 
-    // fun addTrack(trackId: Int, filePath: String, durationMs: Long,
-    //              offsetMs: Long, trimStartMs: Long, trimEndMs: Long,
-    //              volume: Float, isMuted: Boolean): Boolean
-    // fun removeTrack(trackId: Int)
-    // fun removeAllTracks()
-    // fun play()
-    // fun pause()
-    // fun seekTo(positionMs: Long)
-    // fun pollState()  -- call at ~60fps from ViewModel tick coroutine
-    // fun setTrackVolume(trackId: Int, volume: Float)
-    // fun setTrackMuted(trackId: Int, muted: Boolean)
+    fun addTrack(
+        trackId: Int, filePath: String, durationMs: Long,
+        offsetMs: Long, trimStartMs: Long, trimEndMs: Long,
+        volume: Float, isMuted: Boolean
+    ): Boolean {
+        return nativeAddTrack(trackId, filePath, durationMs, offsetMs,
+            trimStartMs, trimEndMs, volume, isMuted)
+    }
 
-    // ── Loop (Phase 5) ─────────────────────────────────────────────────────
+    fun removeTrack(trackId: Int) = nativeRemoveTrack(trackId)
 
-    // fun setLoopRegion(startMs: Long, endMs: Long)
-    // fun clearLoopRegion()
+    fun removeAllTracks() = nativeRemoveAllTracks()
+
+    fun play() {
+        nativePlay()
+    }
+
+    fun pause() {
+        nativePause()
+    }
+
+    fun seekTo(positionMs: Long) {
+        nativeSeekTo(positionMs)
+    }
+
+    /**
+     * Poll native transport state and update StateFlows.
+     * Call this at ~60fps from the ViewModel's tick coroutine.
+     */
+    fun pollState() {
+        _isPlaying.value = nativeIsPlaying()
+        _positionMs.value = nativeGetPositionMs()
+        _totalDurationMs.value = nativeGetTotalDurationMs()
+    }
+
+    // ── Per-track controls ─────────────────────────────────────────────────
+
+    fun setTrackVolume(trackId: Int, volume: Float) =
+        nativeSetTrackVolume(trackId, volume)
+
+    fun setTrackMuted(trackId: Int, muted: Boolean) =
+        nativeSetTrackMuted(trackId, muted)
+
+    // ── Loop ───────────────────────────────────────────────────────────────
+
+    fun setLoopRegion(startMs: Long, endMs: Long) =
+        nativeSetLoopRegion(startMs, endMs)
+
+    fun clearLoopRegion() = nativeClearLoopRegion()
+
+    // ── Overdub support ────────────────────────────────────────────────────
+
+    fun setRecording(active: Boolean) = nativeSetRecording(active)
 
     // ── Sync (Phase 4) ─────────────────────────────────────────────────────
 
     // fun getOutputLatencyMs(): Long
     // fun getInputLatencyMs(): Long
-    // suspend fun awaitPlaybackRendering(timeoutMs: Int = 2000): Boolean
-    // fun setRecording(active: Boolean)
 
     // ── Native method declarations ─────────────────────────────────────────
 
@@ -159,7 +152,7 @@ class OboeAudioEngine @Inject constructor() {
     private external fun nativeShutdown()
     private external fun nativeIsInitialized(): Boolean
 
-    // Recording (Phase 2)
+    // Recording
     private external fun nativeStartRecording(filePath: String): Boolean
     private external fun nativeAwaitFirstBuffer(timeoutMs: Int): Boolean
     private external fun nativeOpenWriteGate()
@@ -167,6 +160,32 @@ class OboeAudioEngine @Inject constructor() {
     private external fun nativeIsRecordingActive(): Boolean
     private external fun nativeGetLatestPeakAmplitude(): Float
     private external fun nativeGetRecordedDurationMs(): Long
+
+    // Playback
+    private external fun nativeAddTrack(
+        trackId: Int, filePath: String, durationMs: Long,
+        offsetMs: Long, trimStartMs: Long, trimEndMs: Long,
+        volume: Float, muted: Boolean
+    ): Boolean
+    private external fun nativeRemoveTrack(trackId: Int)
+    private external fun nativeRemoveAllTracks()
+    private external fun nativePlay()
+    private external fun nativePause()
+    private external fun nativeSeekTo(positionMs: Long)
+    private external fun nativeIsPlaying(): Boolean
+    private external fun nativeGetPositionMs(): Long
+    private external fun nativeGetTotalDurationMs(): Long
+
+    // Per-track controls
+    private external fun nativeSetTrackVolume(trackId: Int, volume: Float)
+    private external fun nativeSetTrackMuted(trackId: Int, muted: Boolean)
+
+    // Loop
+    private external fun nativeSetLoopRegion(startMs: Long, endMs: Long)
+    private external fun nativeClearLoopRegion()
+
+    // Overdub
+    private external fun nativeSetRecording(active: Boolean)
 
     companion object {
         private const val TAG = "OboeAudioEngine"
