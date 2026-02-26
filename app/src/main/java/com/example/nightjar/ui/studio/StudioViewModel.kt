@@ -8,7 +8,6 @@ import com.example.nightjar.audio.OboeAudioEngine
 import com.example.nightjar.data.repository.StudioRepository
 import com.example.nightjar.data.repository.IdeaRepository
 import com.example.nightjar.data.storage.RecordingStorage
-import com.example.nightjar.player.StudioPlaybackManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -17,6 +16,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
 import java.text.SimpleDateFormat
@@ -27,20 +27,19 @@ import javax.inject.Inject
 /**
  * ViewModel for the Studio (multi-track workspace) screen.
  *
- * Coordinates overdub recording via [OboeAudioEngine], multi-track playback
- * via [StudioPlaybackManager], and timeline editing (drag-to-reposition,
- * trim). Recording synchronization follows this protocol:
+ * Coordinates overdub recording and multi-track playback via [OboeAudioEngine],
+ * and timeline editing (drag-to-reposition, trim).
  *
+ * Recording synchronization follows this protocol:
  * 1. Start Oboe recording and wait for the audio pipeline to become hot.
- * 2. Start playback and wait for audio to actually render to the speaker.
- * 3. Open the WAV write gate — audio is captured in sync with playback.
+ * 2. Open write gate and start playback.
+ * 3. Measure pre-roll for latency compensation.
  * 4. On stop, save the new track at the captured timeline offset.
  */
 @HiltViewModel
 class StudioViewModel @Inject constructor(
     private val ideaRepo: IdeaRepository,
     private val studioRepo: StudioRepository,
-    private val playbackManager: StudioPlaybackManager,
     private val audioEngine: OboeAudioEngine,
     private val recordingStorage: RecordingStorage,
     private val latencyEstimator: AudioLatencyEstimator
@@ -52,6 +51,7 @@ class StudioViewModel @Inject constructor(
         private const val TAG = "StudioVM"
         private const val MIN_EFFECTIVE_DURATION_MS = 200L
         private const val MIN_LOOP_DURATION_MS = 500L
+        private const val TICK_MS = 16L // ~60fps
     }
 
     private val _state = MutableStateFlow(StudioUiState())
@@ -65,23 +65,26 @@ class StudioViewModel @Inject constructor(
     private var recordingTrimStartMs: Long = 0L
     private var recordingTickJob: Job? = null
     private var recordingFile: File? = null
+    private var tickJob: Job? = null
 
     init {
-        playbackManager.setScope(viewModelScope)
+        startTick()
+    }
 
-        viewModelScope.launch {
-            playbackManager.isPlaying.collect { playing ->
-                _state.update { it.copy(isPlaying = playing) }
-            }
-        }
-        viewModelScope.launch {
-            playbackManager.globalPositionMs.collect { posMs ->
-                _state.update { it.copy(globalPositionMs = posMs) }
-            }
-        }
-        viewModelScope.launch {
-            playbackManager.totalDurationMs.collect { durMs ->
-                _state.update { it.copy(totalDurationMs = durMs) }
+    /** Poll native engine state at ~60fps and update UI StateFlows. */
+    private fun startTick() {
+        tickJob?.cancel()
+        tickJob = viewModelScope.launch {
+            while (isActive) {
+                audioEngine.pollState()
+                _state.update {
+                    it.copy(
+                        isPlaying = audioEngine.isPlaying.value,
+                        globalPositionMs = audioEngine.positionMs.value,
+                        totalDurationMs = audioEngine.totalDurationMs.value
+                    )
+                }
+                delay(TICK_MS)
             }
         }
     }
@@ -107,10 +110,10 @@ class StudioViewModel @Inject constructor(
             }
             StudioAction.MicPermissionGranted -> startOverdubRecording()
             StudioAction.StopOverdubRecording -> stopOverdubRecording()
-            StudioAction.Play -> playbackManager.play()
-            StudioAction.Pause -> playbackManager.pause()
-            is StudioAction.SeekTo -> playbackManager.seekTo(action.positionMs)
-            is StudioAction.SeekFinished -> playbackManager.seekTo(action.positionMs)
+            StudioAction.Play -> audioEngine.play()
+            StudioAction.Pause -> audioEngine.pause()
+            is StudioAction.SeekTo -> audioEngine.seekTo(action.positionMs)
+            is StudioAction.SeekFinished -> audioEngine.seekTo(action.positionMs)
 
             // Drag-to-reposition
             is StudioAction.StartDragTrack -> startDragTrack(action.trackId)
@@ -207,12 +210,29 @@ class StudioViewModel @Inject constructor(
                     )
                 }
 
-                playbackManager.prepare(tracks, ::getAudioFile)
+                loadTracksIntoEngine(tracks)
             } catch (e: Exception) {
                 val msg = e.message ?: "Failed to load project."
                 _state.update { it.copy(isLoading = false, errorMessage = msg) }
                 _effects.emit(StudioEffect.ShowError(msg))
             }
+        }
+    }
+
+    private fun loadTracksIntoEngine(tracks: List<com.example.nightjar.data.db.entity.TrackEntity>) {
+        audioEngine.removeAllTracks()
+        for (track in tracks) {
+            val file = getAudioFile(track.audioFileName)
+            audioEngine.addTrack(
+                trackId = track.id.toInt(),
+                filePath = file.absolutePath,
+                durationMs = track.durationMs,
+                offsetMs = track.offsetMs,
+                trimStartMs = track.trimStartMs,
+                trimEndMs = track.trimEndMs,
+                volume = track.volume,
+                isMuted = track.isMuted
+            )
         }
     }
 
@@ -222,7 +242,7 @@ class StudioViewModel @Inject constructor(
         // Disable looping during recording — Step C will change this
         if (_state.value.isLoopEnabled) {
             _state.update { it.copy(isLoopEnabled = false) }
-            playbackManager.clearLoopRegion()
+            audioEngine.clearLoopRegion()
         }
 
         viewModelScope.launch {
@@ -233,7 +253,7 @@ class StudioViewModel @Inject constructor(
 
                 // Capture the user's intended start position BEFORE any
                 // startup latency shifts the clock forward.
-                val intendedStartMs = playbackManager.globalPositionMs.value
+                val intendedStartMs = audioEngine.positionMs.value
 
                 // ── Pre-roll capture protocol ────────────────────────────
                 // 1. Start Oboe recording and wait for pipeline to become hot
@@ -249,13 +269,15 @@ class StudioViewModel @Inject constructor(
                 audioEngine.openWriteGate()
                 val writeGateNanos = System.nanoTime()
 
-                // 3. Start playback and await rendering
+                // 3. Start playback
                 val hasPlayableTracks = _state.value.tracks.any { !it.isMuted }
-                playbackManager.setRecording(true)
-                playbackManager.play()
-                playbackManager.awaitPlaybackRendering()
+                audioEngine.setRecording(true)
+                audioEngine.play()
 
                 // 4. Measure pre-roll and compute total compensation
+                // With Oboe output, playback starts nearly instantly — no need
+                // to await rendering like we did with ExoPlayer. The pre-roll
+                // is just the time between write gate and play.
                 val preRollMs = (System.nanoTime() - writeGateNanos) / 1_000_000L
                 val compensation = latencyEstimator.computeCompensationMs(
                     preRollMs = preRollMs,
@@ -292,8 +314,8 @@ class StudioViewModel @Inject constructor(
     private fun stopOverdubRecording() {
         val ideaId = currentIdeaId ?: return
 
-        playbackManager.setRecording(false)
-        playbackManager.pause()
+        audioEngine.setRecording(false)
+        audioEngine.pause()
         recordingTickJob?.cancel()
         recordingTickJob = null
 
@@ -415,9 +437,6 @@ class StudioViewModel @Inject constructor(
         val track = _state.value.tracks.firstOrNull { it.id == trackId }
         _state.update { it.copy(trimState = null) }
         viewModelScope.launch {
-            // When the left trim moves, the visible block shifts right on the
-            // timeline.  Adjust offsetMs by the same delta so the audio samples
-            // keep their global-timeline positions after commit.
             if (track != null && trimStartMs != track.trimStartMs) {
                 val offsetDelta = trimStartMs - track.trimStartMs
                 val newOffsetMs = (track.offsetMs + offsetDelta).coerceAtLeast(0L)
@@ -435,10 +454,12 @@ class StudioViewModel @Inject constructor(
     // ── Track settings ─────────────────────────────────────────────────
 
     private fun setTrackMuted(trackId: Long, muted: Boolean) {
+        // Update native engine immediately for instant feedback
+        audioEngine.setTrackMuted(trackId.toInt(), muted)
         viewModelScope.launch {
             try {
                 studioRepo.setTrackMuted(trackId, muted)
-                reloadAndPrepare()
+                reloadTracks()
             } catch (e: Exception) {
                 _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to update track."))
             }
@@ -446,10 +467,13 @@ class StudioViewModel @Inject constructor(
     }
 
     private fun setTrackVolume(trackId: Long, volume: Float) {
+        val clamped = volume.coerceIn(0f, 1f)
+        // Update native engine immediately for instant feedback
+        audioEngine.setTrackVolume(trackId.toInt(), clamped)
         viewModelScope.launch {
             try {
-                studioRepo.setTrackVolume(trackId, volume.coerceIn(0f, 1f))
-                reloadAndPrepare()
+                studioRepo.setTrackVolume(trackId, clamped)
+                reloadTracks()
             } catch (e: Exception) {
                 _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to update volume."))
             }
@@ -464,7 +488,7 @@ class StudioViewModel @Inject constructor(
 
         viewModelScope.launch {
             try {
-                playbackManager.pause()
+                audioEngine.pause()
                 studioRepo.deleteTrackAndAudio(trackId)
                 reloadAndPrepare()
             } catch (e: Exception) {
@@ -481,30 +505,27 @@ class StudioViewModel @Inject constructor(
         val total = _state.value.totalDurationMs
         val cStart = startMs.coerceIn(0L, total)
         val cEnd = endMs.coerceIn(0L, total)
-        // Ensure minimum duration
         if (cEnd - cStart < MIN_LOOP_DURATION_MS) return
         _state.update { it.copy(loopStartMs = cStart, loopEndMs = cEnd, isLoopEnabled = true) }
-        playbackManager.setLoopRegion(cStart, cEnd)
+        audioEngine.setLoopRegion(cStart, cEnd)
     }
 
     private fun clearLoopRegion() {
         _state.update { it.copy(loopStartMs = null, loopEndMs = null, isLoopEnabled = false) }
-        playbackManager.clearLoopRegion()
+        audioEngine.clearLoopRegion()
     }
 
     private fun toggleLoop() {
         val current = _state.value
         if (current.isLoopEnabled) {
-            // Disable looping but keep the region visible
             _state.update { it.copy(isLoopEnabled = false) }
-            playbackManager.clearLoopRegion()
+            audioEngine.clearLoopRegion()
         } else {
-            // Enable looping — use existing region or default to full timeline
             val start = current.loopStartMs ?: 0L
             val end = current.loopEndMs ?: current.totalDurationMs
             if (end - start < MIN_LOOP_DURATION_MS) return
             _state.update { it.copy(loopStartMs = start, loopEndMs = end, isLoopEnabled = true) }
-            playbackManager.setLoopRegion(start, end)
+            audioEngine.setLoopRegion(start, end)
         }
     }
 
@@ -514,7 +535,7 @@ class StudioViewModel @Inject constructor(
         val clamped = startMs.coerceIn(0L, (end - MIN_LOOP_DURATION_MS).coerceAtLeast(0L))
         _state.update { it.copy(loopStartMs = clamped) }
         if (current.isLoopEnabled) {
-            playbackManager.setLoopRegion(clamped, end)
+            audioEngine.setLoopRegion(clamped, end)
         }
     }
 
@@ -525,20 +546,21 @@ class StudioViewModel @Inject constructor(
         val clamped = endMs.coerceIn(start + MIN_LOOP_DURATION_MS, total)
         _state.update { it.copy(loopEndMs = clamped) }
         if (current.isLoopEnabled) {
-            playbackManager.setLoopRegion(start, clamped)
+            audioEngine.setLoopRegion(start, clamped)
         }
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────
 
+    /** Reload tracks from DB and re-prepare the native engine. */
     private suspend fun reloadAndPrepare() {
         val ideaId = currentIdeaId ?: return
         val tracks = studioRepo.getTracks(ideaId)
         _state.update { it.copy(tracks = tracks) }
-        playbackManager.prepare(tracks, ::getAudioFile)
+        loadTracksIntoEngine(tracks)
 
         // Clamp loop region if total duration changed
-        val total = playbackManager.totalDurationMs.value
+        val total = audioEngine.totalDurationMs.value
         val current = _state.value
         if (current.loopStartMs != null && current.loopEndMs != null) {
             val clampedEnd = current.loopEndMs.coerceAtMost(total)
@@ -546,27 +568,33 @@ class StudioViewModel @Inject constructor(
                 (clampedEnd - MIN_LOOP_DURATION_MS).coerceAtLeast(0L)
             )
             if (clampedEnd - clampedStart < MIN_LOOP_DURATION_MS) {
-                // Region no longer valid — clear it
                 clearLoopRegion()
             } else if (clampedStart != current.loopStartMs || clampedEnd != current.loopEndMs) {
                 _state.update { it.copy(loopStartMs = clampedStart, loopEndMs = clampedEnd) }
                 if (current.isLoopEnabled) {
-                    playbackManager.setLoopRegion(clampedStart, clampedEnd)
+                    audioEngine.setLoopRegion(clampedStart, clampedEnd)
                 }
             } else if (current.isLoopEnabled) {
-                // Re-sync after prepare (prepare resets playback manager state)
-                playbackManager.setLoopRegion(clampedStart, clampedEnd)
+                audioEngine.setLoopRegion(clampedStart, clampedEnd)
             }
         }
+    }
+
+    /** Reload tracks from DB without re-preparing the engine. */
+    private suspend fun reloadTracks() {
+        val ideaId = currentIdeaId ?: return
+        val tracks = studioRepo.getTracks(ideaId)
+        _state.update { it.copy(tracks = tracks) }
     }
 
     fun getAudioFile(name: String): File = recordingStorage.getAudioFile(name)
 
     override fun onCleared() {
         super.onCleared()
+        tickJob?.cancel()
         if (audioEngine.isRecordingActive()) {
             audioEngine.stopRecording()
         }
-        playbackManager.release()
+        audioEngine.removeAllTracks()
     }
 }

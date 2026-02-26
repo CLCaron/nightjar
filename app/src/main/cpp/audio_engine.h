@@ -12,14 +12,12 @@
 namespace nightjar {
 
 class OboeRecordingStream;
+class OboePlaybackStream;
+class TrackMixer;
+struct AtomicTransport;
 
 /**
  * Top-level audio engine managing Oboe input (recording) and output (playback) streams.
- *
- * Phase 1: skeleton with init/shutdown only.
- * Phase 2: recording via OboeRecordingStream + WavWriter.
- * Phase 3: playback via OboePlaybackStream + TrackMixer.
- * Phase 4: hardware timestamps for latency measurement.
  */
 class AudioEngine {
 public:
@@ -37,65 +35,50 @@ public:
         return initialized_.load(std::memory_order_acquire);
     }
 
-    // ── Recording API (Phase 2) ─────────────────────────────────────────
-
-    /**
-     * Start recording to the given WAV file path.
-     * Opens the Oboe input stream and WAV writer, begins capturing audio.
-     * Write gate is closed — call openWriteGate() to begin writing to disk.
-     */
+    // ── Recording API ───────────────────────────────────────────────────
     bool startRecording(const char* filePath);
-
-    /**
-     * Block until the recording stream's first audio callback has fired.
-     * Returns true if the pipeline is hot, false on timeout.
-     */
     bool awaitFirstBuffer(int timeoutMs);
-
-    /** Open the write gate — captured audio is written to the WAV file. */
     void openWriteGate();
-
-    /**
-     * Stop recording, patch WAV header, close the file.
-     * Returns duration in ms, or -1 if nothing was captured.
-     */
     int64_t stopRecording();
-
-    /** Returns true if a recording is in progress. */
     bool isRecordingActive() const;
-
-    /** Peak amplitude of the most recent audio callback, 0–1. */
     float getLatestPeakAmplitude() const;
-
-    /** Duration of audio written so far, in ms. */
     int64_t getRecordedDurationMs() const;
 
-    // ── Playback API (Phase 3) ──────────────────────────────────────────
-    // bool addTrack(...);
-    // void removeTrack(int trackId);
-    // void removeAllTracks();
-    // void play();
-    // void pause();
-    // void seekTo(int64_t positionMs);
-    // bool isPlaying() const;
-    // int64_t getPositionMs() const;
-    // int64_t getTotalDurationMs() const;
+    // ── Playback API ────────────────────────────────────────────────────
+    bool addTrack(int trackId, const char* filePath,
+                  int64_t durationMs, int64_t offsetMs,
+                  int64_t trimStartMs, int64_t trimEndMs,
+                  float volume, bool muted);
+    void removeTrack(int trackId);
+    void removeAllTracks();
+    void play();
+    void pause();
+    void seekTo(int64_t positionMs);
+    bool isPlaying() const;
+    int64_t getPositionMs() const;
+    int64_t getTotalDurationMs() const;
 
-    // ── Per-track controls (Phase 3) ────────────────────────────────────
-    // void setTrackVolume(int trackId, float volume);
-    // void setTrackMuted(int trackId, bool muted);
+    // ── Per-track controls ──────────────────────────────────────────────
+    void setTrackVolume(int trackId, float volume);
+    void setTrackMuted(int trackId, bool muted);
 
-    // ── Loop (Phase 5) ──────────────────────────────────────────────────
-    // void setLoopRegion(int64_t startMs, int64_t endMs);
-    // void clearLoopRegion();
+    // ── Loop ────────────────────────────────────────────────────────────
+    void setLoopRegion(int64_t startMs, int64_t endMs);
+    void clearLoopRegion();
 
-    // ── Sync (Phase 4) ──────────────────────────────────────────────────
-    // int64_t getOutputLatencyMs() const;
-    // int64_t getInputLatencyMs() const;
+    // ── Overdub support ─────────────────────────────────────────────────
+    void setRecording(bool active);
+
+    // ── Hardware latency measurement ──────────────────────────────────
+    int64_t getOutputLatencyMs() const;
+    int64_t getInputLatencyMs() const;
 
 private:
     std::atomic<bool> initialized_{false};
     std::unique_ptr<OboeRecordingStream> recordingStream_;
+    std::unique_ptr<TrackMixer> mixer_;
+    std::unique_ptr<AtomicTransport> transport_;
+    std::unique_ptr<OboePlaybackStream> playbackStream_;
 };
 
 }  // namespace nightjar

@@ -8,7 +8,6 @@ import com.example.nightjar.data.db.entity.TrackEntity
 import com.example.nightjar.data.repository.StudioRepository
 import com.example.nightjar.data.repository.IdeaRepository
 import com.example.nightjar.data.storage.RecordingStorage
-import com.example.nightjar.player.StudioPlaybackManager
 import com.example.nightjar.ui.studio.StudioAction
 import com.example.nightjar.ui.studio.StudioEffect
 import com.example.nightjar.ui.studio.StudioViewModel
@@ -16,9 +15,7 @@ import com.example.nightjar.util.MainDispatcherRule
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
-import io.mockk.just
 import io.mockk.mockk
-import io.mockk.runs
 import io.mockk.verify
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,9 +28,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
-// TODO: Kotlin K2 compiler internal error when MockK mocks StudioPlaybackManager
-//  (has @Inject + @ApplicationContext). Fix by extracting an interface for the manager,
-//  or by upgrading Kotlin past 2.0.21 where the K2 FIR bug is resolved.
 @OptIn(ExperimentalCoroutinesApi::class)
 class StudioViewModelTest {
 
@@ -56,24 +50,22 @@ class StudioViewModelTest {
         )
     )
 
-    private fun mockPlaybackManager(): StudioPlaybackManager {
-        val manager = mockk<StudioPlaybackManager>(relaxed = true)
-        every { manager.isPlaying } returns MutableStateFlow(false)
-        every { manager.globalPositionMs } returns MutableStateFlow(0L)
-        every { manager.totalDurationMs } returns MutableStateFlow(0L)
-        every { manager.setScope(any()) } just runs
-        return manager
+    private fun mockAudioEngine(): OboeAudioEngine {
+        val engine = mockk<OboeAudioEngine>(relaxed = true)
+        every { engine.isPlaying } returns MutableStateFlow(false)
+        every { engine.positionMs } returns MutableStateFlow(0L)
+        every { engine.totalDurationMs } returns MutableStateFlow(0L)
+        return engine
     }
 
     private fun createViewModel(
         ideaRepo: IdeaRepository = mockk(),
         studioRepo: StudioRepository = mockk(),
-        playbackManager: StudioPlaybackManager = mockPlaybackManager()
+        audioEngine: OboeAudioEngine = mockAudioEngine()
     ): StudioViewModel = StudioViewModel(
         ideaRepo = ideaRepo,
         studioRepo = studioRepo,
-        playbackManager = playbackManager,
-        audioEngine = mockk<OboeAudioEngine>(relaxed = true),
+        audioEngine = audioEngine,
         recordingStorage = mockk<RecordingStorage>(relaxed = true),
         latencyEstimator = mockk<AudioLatencyEstimator>(relaxed = true)
     )
@@ -161,32 +153,32 @@ class StudioViewModelTest {
     }
 
     @Test
-    fun `play action delegates to playback manager`() = runTest(mainDispatcherRule.dispatcher.scheduler) {
-        val manager = mockPlaybackManager()
-        val vm = createViewModel(playbackManager = manager)
+    fun `play action delegates to audio engine`() = runTest(mainDispatcherRule.dispatcher.scheduler) {
+        val engine = mockAudioEngine()
+        val vm = createViewModel(audioEngine = engine)
 
         vm.onAction(StudioAction.Play)
 
-        verify { manager.play() }
+        verify { engine.play() }
     }
 
     @Test
-    fun `pause action delegates to playback manager`() = runTest(mainDispatcherRule.dispatcher.scheduler) {
-        val manager = mockPlaybackManager()
-        val vm = createViewModel(playbackManager = manager)
+    fun `pause action delegates to audio engine`() = runTest(mainDispatcherRule.dispatcher.scheduler) {
+        val engine = mockAudioEngine()
+        val vm = createViewModel(audioEngine = engine)
 
         vm.onAction(StudioAction.Pause)
 
-        verify { manager.pause() }
+        verify { engine.pause() }
     }
 
     @Test
-    fun `seek action delegates to playback manager`() = runTest(mainDispatcherRule.dispatcher.scheduler) {
-        val manager = mockPlaybackManager()
-        val vm = createViewModel(playbackManager = manager)
+    fun `seek action delegates to audio engine`() = runTest(mainDispatcherRule.dispatcher.scheduler) {
+        val engine = mockAudioEngine()
+        val vm = createViewModel(audioEngine = engine)
 
         vm.onAction(StudioAction.SeekFinished(5000L))
 
-        verify { manager.seekTo(5000L) }
+        verify { engine.seekTo(5000L) }
     }
 }

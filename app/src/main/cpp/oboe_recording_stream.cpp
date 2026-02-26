@@ -129,6 +129,15 @@ int64_t OboeRecordingStream::stop() {
     return durationMs;
 }
 
+int64_t OboeRecordingStream::getInputLatencyMs() const {
+    if (!stream_) return -1;
+    auto result = stream_->calculateLatencyMillis();
+    if (result) {
+        return static_cast<int64_t>(result.value());
+    }
+    return -1;
+}
+
 // ── Audio callback (real-time thread — NO allocations, locks, or I/O) ──
 
 oboe::DataCallbackResult OboeRecordingStream::onAudioReady(
