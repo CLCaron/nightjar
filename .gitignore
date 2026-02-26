@@ -23,6 +23,10 @@ local.properties
 .DS_Store
 Thumbs.db
 
+# NDK / CMake build cache
+.cxx/
+app/.cxx/
+
 # Claude Code
 CLAUDE.md
 .claude/
