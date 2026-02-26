@@ -2,7 +2,7 @@ package com.example.nightjar.ui.record
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.nightjar.audio.WavRecorder
+import com.example.nightjar.audio.OboeAudioEngine
 import com.example.nightjar.data.repository.IdeaRepository
 import com.example.nightjar.data.storage.RecordingStorage
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.io.File
 import javax.inject.Inject
 import kotlin.coroutines.cancellation.CancellationException
 
@@ -28,7 +29,7 @@ import kotlin.coroutines.cancellation.CancellationException
  */
 @HiltViewModel
 class RecordViewModel @Inject constructor(
-    private val recorder: WavRecorder,
+    private val audioEngine: OboeAudioEngine,
     private val recordingStorage: RecordingStorage,
     private val repo: IdeaRepository
 ) : ViewModel() {
@@ -42,6 +43,7 @@ class RecordViewModel @Inject constructor(
     private var startJob: Job? = null
     private var amplitudeTickJob: Job? = null
     private val amplitudeBuffer = ArrayList<Float>()
+    private var recordingFile: File? = null
 
     fun onAction(action: RecordAction) {
         when (action) {
@@ -58,17 +60,28 @@ class RecordViewModel @Inject constructor(
     fun startRecording() {
         // Clear any post-recording state — starting fresh
         amplitudeBuffer.clear()
+        recordingFile = null
         _state.value = RecordUiState(isRecording = true)
         startJob = viewModelScope.launch {
             try {
                 val file = recordingStorage.createRecordingFile()
-                recorder.start(file)
-                recorder.awaitFirstBuffer()
-                recorder.markWriting()
+                recordingFile = file
+                val started = audioEngine.startRecording(file.absolutePath)
+                if (!started) {
+                    recordingFile = null
+                    _state.value = _state.value.copy(
+                        isRecording = false,
+                        errorMessage = "Failed to start recording."
+                    )
+                    return@launch
+                }
+                audioEngine.awaitFirstBuffer()
+                audioEngine.openWriteGate()
                 startAmplitudeTicker()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                recordingFile = null
                 _state.value = _state.value.copy(
                     isRecording = false,
                     errorMessage = e.message ?: "Failed to start recording."
@@ -81,7 +94,7 @@ class RecordViewModel @Inject constructor(
         amplitudeTickJob?.cancel()
         amplitudeTickJob = viewModelScope.launch {
             while (isActive) {
-                val peak = recorder.latestPeakAmplitude
+                val peak = audioEngine.getLatestPeakAmplitude()
                 amplitudeBuffer.add(peak)
                 _state.value = _state.value.copy(
                     liveAmplitudes = amplitudeBuffer.toFloatArray()
@@ -102,8 +115,11 @@ class RecordViewModel @Inject constructor(
         startJob = null
         _state.value = _state.value.copy(errorMessage = null)
 
-        val result = try {
-            recorder.stop()
+        val file = recordingFile
+        recordingFile = null
+
+        val durationMs = try {
+            audioEngine.stopRecording()
         } catch (e: Exception) {
             val msg = e.message ?: "Failed to stop/save recording."
             _state.value = _state.value.copy(isRecording = false, errorMessage = msg)
@@ -113,19 +129,19 @@ class RecordViewModel @Inject constructor(
 
         _state.value = _state.value.copy(isRecording = false)
 
-        if (result == null) {
+        if (durationMs <= 0 || file == null) {
             _state.value = _state.value.copy(errorMessage = "Failed to save audio.")
             return
         }
 
         viewModelScope.launch {
             try {
-                val ideaId = repo.createIdeaWithTrack(result.file, result.durationMs)
+                val ideaId = repo.createIdeaWithTrack(file, durationMs)
                 _state.value = _state.value.copy(
                     liveAmplitudes = FloatArray(0),
                     postRecording = PostRecordingState(
                         ideaId = ideaId,
-                        audioFile = result.file
+                        audioFile = file
                     )
                 )
             } catch (e: Exception) {
@@ -143,17 +159,20 @@ class RecordViewModel @Inject constructor(
         startJob?.cancel()
         startJob = null
 
-        val result = recorder.stop()
+        val file = recordingFile
+        recordingFile = null
+
+        val durationMs = audioEngine.stopRecording()
         _state.value = _state.value.copy(isRecording = false, liveAmplitudes = FloatArray(0))
 
-        if (result != null) {
+        if (durationMs > 0 && file != null) {
             viewModelScope.launch {
                 try {
-                    val ideaId = repo.createIdeaWithTrack(result.file, result.durationMs)
+                    val ideaId = repo.createIdeaWithTrack(file, durationMs)
                     _state.value = _state.value.copy(
                         postRecording = PostRecordingState(
                             ideaId = ideaId,
-                            audioFile = result.file
+                            audioFile = file
                         )
                     )
                 } catch (_: Exception) {
@@ -203,7 +222,11 @@ class RecordViewModel @Inject constructor(
         super.onCleared()
         stopAmplitudeTicker()
         startJob?.cancel()
-        recorder.release()
+        // Engine is app-scoped singleton — don't release it here.
+        // Just stop recording if it's still in progress.
+        if (audioEngine.isRecordingActive()) {
+            audioEngine.stopRecording()
+        }
     }
 
     private companion object {

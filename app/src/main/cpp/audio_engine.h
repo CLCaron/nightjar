@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <memory>
 #include <android/log.h>
 
 #define LOG_TAG "NightjarAudio"
@@ -10,6 +11,8 @@
 
 namespace nightjar {
 
+class OboeRecordingStream;
+
 /**
  * Top-level audio engine managing Oboe input (recording) and output (playback) streams.
  *
@@ -17,7 +20,6 @@ namespace nightjar {
  * Phase 2: recording via OboeRecordingStream + WavWriter.
  * Phase 3: playback via OboePlaybackStream + TrackMixer.
  * Phase 4: hardware timestamps for latency measurement.
- * Phase 5: loop region support, cleanup.
  */
 class AudioEngine {
 public:
@@ -36,13 +38,37 @@ public:
     }
 
     // ── Recording API (Phase 2) ─────────────────────────────────────────
-    // bool startRecording(const char* filePath);
-    // void openWriteGate();
-    // void stopRecording();
-    // bool isRecordingActive() const;
-    // float getLatestPeakAmplitude() const;
-    // int64_t getRecordedDurationMs() const;
-    // bool awaitFirstBuffer(int timeoutMs);
+
+    /**
+     * Start recording to the given WAV file path.
+     * Opens the Oboe input stream and WAV writer, begins capturing audio.
+     * Write gate is closed — call openWriteGate() to begin writing to disk.
+     */
+    bool startRecording(const char* filePath);
+
+    /**
+     * Block until the recording stream's first audio callback has fired.
+     * Returns true if the pipeline is hot, false on timeout.
+     */
+    bool awaitFirstBuffer(int timeoutMs);
+
+    /** Open the write gate — captured audio is written to the WAV file. */
+    void openWriteGate();
+
+    /**
+     * Stop recording, patch WAV header, close the file.
+     * Returns duration in ms, or -1 if nothing was captured.
+     */
+    int64_t stopRecording();
+
+    /** Returns true if a recording is in progress. */
+    bool isRecordingActive() const;
+
+    /** Peak amplitude of the most recent audio callback, 0–1. */
+    float getLatestPeakAmplitude() const;
+
+    /** Duration of audio written so far, in ms. */
+    int64_t getRecordedDurationMs() const;
 
     // ── Playback API (Phase 3) ──────────────────────────────────────────
     // bool addTrack(...);
@@ -69,6 +95,7 @@ public:
 
 private:
     std::atomic<bool> initialized_{false};
+    std::unique_ptr<OboeRecordingStream> recordingStream_;
 };
 
 }  // namespace nightjar
