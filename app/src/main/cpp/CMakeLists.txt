@@ -10,6 +10,8 @@ find_package(oboe REQUIRED CONFIG)
 add_library(nightjar-audio SHARED
     jni_bridge.cpp
     audio_engine.cpp
+    oboe_recording_stream.cpp
+    wav_writer.cpp
 )
 
 target_link_libraries(nightjar-audio

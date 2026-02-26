@@ -1,14 +1,12 @@
 package com.example.nightjar.ui.record
 
 import app.cash.turbine.test
-import com.example.nightjar.audio.WavRecorder
-import com.example.nightjar.audio.WavRecordingResult
+import com.example.nightjar.audio.OboeAudioEngine
 import com.example.nightjar.data.repository.IdeaRepository
 import com.example.nightjar.data.storage.RecordingStorage
 import com.example.nightjar.util.MainDispatcherRule
 import io.mockk.coEvery
 import io.mockk.every
-import io.mockk.justRun
 import io.mockk.mockk
 import io.mockk.verify
 import java.io.File
@@ -31,18 +29,29 @@ class RecordViewModelTest {
     @get:Rule
     val mainDispatcherRule = MainDispatcherRule(testDispatcher)
 
+    private fun mockAudioEngine(
+        startResult: Boolean = true,
+        awaitResult: Boolean = true,
+        stopDurationMs: Long = 3000L
+    ): OboeAudioEngine {
+        val engine = mockk<OboeAudioEngine>(relaxed = true)
+        every { engine.startRecording(any()) } returns startResult
+        coEvery { engine.awaitFirstBuffer(any()) } returns awaitResult
+        every { engine.stopRecording() } returns stopDurationMs
+        every { engine.isRecordingActive() } returns false
+        every { engine.getLatestPeakAmplitude() } returns 0f
+        return engine
+    }
+
     @Test
     fun `start recording updates state`() = runTest(testDispatcher.scheduler) {
-        val recorder = mockk<WavRecorder>()
+        val engine = mockAudioEngine()
         val storage = mockk<RecordingStorage>()
         val repo = mockk<IdeaRepository>()
         val file = File("nightjar_20260218_120000.wav")
         every { storage.createRecordingFile(any(), any()) } returns file
-        justRun { recorder.start(file) }
-        coEvery { recorder.awaitFirstBuffer() } returns Unit
-        justRun { recorder.markWriting() }
 
-        val viewModel = RecordViewModel(recorder, storage, repo)
+        val viewModel = RecordViewModel(engine, storage, repo)
         viewModel.startRecording()
 
         assertTrue(viewModel.state.value.isRecording)
@@ -51,37 +60,41 @@ class RecordViewModelTest {
 
         assertTrue(viewModel.state.value.isRecording)
         assertEquals(null, viewModel.state.value.errorMessage)
-        verify { recorder.start(file) }
+        verify { engine.startRecording(file.absolutePath) }
     }
 
     @Test
     fun `start recording handles errors`() = runTest(testDispatcher.scheduler) {
-        val recorder = mockk<WavRecorder>()
+        val engine = mockAudioEngine(startResult = false)
         val storage = mockk<RecordingStorage>()
         val repo = mockk<IdeaRepository>()
         val file = File("nightjar_20260218_120000.wav")
         every { storage.createRecordingFile(any(), any()) } returns file
-        every { recorder.start(file) } throws IllegalStateException("no mic")
 
-        val viewModel = RecordViewModel(recorder, storage, repo)
+        val viewModel = RecordViewModel(engine, storage, repo)
         viewModel.startRecording()
         advanceUntilIdle()
 
         assertFalse(viewModel.state.value.isRecording)
-        assertEquals("no mic", viewModel.state.value.errorMessage)
+        assertEquals("Failed to start recording.", viewModel.state.value.errorMessage)
     }
 
     @Test
     fun `stop and save enters post-recording state`() = runTest(testDispatcher.scheduler) {
-        val recorder = mockk<WavRecorder>()
+        val engine = mockAudioEngine(stopDurationMs = 3000L)
         val storage = mockk<RecordingStorage>()
         val repo = mockk<IdeaRepository>()
-        val saved = File("saved.wav")
-        val result = WavRecordingResult(file = saved, durationMs = 3000L)
-        every { recorder.stop() } returns result
-        coEvery { repo.createIdeaWithTrack(saved, 3000L) } returns 42L
+        val file = File("nightjar_20260218_120000.wav")
+        every { storage.createRecordingFile(any(), any()) } returns file
+        coEvery { repo.createIdeaWithTrack(file, 3000L) } returns 42L
 
-        val viewModel = RecordViewModel(recorder, storage, repo)
+        val viewModel = RecordViewModel(engine, storage, repo)
+
+        // Start recording first so recordingFile is set
+        viewModel.startRecording()
+        advanceUntilIdle()
+
+        // Now stop
         viewModel.onAction(RecordAction.StopAndSave)
         advanceUntilIdle()
 
@@ -89,17 +102,17 @@ class RecordViewModelTest {
         val post = viewModel.state.value.postRecording
         assertNotNull(post)
         assertEquals(42L, post!!.ideaId)
-        assertEquals(saved, post.audioFile)
+        assertEquals(file, post.audioFile)
     }
 
     @Test
-    fun `stop and save handles recorder errors`() = runTest(testDispatcher.scheduler) {
-        val recorder = mockk<WavRecorder>()
+    fun `stop and save handles engine errors`() = runTest(testDispatcher.scheduler) {
+        val engine = mockk<OboeAudioEngine>(relaxed = true)
+        every { engine.stopRecording() } throws IllegalStateException("stop failed")
         val storage = mockk<RecordingStorage>()
         val repo = mockk<IdeaRepository>()
-        every { recorder.stop() } throws IllegalStateException("stop failed")
 
-        val viewModel = RecordViewModel(recorder, storage, repo)
+        val viewModel = RecordViewModel(engine, storage, repo)
 
         viewModel.effects.test {
             viewModel.onAction(RecordAction.StopAndSave)
@@ -115,21 +128,14 @@ class RecordViewModelTest {
 
     @Test
     fun `stop for background creates idea and enters post-recording`() = runTest(testDispatcher.scheduler) {
-        val recorder = mockk<WavRecorder>()
+        val engine = mockAudioEngine(stopDurationMs = 1000L)
         val storage = mockk<RecordingStorage>()
         val repo = mockk<IdeaRepository>()
         val file = File("nightjar_20260218_120000.wav")
         every { storage.createRecordingFile(any(), any()) } returns file
-        justRun { recorder.start(file) }
-        coEvery { recorder.awaitFirstBuffer() } returns Unit
-        justRun { recorder.markWriting() }
+        coEvery { repo.createIdeaWithTrack(file, 1000L) } returns 99L
 
-        val bgFile = File("background.wav")
-        val result = WavRecordingResult(file = bgFile, durationMs = 1000L)
-        every { recorder.stop() } returns result
-        coEvery { repo.createIdeaWithTrack(bgFile, 1000L) } returns 99L
-
-        val viewModel = RecordViewModel(recorder, storage, repo)
+        val viewModel = RecordViewModel(engine, storage, repo)
         viewModel.startRecording()
         advanceUntilIdle()
         viewModel.onAction(RecordAction.StopForBackground)
@@ -139,23 +145,24 @@ class RecordViewModelTest {
         val post = viewModel.state.value.postRecording
         assertNotNull(post)
         assertEquals(99L, post!!.ideaId)
-        assertEquals(bgFile, post.audioFile)
-        verify { recorder.stop() }
+        assertEquals(file, post.audioFile)
+        verify { engine.stopRecording() }
     }
 
     @Test
     fun `GoToOverview emits OpenOverview and clears post-recording`() = runTest(testDispatcher.scheduler) {
-        val recorder = mockk<WavRecorder>()
+        val engine = mockAudioEngine(stopDurationMs = 2000L)
         val storage = mockk<RecordingStorage>()
         val repo = mockk<IdeaRepository>()
-        val saved = File("saved.wav")
-        val result = WavRecordingResult(file = saved, durationMs = 2000L)
-        every { recorder.stop() } returns result
-        coEvery { repo.createIdeaWithTrack(saved, 2000L) } returns 7L
+        val file = File("saved.wav")
+        every { storage.createRecordingFile(any(), any()) } returns file
+        coEvery { repo.createIdeaWithTrack(file, 2000L) } returns 7L
 
-        val viewModel = RecordViewModel(recorder, storage, repo)
+        val viewModel = RecordViewModel(engine, storage, repo)
 
-        // Enter post-recording state
+        // Start and stop to enter post-recording state
+        viewModel.startRecording()
+        advanceUntilIdle()
         viewModel.onAction(RecordAction.StopAndSave)
         advanceUntilIdle()
         assertNotNull(viewModel.state.value.postRecording)
@@ -175,17 +182,18 @@ class RecordViewModelTest {
 
     @Test
     fun `GoToStudio emits OpenStudio and clears post-recording`() = runTest(testDispatcher.scheduler) {
-        val recorder = mockk<WavRecorder>()
+        val engine = mockAudioEngine(stopDurationMs = 2000L)
         val storage = mockk<RecordingStorage>()
         val repo = mockk<IdeaRepository>()
-        val saved = File("saved.wav")
-        val result = WavRecordingResult(file = saved, durationMs = 2000L)
-        every { recorder.stop() } returns result
-        coEvery { repo.createIdeaWithTrack(saved, 2000L) } returns 7L
+        val file = File("saved.wav")
+        every { storage.createRecordingFile(any(), any()) } returns file
+        coEvery { repo.createIdeaWithTrack(file, 2000L) } returns 7L
 
-        val viewModel = RecordViewModel(recorder, storage, repo)
+        val viewModel = RecordViewModel(engine, storage, repo)
 
-        // Enter post-recording state
+        // Start and stop to enter post-recording state
+        viewModel.startRecording()
+        advanceUntilIdle()
         viewModel.onAction(RecordAction.StopAndSave)
         advanceUntilIdle()
         assertNotNull(viewModel.state.value.postRecording)
@@ -205,23 +213,18 @@ class RecordViewModelTest {
 
     @Test
     fun `StartRecording clears post-recording state`() = runTest(testDispatcher.scheduler) {
-        val recorder = mockk<WavRecorder>()
+        val engine = mockAudioEngine(stopDurationMs = 2000L)
         val storage = mockk<RecordingStorage>()
         val repo = mockk<IdeaRepository>()
-        val saved = File("saved.wav")
-        val result = WavRecordingResult(file = saved, durationMs = 2000L)
-        every { recorder.stop() } returns result
-        coEvery { repo.createIdeaWithTrack(saved, 2000L) } returns 7L
+        val file = File("saved.wav")
+        every { storage.createRecordingFile(any(), any()) } returns file
+        coEvery { repo.createIdeaWithTrack(file, 2000L) } returns 7L
 
-        val newFile = File("new.wav")
-        every { storage.createRecordingFile(any(), any()) } returns newFile
-        justRun { recorder.start(newFile) }
-        coEvery { recorder.awaitFirstBuffer() } returns Unit
-        justRun { recorder.markWriting() }
+        val viewModel = RecordViewModel(engine, storage, repo)
 
-        val viewModel = RecordViewModel(recorder, storage, repo)
-
-        // Enter post-recording state
+        // Start and stop to enter post-recording state
+        viewModel.startRecording()
+        advanceUntilIdle()
         viewModel.onAction(RecordAction.StopAndSave)
         advanceUntilIdle()
         assertNotNull(viewModel.state.value.postRecording)

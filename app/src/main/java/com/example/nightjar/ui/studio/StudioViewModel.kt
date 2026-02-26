@@ -4,7 +4,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.nightjar.audio.AudioLatencyEstimator
-import com.example.nightjar.audio.WavRecorder
+import com.example.nightjar.audio.OboeAudioEngine
 import com.example.nightjar.data.repository.StudioRepository
 import com.example.nightjar.data.repository.IdeaRepository
 import com.example.nightjar.data.storage.RecordingStorage
@@ -27,11 +27,11 @@ import javax.inject.Inject
 /**
  * ViewModel for the Studio (multi-track workspace) screen.
  *
- * Coordinates overdub recording via [WavRecorder], multi-track playback
+ * Coordinates overdub recording via [OboeAudioEngine], multi-track playback
  * via [StudioPlaybackManager], and timeline editing (drag-to-reposition,
  * trim). Recording synchronization follows this protocol:
  *
- * 1. Start [WavRecorder] and wait for the audio pipeline to become hot.
+ * 1. Start Oboe recording and wait for the audio pipeline to become hot.
  * 2. Start playback and wait for audio to actually render to the speaker.
  * 3. Open the WAV write gate — audio is captured in sync with playback.
  * 4. On stop, save the new track at the captured timeline offset.
@@ -41,7 +41,7 @@ class StudioViewModel @Inject constructor(
     private val ideaRepo: IdeaRepository,
     private val studioRepo: StudioRepository,
     private val playbackManager: StudioPlaybackManager,
-    private val wavRecorder: WavRecorder,
+    private val audioEngine: OboeAudioEngine,
     private val recordingStorage: RecordingStorage,
     private val latencyEstimator: AudioLatencyEstimator
 ) : ViewModel() {
@@ -236,13 +236,17 @@ class StudioViewModel @Inject constructor(
                 val intendedStartMs = playbackManager.globalPositionMs.value
 
                 // ── Pre-roll capture protocol ────────────────────────────
-                // 1. Start AudioRecord and wait for pipeline to become hot
-                wavRecorder.start(file)
-                wavRecorder.awaitFirstBuffer()
+                // 1. Start Oboe recording and wait for pipeline to become hot
+                val started = audioEngine.startRecording(file.absolutePath)
+                if (!started) {
+                    _effects.emit(StudioEffect.ShowError("Failed to start recording."))
+                    return@launch
+                }
+                audioEngine.awaitFirstBuffer()
 
                 // 2. Open write gate BEFORE playback — captures pre-roll
                 //    silence that serves as a safety buffer for compensation
-                wavRecorder.markWriting()
+                audioEngine.openWriteGate()
                 val writeGateNanos = System.nanoTime()
 
                 // 3. Start playback and await rendering
@@ -293,11 +297,13 @@ class StudioViewModel @Inject constructor(
         recordingTickJob?.cancel()
         recordingTickJob = null
 
-        val result = wavRecorder.stop()
+        val durationMs = audioEngine.stopRecording()
+        val file = recordingFile
+        recordingFile = null
 
         _state.update { it.copy(isRecording = false, recordingElapsedMs = 0L) }
 
-        if (result == null) {
+        if (durationMs <= 0 || file == null) {
             viewModelScope.launch {
                 _effects.emit(StudioEffect.ShowError("Recording failed — no audio captured."))
             }
@@ -306,19 +312,19 @@ class StudioViewModel @Inject constructor(
 
         // Clamp trimStartMs so it never exceeds what would leave less than
         // MIN_EFFECTIVE_DURATION_MS of audible audio.
-        val maxTrim = (result.durationMs - MIN_EFFECTIVE_DURATION_MS).coerceAtLeast(0L)
+        val maxTrim = (durationMs - MIN_EFFECTIVE_DURATION_MS).coerceAtLeast(0L)
         val safeTrimStartMs = recordingTrimStartMs.coerceIn(0L, maxTrim)
 
-        Log.d(TAG, "Recording stopped: file=${result.file.name}, " +
-            "durationMs=${result.durationMs}, offsetMs=$recordingStartGlobalMs, " +
+        Log.d(TAG, "Recording stopped: file=${file.name}, " +
+            "durationMs=$durationMs, offsetMs=$recordingStartGlobalMs, " +
             "trimStartMs=$safeTrimStartMs (raw=${recordingTrimStartMs})")
 
         viewModelScope.launch {
             try {
                 studioRepo.addTrack(
                     ideaId = ideaId,
-                    audioFile = result.file,
-                    durationMs = result.durationMs,
+                    audioFile = file,
+                    durationMs = durationMs,
                     offsetMs = recordingStartGlobalMs,
                     trimStartMs = safeTrimStartMs
                 )
@@ -558,10 +564,9 @@ class StudioViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
-        if (wavRecorder.isActive()) {
-            wavRecorder.stop()
+        if (audioEngine.isRecordingActive()) {
+            audioEngine.stopRecording()
         }
-        wavRecorder.release()
         playbackManager.release()
     }
 }

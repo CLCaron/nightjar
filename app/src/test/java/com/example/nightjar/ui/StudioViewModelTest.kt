@@ -2,7 +2,7 @@ package com.example.nightjar.ui
 
 import app.cash.turbine.test
 import com.example.nightjar.audio.AudioLatencyEstimator
-import com.example.nightjar.audio.WavRecorder
+import com.example.nightjar.audio.OboeAudioEngine
 import com.example.nightjar.data.db.entity.IdeaEntity
 import com.example.nightjar.data.db.entity.TrackEntity
 import com.example.nightjar.data.repository.StudioRepository
@@ -73,7 +73,7 @@ class StudioViewModelTest {
         ideaRepo = ideaRepo,
         studioRepo = studioRepo,
         playbackManager = playbackManager,
-        wavRecorder = mockk<WavRecorder>(relaxed = true),
+        audioEngine = mockk<OboeAudioEngine>(relaxed = true),
         recordingStorage = mockk<RecordingStorage>(relaxed = true),
         latencyEstimator = mockk<AudioLatencyEstimator>(relaxed = true)
     )
