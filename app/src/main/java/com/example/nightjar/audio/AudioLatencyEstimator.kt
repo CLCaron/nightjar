@@ -200,9 +200,7 @@ class AudioLatencyEstimator @Inject constructor(
      *
      * Output latency is always applied when [hasPlayableTracks] is true.
      * The output estimate is the dominant latency component (especially
-     * for Bluetooth at ~150-300ms) and must not be gated behind a
-     * rendering confirmation — Android's audio pipeline introduces this
-     * delay regardless of when ExoPlayer reports its playing state.
+     * for Bluetooth at ~150-300ms).
      *
      * @param preRollMs milliseconds of audio captured before playback
      *   started (the "safety buffer")

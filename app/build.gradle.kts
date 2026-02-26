@@ -90,10 +90,6 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     kapt(libs.androidx.room.compiler)
 
-    // Media3
-    implementation(libs.androidx.media3.exoplayer)
-    implementation(libs.androidx.media3.ui)
-
     // Oboe (native audio engine)
     implementation(libs.oboe)
 

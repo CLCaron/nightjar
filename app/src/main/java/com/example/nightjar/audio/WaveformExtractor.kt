@@ -189,7 +189,7 @@ suspend fun extractCompositeWaveform(
     val activeTracks = tracks.filter { !it.isMuted }
     if (activeTracks.isEmpty()) return@withContext FloatArray(0)
 
-    // Compute the total timeline duration (same logic as StudioPlaybackManager).
+    // Compute the total timeline duration.
     val totalDurationMs = activeTracks.maxOf { track ->
         val effectiveDuration = track.durationMs - track.trimStartMs - track.trimEndMs
         track.offsetMs + effectiveDuration.coerceAtLeast(0L)
