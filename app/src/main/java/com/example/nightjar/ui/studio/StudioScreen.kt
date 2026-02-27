@@ -52,8 +52,9 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.nightjar.ui.components.NjScrubber
 import com.example.nightjar.ui.components.NjTopBar
-import com.example.nightjar.ui.theme.NjAccent
-import com.example.nightjar.ui.theme.NjStarlight
+import com.example.nightjar.ui.theme.NjStudioAccent
+import com.example.nightjar.ui.theme.NjStudioBg
+import com.example.nightjar.ui.theme.NjStudioWaveform
 import kotlinx.coroutines.flow.collectLatest
 
 /**
@@ -134,6 +135,7 @@ fun StudioScreen(
     }
 
     Scaffold(
+        containerColor = NjStudioBg,
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         floatingActionButton = {
             if (!state.isLoading && state.errorMessage == null && !state.isRecording) {
@@ -209,12 +211,12 @@ fun StudioScreen(
                             onClick = { vm.onAction(StudioAction.ToggleLoop) },
                             minHeight = 36.dp,
                             containerColor = if (state.isLoopEnabled) {
-                                NjAccent.copy(alpha = 0.25f)
+                                NjStudioAccent.copy(alpha = 0.25f)
                             } else {
                                 MaterialTheme.colorScheme.surfaceVariant
                             },
                             contentColor = if (state.isLoopEnabled) {
-                                NjAccent
+                                NjStudioAccent
                             } else {
                                 MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
                             }
@@ -264,6 +266,8 @@ fun StudioScreen(
                     loopStartMs = state.loopStartMs,
                     loopEndMs = state.loopEndMs,
                     isLoopEnabled = state.isLoopEnabled,
+                    expandedTrackId = state.expandedTrackId,
+                    soloedTrackIds = state.soloedTrackIds,
                     getAudioFile = vm::getAudioFile,
                     onAction = vm::onAction
                 )
@@ -278,7 +282,10 @@ fun StudioScreen(
                     onScrubFinished = { finalMs ->
                         isScrubbing = false
                         vm.onAction(StudioAction.SeekFinished(finalMs))
-                    }
+                    },
+                    activeColor = NjStudioAccent.copy(alpha = 0.6f),
+                    inactiveColor = NjStudioWaveform.copy(alpha = 0.15f),
+                    thumbColor = NjStudioAccent
                 )
             }
 
@@ -291,17 +298,6 @@ fun StudioScreen(
             onSelect = { type -> vm.onAction(StudioAction.SelectNewTrackType(type)) },
             onDismiss = { vm.onAction(StudioAction.DismissAddTrackSheet) }
         )
-    }
-
-    if (state.settingsTrackId != null) {
-        val settingsTrack = state.tracks.find { it.id == state.settingsTrackId }
-        if (settingsTrack != null) {
-            TrackSettingsSheet(
-                track = settingsTrack,
-                onAction = vm::onAction,
-                onDismiss = { vm.onAction(StudioAction.DismissTrackSettings) }
-            )
-        }
     }
 
     if (state.confirmingDeleteTrackId != null) {
@@ -355,7 +351,7 @@ private fun LatencySetupDialog(
                     Text(
                         text = diagnostics.deviceType.displayName,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = NjAccent
+                        color = NjStudioAccent
                     )
 
                     // Auto-estimated latency breakdown
@@ -385,7 +381,7 @@ private fun LatencySetupDialog(
                     Text(
                         text = "${manualOffsetMs}ms",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = if (manualOffsetMs != 0L) NjAccent
+                        color = if (manualOffsetMs != 0L) NjStudioAccent
                             else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                     )
 
@@ -468,7 +464,7 @@ private fun OffsetSlider(
 
         // Full track background
         drawLine(
-            color = NjStarlight.copy(alpha = 0.15f),
+            color = NjStudioWaveform.copy(alpha = 0.15f),
             start = Offset(0f, centerY),
             end = Offset(size.width, centerY),
             strokeWidth = trackHeight
@@ -476,7 +472,7 @@ private fun OffsetSlider(
 
         // Center tick mark
         drawLine(
-            color = NjStarlight.copy(alpha = 0.3f),
+            color = NjStudioWaveform.copy(alpha = 0.3f),
             start = Offset(centerX, centerY - 6.dp.toPx()),
             end = Offset(centerX, centerY + 6.dp.toPx()),
             strokeWidth = 1.dp.toPx()
@@ -487,7 +483,7 @@ private fun OffsetSlider(
             val fillStart = minOf(centerX, thumbX)
             val fillEnd = maxOf(centerX, thumbX)
             drawLine(
-                color = NjAccent.copy(alpha = 0.6f),
+                color = NjStudioAccent.copy(alpha = 0.6f),
                 start = Offset(fillStart, centerY),
                 end = Offset(fillEnd, centerY),
                 strokeWidth = trackHeight
@@ -496,7 +492,7 @@ private fun OffsetSlider(
 
         // Thumb
         drawCircle(
-            color = NjAccent,
+            color = NjStudioAccent,
             radius = thumbRadius,
             center = Offset(thumbX, centerY)
         )

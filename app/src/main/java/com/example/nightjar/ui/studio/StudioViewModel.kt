@@ -143,15 +143,16 @@ class StudioViewModel @Inject constructor(
             }
             StudioAction.ExecuteDeleteTrack -> executeDeleteTrack()
 
-            // Track settings
+            // Track drawer (inline settings panel) — toggle behavior
             is StudioAction.OpenTrackSettings -> {
-                _state.update { it.copy(settingsTrackId = action.trackId) }
-            }
-            StudioAction.DismissTrackSettings -> {
-                _state.update { it.copy(settingsTrackId = null) }
+                _state.update {
+                    val newId = if (it.expandedTrackId == action.trackId) null else action.trackId
+                    it.copy(expandedTrackId = newId)
+                }
             }
             is StudioAction.SetTrackMuted -> setTrackMuted(action.trackId, action.muted)
             is StudioAction.SetTrackVolume -> setTrackVolume(action.trackId, action.volume)
+            is StudioAction.ToggleSolo -> toggleSolo(action.trackId)
 
             // Loop
             is StudioAction.SetLoopRegion -> setLoopRegion(action.startMs, action.endMs)
@@ -454,15 +455,36 @@ class StudioViewModel @Inject constructor(
     // ── Track settings ─────────────────────────────────────────────────
 
     private fun setTrackMuted(trackId: Long, muted: Boolean) {
-        // Update native engine immediately for instant feedback
-        audioEngine.setTrackMuted(trackId.toInt(), muted)
         viewModelScope.launch {
             try {
                 studioRepo.setTrackMuted(trackId, muted)
                 reloadTracks()
+                reapplyEffectiveMute()
             } catch (e: Exception) {
                 _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to update track."))
             }
+        }
+    }
+
+    private fun toggleSolo(trackId: Long) {
+        _state.update { st ->
+            val newSet = if (trackId in st.soloedTrackIds) {
+                st.soloedTrackIds - trackId
+            } else {
+                st.soloedTrackIds + trackId
+            }
+            st.copy(soloedTrackIds = newSet)
+        }
+        reapplyEffectiveMute()
+    }
+
+    private fun reapplyEffectiveMute() {
+        val st = _state.value
+        val anySoloed = st.soloedTrackIds.isNotEmpty()
+        for (track in st.tracks) {
+            val effectivelyMuted = track.isMuted ||
+                (anySoloed && track.id !in st.soloedTrackIds)
+            audioEngine.setTrackMuted(track.id.toInt(), effectivelyMuted)
         }
     }
 
@@ -484,13 +506,20 @@ class StudioViewModel @Inject constructor(
 
     private fun executeDeleteTrack() {
         val trackId = _state.value.confirmingDeleteTrackId ?: return
-        _state.update { it.copy(confirmingDeleteTrackId = null) }
+        _state.update {
+            it.copy(
+                confirmingDeleteTrackId = null,
+                expandedTrackId = if (it.expandedTrackId == trackId) null else it.expandedTrackId,
+                soloedTrackIds = it.soloedTrackIds - trackId
+            )
+        }
 
         viewModelScope.launch {
             try {
                 audioEngine.pause()
                 studioRepo.deleteTrackAndAudio(trackId)
                 reloadAndPrepare()
+                reapplyEffectiveMute()
             } catch (e: Exception) {
                 _effects.emit(
                     StudioEffect.ShowError(e.message ?: "Failed to delete track.")

@@ -30,7 +30,8 @@ The home screen for a single idea. Play it back, edit the title and notes (auto-
 ### Studio
 A lightweight multi-track workspace. Not a replacement for professional tools, but the bridge between "I just thought of something" and "let me sit down and produce this." Layer recordings on top of each other, shift their timing, trim the edges, adjust volume and mute per track. Enough to know whether an idea is worth pursuing. Enough to jumpstart true production later.
 
-- **Overdub** — record new layers while existing tracks play back, with sample-accurate sync
+- **Overdub** — record new layers while existing tracks play back, with hardware-compensated sync
+- **Loop playback** — drag on the ruler to define a loop region, with draggable handles
 - **Drag to reposition** — long-press a track and slide it along the timeline
 - **Non-destructive trim** — drag handles on track edges
 - **Per-track controls** — volume, mute, delete
@@ -45,13 +46,12 @@ The **Library** is where ideas live long-term. Sort by newest, oldest, or favori
 
 ## Tech Stack
 
-- Kotlin, Jetpack Compose (Material 3)
+- Kotlin + C++17, Jetpack Compose (Material 3)
 - Room (SQLite) with schema migrations
 - Hilt dependency injection
 - Coroutines + Flow
 - Navigation Compose
-- Media3 ExoPlayer (multi-track playback)
-- AudioRecord via WavRecorder (16-bit PCM WAV at 44.1 kHz)
+- Oboe audio engine (C++ via NDK) — lock-free, callback-based recording and multi-track playback with hardware timestamp latency compensation
 
 ---
 
@@ -63,14 +63,16 @@ Nightjar is in active development, working toward a v1.0 Play Store release.
 - Full capture → save → organize → multi-track workflow
 - Three entry points for idea creation (record, write, studio)
 - Live waveform during recording with post-recording preview
-- Multi-track overdub with sync, drag-to-reposition, non-destructive trim
-- Per-track volume, mute, and delete
+- Native C++ audio engine (Oboe) — low-latency recording and multi-track playback
+- Multi-track overdub with hardware timestamp latency compensation
+- Drag-to-reposition, non-destructive trim, per-track volume/mute/delete
+- Loop playback with ruler-based region selection
 - Library with tag filtering and sort options
 - Overview with playback, waveform visualization, auto-saving notes, tags, sharing, and delete
 
 **What's next:**
 - Solo toggle, track rename/reorder, track labels
-- Looping a timeline segment
-- Studio entrance animation
+- Loop recording with auto-takes
 - Library long-press menu
+- Studio entrance animation
 - Play Store release prep

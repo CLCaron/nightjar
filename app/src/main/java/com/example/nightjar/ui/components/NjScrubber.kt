@@ -19,14 +19,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.Color
 import com.example.nightjar.ui.theme.NjAccent
 import com.example.nightjar.ui.theme.NjStarlight
 
 /**
- * Custom-drawn audio scrubber — thin track line with a small gold thumb dot.
+ * Custom-drawn audio scrubber — thin track line with a small thumb dot.
  *
  * Reports drag position via [onScrub] during the gesture and the final
  * committed position via [onScrubFinished] on release.
+ *
+ * Color parameters let callers override the default gold/starlight scheme
+ * (e.g. Studio uses its warm amber palette).
  */
 @Composable
 fun NjScrubber(
@@ -35,15 +39,14 @@ fun NjScrubber(
     onScrub: (Long) -> Unit,
     onScrubFinished: (Long) -> Unit,
     modifier: Modifier = Modifier,
-    showTime: Boolean = true
+    showTime: Boolean = true,
+    activeColor: Color = NjAccent.copy(alpha = 0.6f),
+    inactiveColor: Color = NjStarlight.copy(alpha = 0.15f),
+    thumbColor: Color = NjAccent
 ) {
     val safeDuration = durationMs.coerceAtLeast(1L)
     val safePos = positionMs.coerceIn(0L, safeDuration)
     val fraction = safePos.toFloat() / safeDuration.toFloat()
-
-    val activeColor = NjAccent.copy(alpha = 0.6f)
-    val inactiveColor = NjStarlight.copy(alpha = 0.15f)
-    val thumbColor = NjAccent
 
     var canvasWidth by remember { mutableFloatStateOf(0f) }
     var lastScrubMs by remember { mutableLongStateOf(0L) }

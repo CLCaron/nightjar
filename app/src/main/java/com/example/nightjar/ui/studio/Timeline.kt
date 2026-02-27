@@ -1,5 +1,13 @@
 package com.example.nightjar.ui.studio
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -13,7 +21,6 @@ import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
-
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -39,8 +46,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.graphicsLayer
@@ -57,9 +66,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.nightjar.data.db.entity.TrackEntity
 import com.example.nightjar.ui.components.NjWaveform
-import com.example.nightjar.ui.theme.NjAccent
-import com.example.nightjar.ui.theme.NjMidnight2
-import com.example.nightjar.ui.theme.NjStarlight
+import com.example.nightjar.ui.theme.NjStudioAccent
+import com.example.nightjar.ui.theme.NjStudioLane
+import com.example.nightjar.ui.theme.NjStudioWaveform
+import com.example.nightjar.ui.theme.NjTrackColors
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import java.io.File
@@ -76,12 +86,10 @@ private val TRIM_TOUCH_ZONE = 36.dp
 private const val FAST_LONG_PRESS_MS = 200L
 
 /**
- * The main timeline UI — a horizontally scrollable panel showing a time
- * ruler, vertically stacked track lanes with waveforms, and a playhead.
- *
- * Fixed track headers sit on the left; the ruler, waveform blocks, and
- * playhead scroll together horizontally. Auto-scrolls to keep the
- * playhead visible during playback.
+ * The main timeline UI — per-track rows sharing a single horizontal
+ * [ScrollState]. Each row has a fixed-width header on the left and a
+ * scrollable lane on the right. An inline track drawer expands between
+ * rows when a track header is tapped.
  */
 @Composable
 fun TimelinePanel(
@@ -95,6 +103,8 @@ fun TimelinePanel(
     loopStartMs: Long?,
     loopEndMs: Long?,
     isLoopEnabled: Boolean,
+    expandedTrackId: Long?,
+    soloedTrackIds: Set<Long>,
     getAudioFile: (String) -> File,
     onAction: (StudioAction) -> Unit,
     modifier: Modifier = Modifier
@@ -103,10 +113,9 @@ fun TimelinePanel(
     val timelineWidthDp = remember(totalDurationMs, msPerDp) {
         (totalDurationMs / msPerDp).dp + TIMELINE_END_PADDING_DP
     }
-    val totalTrackHeight = TRACK_LANE_HEIGHT * tracks.size
     val density = LocalDensity.current
 
-    // Auto-scroll: use snapshotFlow to throttle and avoid animation fights
+    // Auto-scroll: keep playhead visible during playback
     LaunchedEffect(scrollState, isPlaying) {
         if (!isPlaying) return@LaunchedEffect
         snapshotFlow { globalPositionMs }
@@ -129,74 +138,137 @@ fun TimelinePanel(
             }
     }
 
-    // Single Row: fixed headers on left, one scrollable area on right
-    Row(modifier = modifier.fillMaxWidth()) {
+    // Drawer animation specs
+    val drawerEnter = expandVertically(
+        animationSpec = spring(
+            dampingRatio = 0.75f,
+            stiffness = Spring.StiffnessMedium
+        ),
+        expandFrom = Alignment.Top
+    ) + fadeIn(tween(200, delayMillis = 80))
 
-        // Fixed header column — ruler spacer + track headers
-        Column(modifier = Modifier.width(HEADER_WIDTH)) {
-            Spacer(Modifier.height(RULER_HEIGHT))
-            tracks.forEach { track ->
-                TrackHeader(track = track, height = TRACK_LANE_HEIGHT, onAction = onAction)
-            }
-        }
+    val drawerExit = fadeOut(tween(150)) + shrinkVertically(
+        animationSpec = spring(
+            dampingRatio = 0.75f,
+            stiffness = Spring.StiffnessMedium
+        )
+    )
 
-        // Single horizontally-scrollable area for ruler + tracks + playhead
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .horizontalScroll(scrollState)
-        ) {
-            // Content column: ruler on top, track lanes below
-            Column(modifier = Modifier.width(timelineWidthDp)) {
-                TimeRuler(
-                    totalDurationMs = totalDurationMs,
-                    msPerDp = msPerDp,
-                    timelineWidth = timelineWidthDp
-                )
+    Column(modifier = modifier.fillMaxWidth()) {
+        // ── Ruler row ──────────────────────────────────────────────
+        Row(Modifier.fillMaxWidth()) {
+            Spacer(Modifier.width(HEADER_WIDTH))
 
-                tracks.forEach { track ->
-                    TimelineTrackLane(
-                        track = track,
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .horizontalScroll(scrollState)
+            ) {
+                Box(Modifier.width(timelineWidthDp)) {
+                    TimeRuler(
+                        totalDurationMs = totalDurationMs,
                         msPerDp = msPerDp,
+                        timelineWidth = timelineWidthDp
+                    )
+
+                    // Loop overlay + gesture layer in the ruler
+                    if (loopStartMs != null && loopEndMs != null) {
+                        LoopOverlaySegment(
+                            loopStartMs = loopStartMs,
+                            loopEndMs = loopEndMs,
+                            isLoopEnabled = isLoopEnabled,
+                            msPerDp = msPerDp,
+                            height = RULER_HEIGHT,
+                            showHandles = true
+                        )
+                    }
+
+                    LoopRulerGestureLayer(
+                        loopStartMs = loopStartMs,
+                        loopEndMs = loopEndMs,
+                        msPerDp = msPerDp,
+                        totalDurationMs = totalDurationMs,
                         timelineWidth = timelineWidthDp,
-                        laneHeight = TRACK_LANE_HEIGHT,
-                        dragState = dragState,
-                        trimState = trimState,
-                        getAudioFile = getAudioFile,
                         onAction = onAction
+                    )
+
+                    PlayheadSegment(
+                        globalPositionMs = globalPositionMs,
+                        msPerDp = msPerDp,
+                        height = RULER_HEIGHT
                     )
                 }
             }
+        }
 
-            // Loop region overlay — visual only (fill, borders, triangle handles)
-            if (loopStartMs != null && loopEndMs != null) {
-                LoopRegionOverlay(
-                    loopStartMs = loopStartMs,
-                    loopEndMs = loopEndMs,
-                    isLoopEnabled = isLoopEnabled,
-                    msPerDp = msPerDp,
-                    height = RULER_HEIGHT + totalTrackHeight
+        // ── Per-track rows with drawer slots ──────────────────────
+        tracks.forEachIndexed { index, track ->
+            val isSoloed = track.id in soloedTrackIds
+            val anySoloed = soloedTrackIds.isNotEmpty()
+            val effectivelyMuted = track.isMuted || (anySoloed && !isSoloed)
+            val trackColor = NjTrackColors[index % NjTrackColors.size]
+
+            // Track row: header + scrollable lane
+            Row(Modifier.fillMaxWidth()) {
+                TrackHeader(
+                    track = track,
+                    height = TRACK_LANE_HEIGHT,
+                    isExpanded = expandedTrackId == track.id,
+                    isSoloed = isSoloed,
+                    onAction = onAction
                 )
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .horizontalScroll(scrollState)
+                ) {
+                    Box(Modifier.width(timelineWidthDp)) {
+                        TimelineTrackLane(
+                            track = track,
+                            trackColor = trackColor,
+                            msPerDp = msPerDp,
+                            timelineWidth = timelineWidthDp,
+                            laneHeight = TRACK_LANE_HEIGHT,
+                            dragState = dragState,
+                            trimState = trimState,
+                            effectivelyMuted = effectivelyMuted,
+                            getAudioFile = getAudioFile,
+                            onAction = onAction
+                        )
+
+                        if (loopStartMs != null && loopEndMs != null) {
+                            LoopOverlaySegment(
+                                loopStartMs = loopStartMs,
+                                loopEndMs = loopEndMs,
+                                isLoopEnabled = isLoopEnabled,
+                                msPerDp = msPerDp,
+                                height = TRACK_LANE_HEIGHT,
+                                showHandles = false
+                            )
+                        }
+
+                        PlayheadSegment(
+                            globalPositionMs = globalPositionMs,
+                            msPerDp = msPerDp,
+                            height = TRACK_LANE_HEIGHT
+                        )
+                    }
+                }
             }
 
-            // Loop gesture layer — confined to the ruler area so it never
-            // blocks track lane gestures (trim, drag). Handles both creating
-            // new regions and adjusting existing handles via the triangles.
-            LoopRulerGestureLayer(
-                loopStartMs = loopStartMs,
-                loopEndMs = loopEndMs,
-                msPerDp = msPerDp,
-                totalDurationMs = totalDurationMs,
-                timelineWidth = timelineWidthDp,
-                onAction = onAction
-            )
-
-            // Playhead spans from ruler top to bottom of last track
-            PlayheadLine(
-                globalPositionMs = globalPositionMs,
-                msPerDp = msPerDp,
-                height = RULER_HEIGHT + totalTrackHeight
-            )
+            // Drawer slot — expands below the track
+            AnimatedVisibility(
+                visible = expandedTrackId == track.id,
+                enter = drawerEnter,
+                exit = drawerExit
+            ) {
+                TrackDrawerPanel(
+                    track = track,
+                    isSoloed = isSoloed,
+                    onAction = onAction
+                )
+            }
         }
     }
 }
@@ -269,11 +341,13 @@ private fun TimeRuler(
 @Composable
 private fun TimelineTrackLane(
     track: TrackEntity,
+    trackColor: Color,
     msPerDp: Float,
     timelineWidth: Dp,
     laneHeight: Dp,
     dragState: TrackDragState?,
     trimState: TrackTrimState?,
+    effectivelyMuted: Boolean,
     getAudioFile: (String) -> File,
     onAction: (StudioAction) -> Unit
 ) {
@@ -310,7 +384,7 @@ private fun TimelineTrackLane(
 
     val bgAlpha = when {
         isDragging -> 0.8f
-        track.isMuted -> 0.3f
+        effectivelyMuted -> 0.3f
         else -> 0.6f
     }
 
@@ -338,7 +412,7 @@ private fun TimelineTrackLane(
                 .width(widthDp)
                 .fillMaxHeight()
                 .clip(RoundedCornerShape(6.dp))
-                .background(NjMidnight2.copy(alpha = bgAlpha))
+                .background(NjStudioLane.copy(alpha = bgAlpha))
                 .then(
                     if (isDragging) Modifier
                         .graphicsLayer { shadowElevation = 8f }
@@ -446,14 +520,13 @@ private fun TimelineTrackLane(
                 }
                 .padding(vertical = 4.dp)
         ) {
-            val barColor = if (track.isMuted) {
-                NjStarlight.copy(alpha = 0.18f)
+            val barColor = if (effectivelyMuted) {
+                trackColor.copy(alpha = 0.18f)
             } else {
-                NjStarlight.copy(alpha = 0.65f)
+                trackColor.copy(alpha = 0.65f)
             }
 
-            // Show only the trimmed portion of the audio — peaks stay at
-            // correct timeline positions without any width or offset tricks.
+            // Show only the trimmed portion of the audio
             val startFrac = if (track.durationMs > 0)
                 effectiveTrimStartMs.toFloat() / track.durationMs else 0f
             val endFrac = if (track.durationMs > 0)
@@ -492,7 +565,7 @@ private fun TrimHandle(edge: TrimEdge, modifier: Modifier = Modifier) {
             .fillMaxHeight()
             .padding(vertical = 8.dp)
             .clip(RoundedCornerShape(4.dp))
-            .background(NjStarlight.copy(alpha = 0.45f))
+            .background(NjStudioWaveform.copy(alpha = 0.45f))
     )
 }
 
@@ -510,7 +583,6 @@ private fun computeTrimValues(
             Pair(newStart, track.trimEndMs)
         }
         TrimEdge.RIGHT -> {
-            // Dragging right handle left (negative delta) increases trimEnd
             val maxTrimEnd = track.durationMs - track.trimStartMs - MIN_EFFECTIVE_DURATION_MS
             val newEnd = (track.trimEndMs - deltaMs)
                 .coerceIn(0L, maxTrimEnd.coerceAtLeast(0L))
@@ -519,17 +591,36 @@ private fun computeTrimValues(
     }
 }
 
-/** Fixed-width header showing a track's display name, duration, and mute status. Tap to open settings. */
+/**
+ * Fixed-width header showing a track's display name, duration, and status.
+ * Tap to toggle the inline drawer. Shows visual indicators for expanded,
+ * soloed, and muted states.
+ */
 @Composable
 private fun TrackHeader(
     track: TrackEntity,
     height: Dp,
+    isExpanded: Boolean,
+    isSoloed: Boolean,
     onAction: (StudioAction) -> Unit
 ) {
+    val borderColor = if (isExpanded) NjStudioAccent.copy(alpha = 0.5f) else NjStudioAccent.copy(alpha = 0f)
+
     Column(
         modifier = Modifier
             .width(HEADER_WIDTH)
             .height(height)
+            .drawBehind {
+                // Gold left border when expanded
+                if (isExpanded) {
+                    drawLine(
+                        color = borderColor,
+                        start = Offset(0f, 0f),
+                        end = Offset(0f, size.height),
+                        strokeWidth = 2.dp.toPx()
+                    )
+                }
+            }
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = LocalIndication.current,
@@ -557,11 +648,16 @@ private fun TrackHeader(
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
         )
-        if (track.isMuted) {
+        // Status indicators
+        val statusParts = mutableListOf<String>()
+        if (isSoloed) statusParts.add("Solo")
+        if (track.isMuted) statusParts.add("Muted")
+        if (statusParts.isNotEmpty()) {
             Text(
-                text = "Muted",
+                text = statusParts.joinToString(" / "),
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
+                color = if (isSoloed) NjStudioAccent.copy(alpha = 0.7f)
+                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
             )
         }
     }
@@ -575,7 +671,7 @@ fun TimelinePlaceholder(message: String) {
             .fillMaxWidth()
             .height(200.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(NjMidnight2.copy(alpha = 0.55f)),
+            .background(NjStudioLane.copy(alpha = 0.55f)),
         contentAlignment = Alignment.Center
     ) {
         Text(
@@ -586,17 +682,37 @@ fun TimelinePlaceholder(message: String) {
     }
 }
 
+/** Playhead segment — a gold vertical line for a single row's height. */
+@Composable
+private fun PlayheadSegment(
+    globalPositionMs: Long,
+    msPerDp: Float,
+    height: Dp
+) {
+    val offsetDp = (globalPositionMs / msPerDp).dp
+
+    Box(
+        modifier = Modifier
+            .offset(x = offsetDp)
+            .width(2.dp)
+            .height(height)
+            .background(NjStudioAccent)
+    )
+}
+
 /**
- * Visual-only loop region overlay — gold fill, boundary lines, and
- * corner triangle handles. All gesture handling lives in [LoopGestureLayer].
+ * Loop region overlay segment — gold fill and boundary lines for a single
+ * row's height. Triangle handles only rendered when [showHandles] is true
+ * (ruler row only).
  */
 @Composable
-private fun LoopRegionOverlay(
+private fun LoopOverlaySegment(
     loopStartMs: Long,
     loopEndMs: Long,
     isLoopEnabled: Boolean,
     msPerDp: Float,
-    height: Dp
+    height: Dp,
+    showHandles: Boolean
 ) {
     val startDp = (loopStartMs / msPerDp).dp
     val regionWidthDp = ((loopEndMs - loopStartMs) / msPerDp).dp
@@ -614,7 +730,7 @@ private fun LoopRegionOverlay(
         Box(
             modifier = Modifier
                 .matchParentSize()
-                .background(NjAccent.copy(alpha = fillAlpha))
+                .background(NjStudioAccent.copy(alpha = fillAlpha))
         )
 
         // Left boundary line
@@ -623,7 +739,7 @@ private fun LoopRegionOverlay(
                 .align(Alignment.CenterStart)
                 .width(2.dp)
                 .fillMaxHeight()
-                .background(NjAccent.copy(alpha = borderAlpha))
+                .background(NjStudioAccent.copy(alpha = borderAlpha))
         )
 
         // Right boundary line
@@ -632,32 +748,32 @@ private fun LoopRegionOverlay(
                 .align(Alignment.CenterEnd)
                 .width(2.dp)
                 .fillMaxHeight()
-                .background(NjAccent.copy(alpha = borderAlpha))
+                .background(NjStudioAccent.copy(alpha = borderAlpha))
         )
 
-        // Triangle handle indicators at the top corners
-        Canvas(modifier = Modifier.matchParentSize()) {
-            val triW = 10.dp.toPx()
-            val triH = 8.dp.toPx()
-            val handleColor = NjAccent.copy(alpha = handleAlpha)
+        // Triangle handle indicators at the top corners (ruler only)
+        if (showHandles) {
+            Canvas(modifier = Modifier.matchParentSize()) {
+                val triW = 10.dp.toPx()
+                val triH = 8.dp.toPx()
+                val handleColor = NjStudioAccent.copy(alpha = handleAlpha)
 
-            // Left corner triangle — points inward and down
-            val leftPath = Path().apply {
-                moveTo(0f, 0f)
-                lineTo(triW, 0f)
-                lineTo(0f, triH)
-                close()
-            }
-            drawPath(leftPath, handleColor)
+                val leftPath = Path().apply {
+                    moveTo(0f, 0f)
+                    lineTo(triW, 0f)
+                    lineTo(0f, triH)
+                    close()
+                }
+                drawPath(leftPath, handleColor)
 
-            // Right corner triangle — points inward and down
-            val rightPath = Path().apply {
-                moveTo(size.width, 0f)
-                lineTo(size.width - triW, 0f)
-                lineTo(size.width, triH)
-                close()
+                val rightPath = Path().apply {
+                    moveTo(size.width, 0f)
+                    lineTo(size.width - triW, 0f)
+                    lineTo(size.width, triH)
+                    close()
+                }
+                drawPath(rightPath, handleColor)
             }
-            drawPath(rightPath, handleColor)
         }
     }
 }
@@ -667,11 +783,7 @@ private enum class LoopDragMode { NEW_SELECTION, ADJUST_START, ADJUST_END }
 
 /**
  * Ruler-height gesture layer for all loop interactions. Confined to
- * [RULER_HEIGHT] so it never overlaps track lanes — trim, drag, and
- * scroll gestures below the ruler work unimpeded.
- *
- * - Touch near a loop handle triangle → drag that edge
- * - Touch elsewhere on the ruler → drag to create a new region
+ * [RULER_HEIGHT] so it never overlaps track lanes.
  */
 @Composable
 private fun LoopRulerGestureLayer(
@@ -751,23 +863,5 @@ private fun LoopRulerGestureLayer(
                     }
                 }
             }
-    )
-}
-
-/** Vertical white line indicating the current playback position on the timeline. */
-@Composable
-private fun PlayheadLine(
-    globalPositionMs: Long,
-    msPerDp: Float,
-    height: Dp
-) {
-    val offsetDp = (globalPositionMs / msPerDp).dp
-
-    Box(
-        modifier = Modifier
-            .offset(x = offsetDp)
-            .width(2.dp)
-            .height(height)
-            .background(NjAccent)
     )
 }
