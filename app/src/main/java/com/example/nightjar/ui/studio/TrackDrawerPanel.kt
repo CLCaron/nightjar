@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import com.example.nightjar.data.db.entity.TrackEntity
 import com.example.nightjar.ui.components.NjKnob
 import com.example.nightjar.ui.theme.NjStudioAccent
+import com.example.nightjar.ui.theme.NjStudioTeal
 import com.example.nightjar.ui.theme.NjError
 import com.example.nightjar.ui.theme.NjMuted2
 import com.example.nightjar.ui.theme.NjStudioSurface2
@@ -86,7 +87,7 @@ fun TrackDrawerPanel(
             DrawerToggleButton(
                 label = "S",
                 isActive = isSoloed,
-                ledColor = NjStudioAccent,
+                ledColor = NjStudioTeal,
                 onClick = { onAction(StudioAction.ToggleSolo(track.id)) }
             )
 
@@ -104,19 +105,10 @@ fun TrackDrawerPanel(
             Box(Modifier.weight(1f))
 
             // Delete button
-            Text(
+            NjStudioButton(
                 text = "Delete",
-                style = MaterialTheme.typography.labelMedium,
-                color = NjError.copy(alpha = 0.7f),
-                modifier = Modifier
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = {
-                            onAction(StudioAction.ConfirmDeleteTrack(track.id))
-                        }
-                    )
-                    .padding(8.dp)
+                onClick = { onAction(StudioAction.ConfirmDeleteTrack(track.id)) },
+                textColor = NjError.copy(alpha = 0.7f)
             )
         }
     }

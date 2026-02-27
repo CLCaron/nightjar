@@ -34,7 +34,8 @@ A lightweight multi-track workspace. Not a replacement for professional tools, b
 - **Loop playback** — drag on the ruler to define a loop region, with draggable handles
 - **Drag to reposition** — long-press a track and slide it along the timeline
 - **Non-destructive trim** — drag handles on track edges
-- **Per-track controls** — volume, mute, delete
+- **Per-track controls** — volume knob, solo, mute, delete via inline track drawer
+- **Hardware-style controls** — beveled toggle buttons with LED glow, rotary knob with haptic detents
 
 ---
 
@@ -65,14 +66,15 @@ Nightjar is in active development, working toward a v1.0 Play Store release.
 - Live waveform during recording with post-recording preview
 - Native C++ audio engine (Oboe) — low-latency recording and multi-track playback
 - Multi-track overdub with hardware timestamp latency compensation
-- Drag-to-reposition, non-destructive trim, per-track volume/mute/delete
-- Loop playback with ruler-based region selection
+- Drag-to-reposition, non-destructive trim, per-track volume/mute/solo/delete
+- Loop playback with ruler-based region selection and toggle controls
+- Inline track drawer with hardware-style controls (LED toggle buttons, volume knob)
 - Library with tag filtering and sort options
 - Overview with playback, waveform visualization, auto-saving notes, tags, sharing, and delete
 
 **What's next:**
-- Solo toggle, track rename/reorder, track labels
+- Track rename/reorder, track labels
 - Loop recording with auto-takes
 - Library long-press menu
-- Studio entrance animation
+- Contextual gesture hints for discoverability
 - Play Store release prep

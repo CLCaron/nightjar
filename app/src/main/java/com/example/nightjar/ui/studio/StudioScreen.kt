@@ -1,22 +1,27 @@
 package com.example.nightjar.ui.studio
 
 import com.example.nightjar.audio.AudioLatencyEstimator
-import com.example.nightjar.ui.components.NjPrimaryButton
 import com.example.nightjar.ui.components.NjSectionTitle
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -54,6 +59,8 @@ import com.example.nightjar.ui.components.NjScrubber
 import com.example.nightjar.ui.components.NjTopBar
 import com.example.nightjar.ui.theme.NjStudioAccent
 import com.example.nightjar.ui.theme.NjStudioBg
+import com.example.nightjar.ui.theme.NjStudioGreen
+import com.example.nightjar.ui.theme.NjStudioOutline
 import com.example.nightjar.ui.theme.NjStudioWaveform
 import kotlinx.coroutines.flow.collectLatest
 
@@ -206,33 +213,46 @@ fun StudioScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        NjPrimaryButton(
-                            text = if (state.isLoopEnabled) "Loop" else "Loop",
-                            onClick = { vm.onAction(StudioAction.ToggleLoop) },
-                            minHeight = 36.dp,
-                            containerColor = if (state.isLoopEnabled) {
-                                NjStudioAccent.copy(alpha = 0.25f)
-                            } else {
-                                MaterialTheme.colorScheme.surfaceVariant
-                            },
-                            contentColor = if (state.isLoopEnabled) {
-                                NjStudioAccent
-                            } else {
-                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
-                            }
-                        )
-
-                        if (state.hasLoopRegion) {
-                            NjPrimaryButton(
-                                text = "Clear",
-                                onClick = { vm.onAction(StudioAction.ClearLoopRegion) },
-                                minHeight = 36.dp,
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+                        // Loop + Clear pill pair
+                        Row(
+                            modifier = Modifier.height(IntrinsicSize.Min),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            NjStudioButton(
+                                text = "Loop",
+                                onClick = { vm.onAction(StudioAction.ToggleLoop) },
+                                isActive = state.isLoopEnabled,
+                                ledColor = NjStudioAccent,
+                                shape = if (state.hasLoopRegion)
+                                    RoundedCornerShape(
+                                        topStart = 4.dp, bottomStart = 4.dp,
+                                        topEnd = 0.dp, bottomEnd = 0.dp
+                                    )
+                                else
+                                    RoundedCornerShape(4.dp)
                             )
+
+                            if (state.hasLoopRegion) {
+                                Box(
+                                    Modifier
+                                        .width(1.dp)
+                                        .fillMaxHeight()
+                                        .background(NjStudioOutline)
+                                )
+
+                                NjStudioButton(
+                                    text = "Clear",
+                                    onClick = { vm.onAction(StudioAction.ClearLoopRegion) },
+                                    shape = RoundedCornerShape(
+                                        topStart = 0.dp, bottomStart = 0.dp,
+                                        topEnd = 4.dp, bottomEnd = 4.dp
+                                    )
+                                )
+                            }
                         }
 
-                        NjPrimaryButton(
+                        // Play / Pause toggle
+                        NjStudioButton(
                             text = if (state.isPlaying) "Pause" else "Play",
                             onClick = {
                                 if (state.isPlaying) {
@@ -241,9 +261,8 @@ fun StudioScreen(
                                     vm.onAction(StudioAction.Play)
                                 }
                             },
-                            minHeight = 36.dp,
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+                            isActive = state.isPlaying,
+                            ledColor = NjStudioGreen
                         )
                     }
                 }
