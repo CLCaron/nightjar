@@ -103,7 +103,7 @@ fun TimelinePanel(
     loopStartMs: Long?,
     loopEndMs: Long?,
     isLoopEnabled: Boolean,
-    expandedTrackId: Long?,
+    expandedTrackIds: Set<Long>,
     soloedTrackIds: Set<Long>,
     getAudioFile: (String) -> File,
     onAction: (StudioAction) -> Unit,
@@ -213,7 +213,7 @@ fun TimelinePanel(
                 TrackHeader(
                     track = track,
                     height = TRACK_LANE_HEIGHT,
-                    isExpanded = expandedTrackId == track.id,
+                    isExpanded = track.id in expandedTrackIds,
                     isSoloed = isSoloed,
                     onAction = onAction
                 )
@@ -259,7 +259,7 @@ fun TimelinePanel(
 
             // Drawer slot — expands below the track
             AnimatedVisibility(
-                visible = expandedTrackId == track.id,
+                visible = track.id in expandedTrackIds,
                 enter = drawerEnter,
                 exit = drawerExit
             ) {

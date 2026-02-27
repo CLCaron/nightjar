@@ -19,7 +19,7 @@ data class StudioUiState(
     val dragState: TrackDragState? = null,
     val trimState: TrackTrimState? = null,
     val confirmingDeleteTrackId: Long? = null,
-    val expandedTrackId: Long? = null,
+    val expandedTrackIds: Set<Long> = emptySet(),
     val soloedTrackIds: Set<Long> = emptySet(),
     val loopStartMs: Long? = null,
     val loopEndMs: Long? = null,

@@ -143,11 +143,15 @@ class StudioViewModel @Inject constructor(
             }
             StudioAction.ExecuteDeleteTrack -> executeDeleteTrack()
 
-            // Track drawer (inline settings panel) — toggle behavior
+            // Track drawer (inline settings panel) — toggle open/closed
             is StudioAction.OpenTrackSettings -> {
                 _state.update {
-                    val newId = if (it.expandedTrackId == action.trackId) null else action.trackId
-                    it.copy(expandedTrackId = newId)
+                    val newSet = if (action.trackId in it.expandedTrackIds) {
+                        it.expandedTrackIds - action.trackId
+                    } else {
+                        it.expandedTrackIds + action.trackId
+                    }
+                    it.copy(expandedTrackIds = newSet)
                 }
             }
             is StudioAction.SetTrackMuted -> setTrackMuted(action.trackId, action.muted)
@@ -509,7 +513,7 @@ class StudioViewModel @Inject constructor(
         _state.update {
             it.copy(
                 confirmingDeleteTrackId = null,
-                expandedTrackId = if (it.expandedTrackId == trackId) null else it.expandedTrackId,
+                expandedTrackIds = it.expandedTrackIds - trackId,
                 soloedTrackIds = it.soloedTrackIds - trackId
             )
         }
