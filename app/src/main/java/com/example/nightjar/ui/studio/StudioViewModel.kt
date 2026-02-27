@@ -469,9 +469,9 @@ class StudioViewModel @Inject constructor(
     private fun toggleSolo(trackId: Long) {
         _state.update { st ->
             val newSet = if (trackId in st.soloedTrackIds) {
-                st.soloedTrackIds - trackId
+                emptySet()
             } else {
-                st.soloedTrackIds + trackId
+                setOf(trackId)
             }
             st.copy(soloedTrackIds = newSet)
         }
