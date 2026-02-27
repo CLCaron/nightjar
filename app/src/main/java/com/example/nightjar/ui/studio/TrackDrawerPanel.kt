@@ -27,14 +27,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.example.nightjar.data.db.entity.TrackEntity
 import com.example.nightjar.ui.components.NjKnob
-import com.example.nightjar.ui.theme.NjAccent
+import com.example.nightjar.ui.theme.NjStudioAccent
 import com.example.nightjar.ui.theme.NjError
 import com.example.nightjar.ui.theme.NjMuted2
-import com.example.nightjar.ui.theme.NjSurface2
+import com.example.nightjar.ui.theme.NjStudioSurface2
 
-// Pressed body — slightly darker than NjSurface2 (0xFF141A28),
+// Pressed body — slightly darker than NjStudioSurface2 (0xFF1C1824),
 // so the button looks recessed INTO the drawer surface.
-private val PressedBodyColor = Color(0xFF0E1420)
+private val PressedBodyColor = Color(0xFF12101A)
 
 /**
  * Inline track drawer — expands directly below a track lane in the timeline.
@@ -47,7 +47,7 @@ fun TrackDrawerPanel(
     onAction: (StudioAction) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val goldBorderColor = NjAccent.copy(alpha = 0.5f)
+    val goldBorderColor = NjStudioAccent.copy(alpha = 0.5f)
 
     Box(
         modifier = modifier
@@ -62,7 +62,7 @@ fun TrackDrawerPanel(
                     strokeWidth = 1.dp.toPx()
                 )
             }
-            .background(NjSurface2)
+            .background(NjStudioSurface2)
             .padding(horizontal = 16.dp)
     ) {
         Row(
@@ -86,7 +86,7 @@ fun TrackDrawerPanel(
             DrawerToggleButton(
                 label = "S",
                 isActive = isSoloed,
-                ledColor = NjAccent,
+                ledColor = NjStudioAccent,
                 onClick = { onAction(StudioAction.ToggleSolo(track.id)) }
             )
 

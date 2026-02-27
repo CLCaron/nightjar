@@ -25,3 +25,26 @@ val NjStardust = Color(0xFFE2E0EE)          // bright silver-white — starfield
 
 val NjOutline = Color(0xFF1A2235)          // subtle borders
 val NjError = Color(0xFFD4727A)          // muted rose
+
+// ── Studio warm variants — indoor midnight ──────────────────────
+// Same darkness, but the blues shift toward indigo/warm gray.
+// Like stepping from the open night sky into a dimly lit room.
+val NjStudioBg = Color(0xFF0F0D18)          // NjBg warmed — faint indigo
+val NjStudioSurface = Color(0xFF16131E)     // NjSurface warmed
+val NjStudioSurface2 = Color(0xFF1C1824)    // NjSurface2 warmed — drawer, panels
+val NjStudioLane = Color(0xFF1A161E)        // NjMidnight2 warmed — track lanes
+val NjStudioOutline = Color(0xFF231E2C)     // NjOutline warmed — borders
+val NjStudioAccent = Color(0xFFBE7B4A)      // warm amber-orange — playhead, active states
+val NjStudioWaveform = Color(0xFF9E9488)    // warm silver — trim handles, inactive UI
+
+// ── Per-track waveform colors — muted warm tones ─────────────────
+// Enough saturation to distinguish tracks at a glance, but still
+// low enough to feel lo-fi / late-night. Cycles by track sortIndex.
+val NjTrackColors = listOf(
+    Color(0xFFC48560),    // dusty coral-orange
+    Color(0xFF8B7EC8),    // muted lavender
+    Color(0xFFCB6B6B),    // soft brick red
+    Color(0xFF6A9E8F),    // sage green
+    Color(0xFFB89B5A),    // faded gold
+    Color(0xFF7A9FC4),    // dusty steel blue
+)

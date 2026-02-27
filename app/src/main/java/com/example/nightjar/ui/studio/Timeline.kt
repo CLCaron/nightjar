@@ -46,6 +46,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
@@ -65,9 +66,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.nightjar.data.db.entity.TrackEntity
 import com.example.nightjar.ui.components.NjWaveform
-import com.example.nightjar.ui.theme.NjAccent
-import com.example.nightjar.ui.theme.NjMidnight2
-import com.example.nightjar.ui.theme.NjStarlight
+import com.example.nightjar.ui.theme.NjStudioAccent
+import com.example.nightjar.ui.theme.NjStudioLane
+import com.example.nightjar.ui.theme.NjStudioWaveform
+import com.example.nightjar.ui.theme.NjTrackColors
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import java.io.File
@@ -200,10 +202,11 @@ fun TimelinePanel(
         }
 
         // ── Per-track rows with drawer slots ──────────────────────
-        tracks.forEach { track ->
+        tracks.forEachIndexed { index, track ->
             val isSoloed = track.id in soloedTrackIds
             val anySoloed = soloedTrackIds.isNotEmpty()
             val effectivelyMuted = track.isMuted || (anySoloed && !isSoloed)
+            val trackColor = NjTrackColors[index % NjTrackColors.size]
 
             // Track row: header + scrollable lane
             Row(Modifier.fillMaxWidth()) {
@@ -223,6 +226,7 @@ fun TimelinePanel(
                     Box(Modifier.width(timelineWidthDp)) {
                         TimelineTrackLane(
                             track = track,
+                            trackColor = trackColor,
                             msPerDp = msPerDp,
                             timelineWidth = timelineWidthDp,
                             laneHeight = TRACK_LANE_HEIGHT,
@@ -337,6 +341,7 @@ private fun TimeRuler(
 @Composable
 private fun TimelineTrackLane(
     track: TrackEntity,
+    trackColor: Color,
     msPerDp: Float,
     timelineWidth: Dp,
     laneHeight: Dp,
@@ -407,7 +412,7 @@ private fun TimelineTrackLane(
                 .width(widthDp)
                 .fillMaxHeight()
                 .clip(RoundedCornerShape(6.dp))
-                .background(NjMidnight2.copy(alpha = bgAlpha))
+                .background(NjStudioLane.copy(alpha = bgAlpha))
                 .then(
                     if (isDragging) Modifier
                         .graphicsLayer { shadowElevation = 8f }
@@ -516,9 +521,9 @@ private fun TimelineTrackLane(
                 .padding(vertical = 4.dp)
         ) {
             val barColor = if (effectivelyMuted) {
-                NjStarlight.copy(alpha = 0.18f)
+                trackColor.copy(alpha = 0.18f)
             } else {
-                NjStarlight.copy(alpha = 0.65f)
+                trackColor.copy(alpha = 0.65f)
             }
 
             // Show only the trimmed portion of the audio
@@ -560,7 +565,7 @@ private fun TrimHandle(edge: TrimEdge, modifier: Modifier = Modifier) {
             .fillMaxHeight()
             .padding(vertical = 8.dp)
             .clip(RoundedCornerShape(4.dp))
-            .background(NjStarlight.copy(alpha = 0.45f))
+            .background(NjStudioWaveform.copy(alpha = 0.45f))
     )
 }
 
@@ -599,7 +604,7 @@ private fun TrackHeader(
     isSoloed: Boolean,
     onAction: (StudioAction) -> Unit
 ) {
-    val borderColor = if (isExpanded) NjAccent.copy(alpha = 0.5f) else NjAccent.copy(alpha = 0f)
+    val borderColor = if (isExpanded) NjStudioAccent.copy(alpha = 0.5f) else NjStudioAccent.copy(alpha = 0f)
 
     Column(
         modifier = Modifier
@@ -651,7 +656,7 @@ private fun TrackHeader(
             Text(
                 text = statusParts.joinToString(" / "),
                 style = MaterialTheme.typography.labelSmall,
-                color = if (isSoloed) NjAccent.copy(alpha = 0.7f)
+                color = if (isSoloed) NjStudioAccent.copy(alpha = 0.7f)
                     else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
             )
         }
@@ -666,7 +671,7 @@ fun TimelinePlaceholder(message: String) {
             .fillMaxWidth()
             .height(200.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(NjMidnight2.copy(alpha = 0.55f)),
+            .background(NjStudioLane.copy(alpha = 0.55f)),
         contentAlignment = Alignment.Center
     ) {
         Text(
@@ -691,7 +696,7 @@ private fun PlayheadSegment(
             .offset(x = offsetDp)
             .width(2.dp)
             .height(height)
-            .background(NjAccent)
+            .background(NjStudioAccent)
     )
 }
 
@@ -725,7 +730,7 @@ private fun LoopOverlaySegment(
         Box(
             modifier = Modifier
                 .matchParentSize()
-                .background(NjAccent.copy(alpha = fillAlpha))
+                .background(NjStudioAccent.copy(alpha = fillAlpha))
         )
 
         // Left boundary line
@@ -734,7 +739,7 @@ private fun LoopOverlaySegment(
                 .align(Alignment.CenterStart)
                 .width(2.dp)
                 .fillMaxHeight()
-                .background(NjAccent.copy(alpha = borderAlpha))
+                .background(NjStudioAccent.copy(alpha = borderAlpha))
         )
 
         // Right boundary line
@@ -743,7 +748,7 @@ private fun LoopOverlaySegment(
                 .align(Alignment.CenterEnd)
                 .width(2.dp)
                 .fillMaxHeight()
-                .background(NjAccent.copy(alpha = borderAlpha))
+                .background(NjStudioAccent.copy(alpha = borderAlpha))
         )
 
         // Triangle handle indicators at the top corners (ruler only)
@@ -751,7 +756,7 @@ private fun LoopOverlaySegment(
             Canvas(modifier = Modifier.matchParentSize()) {
                 val triW = 10.dp.toPx()
                 val triH = 8.dp.toPx()
-                val handleColor = NjAccent.copy(alpha = handleAlpha)
+                val handleColor = NjStudioAccent.copy(alpha = handleAlpha)
 
                 val leftPath = Path().apply {
                     moveTo(0f, 0f)
