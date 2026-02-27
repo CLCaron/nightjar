@@ -266,7 +266,7 @@ fun StudioScreen(
                     loopStartMs = state.loopStartMs,
                     loopEndMs = state.loopEndMs,
                     isLoopEnabled = state.isLoopEnabled,
-                    expandedTrackId = state.expandedTrackId,
+                    expandedTrackIds = state.expandedTrackIds,
                     soloedTrackIds = state.soloedTrackIds,
                     getAudioFile = vm::getAudioFile,
                     onAction = vm::onAction
