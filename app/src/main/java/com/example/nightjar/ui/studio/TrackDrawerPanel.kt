@@ -1,8 +1,10 @@
 package com.example.nightjar.ui.studio
 
+import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -15,6 +17,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -22,20 +26,24 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import com.example.nightjar.data.db.entity.TrackEntity
 import com.example.nightjar.ui.components.NjKnob
+import com.example.nightjar.ui.components.collectIsPressedWithMinDuration
 import com.example.nightjar.ui.theme.NjStudioAccent
 import com.example.nightjar.ui.theme.NjStudioTeal
 import com.example.nightjar.ui.theme.NjError
 import com.example.nightjar.ui.theme.NjMuted2
 import com.example.nightjar.ui.theme.NjStudioSurface2
 
-// Pressed body — slightly darker than NjStudioSurface2 (0xFF1C1824),
-// so the button looks recessed INTO the drawer surface.
+// Pressed-in body — slightly darker than NjStudioSurface2 (0xFF1C1824).
 private val PressedBodyColor = Color(0xFF12101A)
+
+// Raised body — semi-transparent muted surface.
+private val RaisedBodyColor = NjMuted2.copy(alpha = 0.12f)
 
 /**
  * Inline track drawer — expands directly below a track lane in the timeline.
@@ -117,9 +125,8 @@ fun TrackDrawerPanel(
 /**
  * Hardware-style toggle button with a "clicked in" visual when active.
  *
- * Inactive (raised): light top edge, dark bottom edge, muted text.
- * Active (pressed in): shifted down 1dp, inner shadow, dark recessed body,
- * and the letter "lights up" with a soft LED glow behind it.
+ * Two states: raised (inactive) and pressed-in (active or finger down).
+ * Haptic click on press and release. LED glow when active.
  */
 @Composable
 private fun DrawerToggleButton(
@@ -128,39 +135,38 @@ private fun DrawerToggleButton(
     ledColor: Color,
     onClick: () -> Unit
 ) {
-    val bgColor = if (isActive) PressedBodyColor else NjMuted2.copy(alpha = 0.12f)
+    val interactionSource = remember { MutableInteractionSource() }
+    val view = LocalView.current
+    val fingerDown by interactionSource.collectIsPressedWithMinDuration()
+
+    val visuallyPressed = isActive || fingerDown
+    val bgColor = if (visuallyPressed) PressedBodyColor else RaisedBodyColor
     val textColor = if (isActive) ledColor else NjMuted2
+
+    // Haptics — fire on raw press/release events.
+    LaunchedEffect(interactionSource) {
+        interactionSource.interactions.collect { interaction ->
+            when (interaction) {
+                is PressInteraction.Press ->
+                    view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                is PressInteraction.Release ->
+                    view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+            }
+        }
+    }
 
     Box(
         modifier = Modifier
             .size(36.dp)
-            .offset(y = if (isActive) 1.dp else 0.dp)
+            .offset(y = if (visuallyPressed) 1.dp else 0.dp)
             .clip(RoundedCornerShape(4.dp))
             .background(bgColor)
             .drawWithContent {
-                val sw = 1.dp.toPx()
-
-                // LED glow behind text when active
-                if (isActive) {
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            colors = listOf(
-                                ledColor.copy(alpha = 0.15f),
-                                Color.Transparent
-                            ),
-                            center = Offset(size.width / 2, size.height / 2),
-                            radius = size.minDimension * 0.25f
-                        ),
-                        center = Offset(size.width / 2, size.height / 2),
-                        radius = size.minDimension * 0.25f
-                    )
-                }
-
                 drawContent()
 
-                // Bevel edges
-                if (isActive) {
-                    // Pressed in: dark top + left edges = inner shadow
+                val sw = 1.dp.toPx()
+
+                if (visuallyPressed) {
                     drawLine(
                         Color.Black.copy(alpha = 0.45f),
                         Offset(0f, sw / 2),
@@ -173,12 +179,29 @@ private fun DrawerToggleButton(
                         Offset(sw / 2, size.height),
                         sw
                     )
-                } else {
-                    // Raised: light top edge, dark bottom edge
                     drawLine(
-                        Color.White.copy(alpha = 0.07f),
+                        Color.White.copy(alpha = 0.06f),
+                        Offset(0f, size.height - sw / 2),
+                        Offset(size.width, size.height - sw / 2),
+                        sw
+                    )
+                    drawLine(
+                        Color.White.copy(alpha = 0.04f),
+                        Offset(size.width - sw / 2, 0f),
+                        Offset(size.width - sw / 2, size.height),
+                        sw
+                    )
+                } else {
+                    drawLine(
+                        Color.White.copy(alpha = 0.09f),
                         Offset(0f, sw / 2),
                         Offset(size.width, sw / 2),
+                        sw
+                    )
+                    drawLine(
+                        Color.White.copy(alpha = 0.05f),
+                        Offset(sw / 2, 0f),
+                        Offset(sw / 2, size.height),
                         sw
                     )
                     drawLine(
@@ -187,18 +210,37 @@ private fun DrawerToggleButton(
                         Offset(size.width, size.height - sw / 2),
                         sw
                     )
+                    drawLine(
+                        Color.Black.copy(alpha = 0.18f),
+                        Offset(size.width - sw / 2, 0f),
+                        Offset(size.width - sw / 2, size.height),
+                        sw
+                    )
                 }
             }
             .clickable(
-                interactionSource = remember { MutableInteractionSource() },
+                interactionSource = interactionSource,
                 indication = null,
                 onClick = onClick
             ),
         contentAlignment = Alignment.Center
     ) {
+        val glowShadow = if (isActive) {
+            Shadow(
+                color = ledColor.copy(alpha = 0.8f),
+                offset = Offset.Zero,
+                blurRadius = 8f
+            )
+        } else {
+            Shadow(
+                color = Color.White.copy(alpha = 0.35f),
+                offset = Offset.Zero,
+                blurRadius = 6f
+            )
+        }
         Text(
             text = label,
-            style = MaterialTheme.typography.labelLarge,
+            style = MaterialTheme.typography.labelLarge.copy(shadow = glowShadow),
             color = textColor
         )
     }

@@ -246,6 +246,7 @@ fun StudioScreen(
                                 },
                                 isActive = !state.isLoopEnabled,
                                 ledColor = NjMuted2,
+                                activeGlow = false,
                                 shape = RoundedCornerShape(
                                     topStart = 0.dp, bottomStart = 0.dp,
                                     topEnd = 4.dp, bottomEnd = 4.dp

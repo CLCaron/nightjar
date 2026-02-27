@@ -1,14 +1,17 @@
 package com.example.nightjar.ui.studio
 
+import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -18,15 +21,19 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import com.example.nightjar.ui.components.collectIsPressedWithMinDuration
 import com.example.nightjar.ui.theme.NjMuted2
 import com.example.nightjar.ui.theme.NjStudioAccent
 
-// Pressed body — slightly darker than NjStudioSurface2 (0xFF1C1824),
-// so active toggles look recessed into the surface.
+// Pressed-in body — slightly darker than NjStudioSurface2 (0xFF1C1824).
 private val PressedBodyColor = Color(0xFF12101A)
+
+// Raised body — semi-transparent muted surface.
+private val RaisedBodyColor = NjMuted2.copy(alpha = 0.12f)
 
 /**
  * Hardware-style button for Studio actions.
@@ -42,8 +49,11 @@ private val PressedBodyColor = Color(0xFF12101A)
  * feedback. [isActive] tints the body with [activeAccent]. Used for Clear,
  * Delete, and other one-shot or stateful momentary actions.
  *
- * @param ledColor  When non-null, enables toggle mode with this LED color.
- * @param shape     Corner shape — override for pill-pair grouping.
+ * @param ledColor    When non-null, enables toggle mode with this LED color.
+ * @param activeGlow  When true (default), shows full LED glow when pressed in.
+ *                    Set false for action buttons (e.g. Clear) that use toggle
+ *                    visuals for the rocker effect but aren't status indicators.
+ * @param shape       Corner shape — override for pill-pair grouping.
  */
 @Composable
 fun NjStudioButton(
@@ -54,16 +64,17 @@ fun NjStudioButton(
     activeAccent: Color = NjStudioAccent,
     textColor: Color? = null,
     ledColor: Color? = null,
-    shape: Shape = RoundedCornerShape(4.dp)
+    activeGlow: Boolean = true,
+    shape: Shape = RoundedCornerShape(2.dp)
 ) {
     if (ledColor != null) {
-        ToggleModeButton(text, onClick, modifier, isActive, ledColor, shape)
+        ToggleModeButton(text, onClick, modifier, isActive, ledColor, activeGlow, shape)
     } else {
         MomentaryModeButton(text, onClick, modifier, isActive, activeAccent, textColor, shape)
     }
 }
 
-/** Toggle mode — DrawerToggleButton-style pressed-in/raised visual with LED glow. */
+/** Toggle mode — two-state pressed-in/raised visual with LED glow. */
 @Composable
 private fun ToggleModeButton(
     text: String,
@@ -71,39 +82,41 @@ private fun ToggleModeButton(
     modifier: Modifier,
     isActive: Boolean,
     ledColor: Color,
+    activeGlow: Boolean,
     shape: Shape
 ) {
-    val bgColor = if (isActive) PressedBodyColor else NjMuted2.copy(alpha = 0.12f)
+    val interactionSource = remember { MutableInteractionSource() }
+    val view = LocalView.current
+    val fingerDown by interactionSource.collectIsPressedWithMinDuration()
+
+    val visuallyPressed = isActive || fingerDown
+    val bgColor = if (visuallyPressed) PressedBodyColor else RaisedBodyColor
     val fgColor = if (isActive) ledColor else NjMuted2
+
+    // Haptics — fire on raw press/release events.
+    LaunchedEffect(interactionSource) {
+        interactionSource.interactions.collect { interaction ->
+            when (interaction) {
+                is PressInteraction.Press ->
+                    view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                is PressInteraction.Release ->
+                    view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+            }
+        }
+    }
 
     Box(
         modifier = modifier
             .clip(shape)
             .background(bgColor)
             .drawWithContent {
-                val sw = 1.dp.toPx()
-
-                // LED glow behind text when active — concentrated around the
-                // text center, fades before reaching the button edges.
-                if (isActive) {
-                    drawRect(
-                        brush = Brush.radialGradient(
-                            colorStops = arrayOf(
-                                0.0f to ledColor.copy(alpha = 0.20f),
-                                0.4f to ledColor.copy(alpha = 0.06f),
-                                1.0f to Color.Transparent
-                            ),
-                            center = Offset(size.width / 2, size.height / 2),
-                            radius = size.width * 0.45f
-                        )
-                    )
-                }
-
                 drawContent()
 
-                // Bevel edges
-                if (isActive) {
-                    // Pressed in: dark top + left = inner shadow
+                val sw = 1.dp.toPx()
+
+                if (visuallyPressed) {
+                    // Pressed in: dark top + left (inner shadow),
+                    // subtle light bottom + right (rim catch)
                     drawLine(
                         Color.Black.copy(alpha = 0.45f),
                         Offset(0f, sw / 2),
@@ -116,12 +129,30 @@ private fun ToggleModeButton(
                         Offset(sw / 2, size.height),
                         sw
                     )
-                } else {
-                    // Raised: light top, dark bottom
                     drawLine(
-                        Color.White.copy(alpha = 0.07f),
+                        Color.White.copy(alpha = 0.06f),
+                        Offset(0f, size.height - sw / 2),
+                        Offset(size.width, size.height - sw / 2),
+                        sw
+                    )
+                    drawLine(
+                        Color.White.copy(alpha = 0.04f),
+                        Offset(size.width - sw / 2, 0f),
+                        Offset(size.width - sw / 2, size.height),
+                        sw
+                    )
+                } else {
+                    // Raised: light top + left, dark bottom + right
+                    drawLine(
+                        Color.White.copy(alpha = 0.09f),
                         Offset(0f, sw / 2),
                         Offset(size.width, sw / 2),
+                        sw
+                    )
+                    drawLine(
+                        Color.White.copy(alpha = 0.05f),
+                        Offset(sw / 2, 0f),
+                        Offset(sw / 2, size.height),
                         sw
                     )
                     drawLine(
@@ -130,19 +161,41 @@ private fun ToggleModeButton(
                         Offset(size.width, size.height - sw / 2),
                         sw
                     )
+                    drawLine(
+                        Color.Black.copy(alpha = 0.18f),
+                        Offset(size.width - sw / 2, 0f),
+                        Offset(size.width - sw / 2, size.height),
+                        sw
+                    )
                 }
             }
             .clickable(
-                interactionSource = remember { MutableInteractionSource() },
+                interactionSource = interactionSource,
                 indication = null,
                 onClick = onClick
             )
             .padding(horizontal = 14.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center
     ) {
+        // Per-letter glow via text shadow — backlit lettering effect.
+        val glowShadow = when {
+            isActive && activeGlow -> Shadow(
+                color = ledColor.copy(alpha = 0.8f),
+                offset = Offset.Zero,
+                blurRadius = 8f
+            )
+            !isActive -> Shadow(
+                color = Color.White.copy(alpha = 0.35f),
+                offset = Offset.Zero,
+                blurRadius = 6f
+            )
+            else -> null
+        }
         Text(
             text = text,
-            style = MaterialTheme.typography.labelLarge,
+            style = MaterialTheme.typography.labelLarge.let { base ->
+                if (glowShadow != null) base.copy(shadow = glowShadow) else base
+            },
             color = fgColor
         )
     }
@@ -161,6 +214,18 @@ private fun MomentaryModeButton(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedWithMinDuration()
+    val view = LocalView.current
+
+    LaunchedEffect(interactionSource) {
+        interactionSource.interactions.collect { interaction ->
+            when (interaction) {
+                is PressInteraction.Press ->
+                    view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                is PressInteraction.Release ->
+                    view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+            }
+        }
+    }
 
     val bgColor = when {
         isActive -> activeAccent.copy(alpha = 0.15f)
@@ -194,6 +259,7 @@ private fun MomentaryModeButton(
                             0.25f to Color.Transparent
                         )
                     )
+                    // Dark top + left (inner shadow)
                     drawLine(
                         Color.Black.copy(alpha = 0.40f),
                         Offset(0f, sw / 2),
@@ -206,17 +272,43 @@ private fun MomentaryModeButton(
                         Offset(sw / 2, size.height),
                         sw
                     )
-                } else {
+                    // Subtle light bottom + right (rim catch)
                     drawLine(
-                        Color.White.copy(alpha = 0.07f),
+                        Color.White.copy(alpha = 0.06f),
+                        Offset(0f, size.height - sw / 2),
+                        Offset(size.width, size.height - sw / 2),
+                        sw
+                    )
+                    drawLine(
+                        Color.White.copy(alpha = 0.04f),
+                        Offset(size.width - sw / 2, 0f),
+                        Offset(size.width - sw / 2, size.height),
+                        sw
+                    )
+                } else {
+                    // Light top + left, dark bottom + right
+                    drawLine(
+                        Color.White.copy(alpha = 0.09f),
                         Offset(0f, sw / 2),
                         Offset(size.width, sw / 2),
+                        sw
+                    )
+                    drawLine(
+                        Color.White.copy(alpha = 0.05f),
+                        Offset(sw / 2, 0f),
+                        Offset(sw / 2, size.height),
                         sw
                     )
                     drawLine(
                         Color.Black.copy(alpha = 0.35f),
                         Offset(0f, size.height - sw / 2),
                         Offset(size.width, size.height - sw / 2),
+                        sw
+                    )
+                    drawLine(
+                        Color.Black.copy(alpha = 0.18f),
+                        Offset(size.width - sw / 2, 0f),
+                        Offset(size.width - sw / 2, size.height),
                         sw
                     )
                 }
