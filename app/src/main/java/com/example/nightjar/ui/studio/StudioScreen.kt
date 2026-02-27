@@ -57,6 +57,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.nightjar.ui.components.NjScrubber
 import com.example.nightjar.ui.components.NjTopBar
+import com.example.nightjar.ui.theme.NjMuted2
 import com.example.nightjar.ui.theme.NjStudioAccent
 import com.example.nightjar.ui.theme.NjStudioBg
 import com.example.nightjar.ui.theme.NjStudioGreen
@@ -213,7 +214,7 @@ fun StudioScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Loop + Clear pill pair
+                        // Loop + Clear rocker pill — always both visible
                         Row(
                             modifier = Modifier.height(IntrinsicSize.Min),
                             verticalAlignment = Alignment.CenterVertically
@@ -223,32 +224,33 @@ fun StudioScreen(
                                 onClick = { vm.onAction(StudioAction.ToggleLoop) },
                                 isActive = state.isLoopEnabled,
                                 ledColor = NjStudioAccent,
-                                shape = if (state.hasLoopRegion)
-                                    RoundedCornerShape(
-                                        topStart = 4.dp, bottomStart = 4.dp,
-                                        topEnd = 0.dp, bottomEnd = 0.dp
-                                    )
-                                else
-                                    RoundedCornerShape(4.dp)
+                                shape = RoundedCornerShape(
+                                    topStart = 4.dp, bottomStart = 4.dp,
+                                    topEnd = 0.dp, bottomEnd = 0.dp
+                                )
                             )
 
-                            if (state.hasLoopRegion) {
-                                Box(
-                                    Modifier
-                                        .width(1.dp)
-                                        .fillMaxHeight()
-                                        .background(NjStudioOutline)
-                                )
+                            Box(
+                                Modifier
+                                    .width(1.dp)
+                                    .fillMaxHeight()
+                                    .background(NjStudioOutline)
+                            )
 
-                                NjStudioButton(
-                                    text = "Clear",
-                                    onClick = { vm.onAction(StudioAction.ClearLoopRegion) },
-                                    shape = RoundedCornerShape(
-                                        topStart = 0.dp, bottomStart = 0.dp,
-                                        topEnd = 4.dp, bottomEnd = 4.dp
-                                    )
+                            NjStudioButton(
+                                text = "Clear",
+                                onClick = {
+                                    if (state.isLoopEnabled) {
+                                        vm.onAction(StudioAction.ClearLoopRegion)
+                                    }
+                                },
+                                isActive = !state.isLoopEnabled,
+                                ledColor = NjMuted2,
+                                shape = RoundedCornerShape(
+                                    topStart = 0.dp, bottomStart = 0.dp,
+                                    topEnd = 4.dp, bottomEnd = 4.dp
                                 )
-                            }
+                            )
                         }
 
                         // Play / Pause toggle
