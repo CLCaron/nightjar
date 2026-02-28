@@ -38,6 +38,7 @@ import com.example.nightjar.ui.theme.NjStudioTeal
 import com.example.nightjar.ui.theme.NjError
 import com.example.nightjar.ui.theme.NjMuted2
 import com.example.nightjar.ui.theme.NjStudioSurface2
+import com.example.nightjar.ui.theme.NjStudioYellow
 
 // Pressed-in body — slightly darker than NjStudioSurface2 (0xFF1C1824).
 private val PressedBodyColor = Color(0xFF12101A)
@@ -103,7 +104,7 @@ fun TrackDrawerPanel(
             DrawerToggleButton(
                 label = "M",
                 isActive = track.isMuted,
-                ledColor = NjError,
+                ledColor = NjStudioYellow,
                 onClick = {
                     onAction(StudioAction.SetTrackMuted(track.id, !track.isMuted))
                 }

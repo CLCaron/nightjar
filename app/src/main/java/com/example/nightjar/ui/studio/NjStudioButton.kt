@@ -7,7 +7,9 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -17,12 +19,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import com.example.nightjar.ui.components.collectIsPressedWithMinDuration
@@ -49,6 +53,8 @@ private val RaisedBodyColor = NjMuted2.copy(alpha = 0.12f)
  * feedback. [isActive] tints the body with [activeAccent]. Used for Clear,
  * Delete, and other one-shot or stateful momentary actions.
  *
+ * @param icon        Optional Material icon. When set, renders an icon with neon
+ *                    glow instead of text. Use with empty [text].
  * @param ledColor    When non-null, enables toggle mode with this LED color.
  * @param activeGlow  When true (default), shows full LED glow when pressed in.
  *                    Set false for action buttons (e.g. Clear) that use toggle
@@ -60,6 +66,7 @@ fun NjStudioButton(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
     isActive: Boolean = false,
     activeAccent: Color = NjStudioAccent,
     textColor: Color? = null,
@@ -68,9 +75,9 @@ fun NjStudioButton(
     shape: Shape = RoundedCornerShape(2.dp)
 ) {
     if (ledColor != null) {
-        ToggleModeButton(text, onClick, modifier, isActive, ledColor, activeGlow, shape)
+        ToggleModeButton(text, onClick, modifier, icon, isActive, ledColor, activeGlow, shape)
     } else {
-        MomentaryModeButton(text, onClick, modifier, isActive, activeAccent, textColor, shape)
+        MomentaryModeButton(text, onClick, modifier, icon, isActive, activeAccent, textColor, shape)
     }
 }
 
@@ -80,6 +87,7 @@ private fun ToggleModeButton(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier,
+    icon: ImageVector?,
     isActive: Boolean,
     ledColor: Color,
     activeGlow: Boolean,
@@ -91,7 +99,7 @@ private fun ToggleModeButton(
 
     val visuallyPressed = isActive || fingerDown
     val bgColor = if (visuallyPressed) PressedBodyColor else RaisedBodyColor
-    val fgColor = if (isActive) ledColor else NjMuted2
+    val fgColor = if (isActive) ledColor else ledColor.copy(alpha = 0.5f)
 
     // Haptics — fire on raw press/release events.
     LaunchedEffect(interactionSource) {
@@ -174,30 +182,61 @@ private fun ToggleModeButton(
                 indication = null,
                 onClick = onClick
             )
-            .padding(horizontal = 14.dp, vertical = 8.dp),
+            .padding(
+                horizontal = if (icon != null) 8.dp else 14.dp,
+                vertical = 8.dp
+            ),
         contentAlignment = Alignment.Center
     ) {
-        // Per-letter glow via text shadow — backlit lettering effect.
-        val glowShadow = when {
-            isActive && activeGlow -> Shadow(
-                color = ledColor.copy(alpha = 0.8f),
-                offset = Offset.Zero,
-                blurRadius = 8f
+        if (icon != null) {
+            // Neon glow: radial gradient behind the icon
+            val glowColor = if (isActive && activeGlow) ledColor else Color.Transparent
+            Icon(
+                imageVector = icon,
+                contentDescription = text.ifEmpty { null },
+                tint = fgColor,
+                modifier = Modifier
+                    .size(20.dp)
+                    .drawBehind {
+                        if (glowColor != Color.Transparent) {
+                            drawCircle(
+                                brush = Brush.radialGradient(
+                                    colors = listOf(
+                                        glowColor.copy(alpha = 0.18f),
+                                        Color.Transparent
+                                    ),
+                                    center = center,
+                                    radius = 14.dp.toPx()
+                                ),
+                                radius = 14.dp.toPx(),
+                                center = center
+                            )
+                        }
+                    }
             )
-            !isActive -> Shadow(
-                color = Color.White.copy(alpha = 0.35f),
-                offset = Offset.Zero,
-                blurRadius = 6f
+        } else {
+            // Per-letter glow via text shadow — backlit lettering effect.
+            val glowShadow = when {
+                isActive && activeGlow -> Shadow(
+                    color = ledColor.copy(alpha = 0.8f),
+                    offset = Offset.Zero,
+                    blurRadius = 8f
+                )
+                !isActive -> Shadow(
+                    color = Color.White.copy(alpha = 0.35f),
+                    offset = Offset.Zero,
+                    blurRadius = 6f
+                )
+                else -> null
+            }
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelLarge.let { base ->
+                    if (glowShadow != null) base.copy(shadow = glowShadow) else base
+                },
+                color = fgColor
             )
-            else -> null
         }
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelLarge.let { base ->
-                if (glowShadow != null) base.copy(shadow = glowShadow) else base
-            },
-            color = fgColor
-        )
     }
 }
 
@@ -207,6 +246,7 @@ private fun MomentaryModeButton(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier,
+    icon: ImageVector?,
     isActive: Boolean,
     activeAccent: Color,
     textColor: Color?,
@@ -228,8 +268,9 @@ private fun MomentaryModeButton(
     }
 
     val bgColor = when {
+        isPressed -> PressedBodyColor
         isActive -> activeAccent.copy(alpha = 0.15f)
-        else -> NjMuted2.copy(alpha = 0.12f)
+        else -> RaisedBodyColor
     }
 
     val fgColor = textColor ?: when {
@@ -318,13 +359,53 @@ private fun MomentaryModeButton(
                 indication = null,
                 onClick = onClick
             )
-            .padding(horizontal = 14.dp, vertical = 8.dp),
+            .padding(
+                horizontal = if (icon != null) 8.dp else 14.dp,
+                vertical = 8.dp
+            ),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelLarge,
-            color = fgColor
-        )
+        if (icon != null) {
+            // Neon glow: radial gradient behind the icon in the text/accent color
+            val glowColor = textColor ?: if (isActive) activeAccent else Color.Transparent
+            Icon(
+                imageVector = icon,
+                contentDescription = text.ifEmpty { null },
+                tint = fgColor,
+                modifier = Modifier
+                    .size(20.dp)
+                    .drawBehind {
+                        if (glowColor != Color.Transparent) {
+                            drawCircle(
+                                brush = Brush.radialGradient(
+                                    colors = listOf(
+                                        glowColor.copy(alpha = 0.18f),
+                                        Color.Transparent
+                                    ),
+                                    center = center,
+                                    radius = 14.dp.toPx()
+                                ),
+                                radius = 14.dp.toPx(),
+                                center = center
+                            )
+                        }
+                    }
+            )
+        } else {
+            val glowShadow = textColor?.let {
+                Shadow(
+                    color = it.copy(alpha = 0.8f),
+                    offset = Offset.Zero,
+                    blurRadius = 8f
+                )
+            }
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelLarge.let { base ->
+                    if (glowShadow != null) base.copy(shadow = glowShadow) else base
+                },
+                color = fgColor
+            )
+        }
     }
 }

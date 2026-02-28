@@ -63,6 +63,10 @@ import com.example.nightjar.ui.theme.NjStudioBg
 import com.example.nightjar.ui.theme.NjStudioGreen
 import com.example.nightjar.ui.theme.NjStudioOutline
 import com.example.nightjar.ui.theme.NjStudioWaveform
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.Repeat
 import kotlinx.coroutines.flow.collectLatest
 
 /**
@@ -221,13 +225,10 @@ fun StudioScreen(
                         ) {
                             NjStudioButton(
                                 text = "Loop",
+                                icon = Icons.Outlined.Repeat,
                                 onClick = { vm.onAction(StudioAction.ToggleLoop) },
                                 isActive = state.isLoopEnabled,
                                 ledColor = NjStudioAccent,
-                                shape = RoundedCornerShape(
-                                    topStart = 4.dp, bottomStart = 4.dp,
-                                    topEnd = 0.dp, bottomEnd = 0.dp
-                                )
                             )
 
                             Box(
@@ -239,24 +240,22 @@ fun StudioScreen(
 
                             NjStudioButton(
                                 text = "Clear",
+                                icon = Icons.Outlined.Close,
                                 onClick = {
-                                    if (state.isLoopEnabled) {
+                                    if (state.hasLoopRegion) {
                                         vm.onAction(StudioAction.ClearLoopRegion)
                                     }
                                 },
-                                isActive = !state.isLoopEnabled,
+                                isActive = !state.hasLoopRegion,
                                 ledColor = NjMuted2,
                                 activeGlow = false,
-                                shape = RoundedCornerShape(
-                                    topStart = 0.dp, bottomStart = 0.dp,
-                                    topEnd = 4.dp, bottomEnd = 4.dp
-                                )
                             )
                         }
 
-                        // Play / Pause toggle
+                        // Play / Pause — toggle with green LED glow when playing
                         NjStudioButton(
                             text = if (state.isPlaying) "Pause" else "Play",
+                            icon = Icons.Outlined.PlayArrow,
                             onClick = {
                                 if (state.isPlaying) {
                                     vm.onAction(StudioAction.Pause)
@@ -265,7 +264,7 @@ fun StudioScreen(
                                 }
                             },
                             isActive = state.isPlaying,
-                            ledColor = NjStudioGreen
+                            ledColor = NjStudioGreen,
                         )
                     }
                 }

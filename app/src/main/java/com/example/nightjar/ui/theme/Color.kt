@@ -35,8 +35,9 @@ val NjStudioSurface2 = Color(0xFF1C1824)    // NjSurface2 warmed — drawer, pan
 val NjStudioLane = Color(0xFF1A161E)        // NjMidnight2 warmed — track lanes
 val NjStudioOutline = Color(0xFF231E2C)     // NjOutline warmed — borders
 val NjStudioAccent = Color(0xFFBE7B4A)      // warm amber-orange — playhead, Loop LED
-val NjStudioGreen = Color(0xFF7DA87A)       // muted sage green — Play LED
-val NjStudioTeal = Color(0xFF5EA8A3)        // dusty teal — Solo LED
+val NjStudioGreen = Color(0xFF7DA87A)       // muted sage green -- Play LED
+val NjStudioTeal = Color(0xFF5EA8A3)        // dusty teal -- Solo LED
+val NjStudioYellow = Color(0xFFCCB35A)      // warm muted yellow -- Mute LED
 val NjStudioWaveform = Color(0xFF9E9488)    // warm silver — trim handles, inactive UI
 
 // ── Per-track waveform colors — muted warm tones ─────────────────

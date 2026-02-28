@@ -35,7 +35,7 @@ A lightweight multi-track workspace. Not a replacement for professional tools, b
 - **Drag to reposition** — long-press a track and slide it along the timeline
 - **Non-destructive trim** — drag handles on track edges
 - **Per-track controls** — volume knob, solo, mute, delete via inline track drawer
-- **Hardware-style controls** — beveled toggle buttons with LED glow, rotary knob with haptic detents
+- **Hardware-style controls** — beveled toggle buttons with icon LEDs (color-coded glow when active, muted when idle), rotary knob with haptic detents
 
 ---
 
