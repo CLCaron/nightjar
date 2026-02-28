@@ -1,22 +1,27 @@
 package com.example.nightjar.ui.studio
 
 import com.example.nightjar.audio.AudioLatencyEstimator
-import com.example.nightjar.ui.components.NjPrimaryButton
 import com.example.nightjar.ui.components.NjSectionTitle
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -52,9 +57,16 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.nightjar.ui.components.NjScrubber
 import com.example.nightjar.ui.components.NjTopBar
+import com.example.nightjar.ui.theme.NjMuted2
 import com.example.nightjar.ui.theme.NjStudioAccent
 import com.example.nightjar.ui.theme.NjStudioBg
+import com.example.nightjar.ui.theme.NjStudioGreen
+import com.example.nightjar.ui.theme.NjStudioOutline
 import com.example.nightjar.ui.theme.NjStudioWaveform
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.Repeat
 import kotlinx.coroutines.flow.collectLatest
 
 /**
@@ -206,34 +218,44 @@ fun StudioScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        NjPrimaryButton(
-                            text = if (state.isLoopEnabled) "Loop" else "Loop",
-                            onClick = { vm.onAction(StudioAction.ToggleLoop) },
-                            minHeight = 36.dp,
-                            containerColor = if (state.isLoopEnabled) {
-                                NjStudioAccent.copy(alpha = 0.25f)
-                            } else {
-                                MaterialTheme.colorScheme.surfaceVariant
-                            },
-                            contentColor = if (state.isLoopEnabled) {
-                                NjStudioAccent
-                            } else {
-                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
-                            }
-                        )
+                        // Loop + Clear rocker pill — always both visible
+                        Row(
+                            modifier = Modifier.height(IntrinsicSize.Min),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            NjStudioButton(
+                                text = "Loop",
+                                icon = Icons.Outlined.Repeat,
+                                onClick = { vm.onAction(StudioAction.ToggleLoop) },
+                                isActive = state.isLoopEnabled,
+                                ledColor = NjStudioAccent,
+                            )
 
-                        if (state.hasLoopRegion) {
-                            NjPrimaryButton(
+                            Box(
+                                Modifier
+                                    .width(1.dp)
+                                    .fillMaxHeight()
+                                    .background(NjStudioOutline)
+                            )
+
+                            NjStudioButton(
                                 text = "Clear",
-                                onClick = { vm.onAction(StudioAction.ClearLoopRegion) },
-                                minHeight = 36.dp,
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+                                icon = Icons.Outlined.Close,
+                                onClick = {
+                                    if (state.hasLoopRegion) {
+                                        vm.onAction(StudioAction.ClearLoopRegion)
+                                    }
+                                },
+                                isActive = !state.hasLoopRegion,
+                                ledColor = NjMuted2,
+                                activeGlow = false,
                             )
                         }
 
-                        NjPrimaryButton(
+                        // Play / Pause — toggle with green LED glow when playing
+                        NjStudioButton(
                             text = if (state.isPlaying) "Pause" else "Play",
+                            icon = Icons.Outlined.PlayArrow,
                             onClick = {
                                 if (state.isPlaying) {
                                     vm.onAction(StudioAction.Pause)
@@ -241,9 +263,8 @@ fun StudioScreen(
                                     vm.onAction(StudioAction.Play)
                                 }
                             },
-                            minHeight = 36.dp,
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+                            isActive = state.isPlaying,
+                            ledColor = NjStudioGreen,
                         )
                     }
                 }
