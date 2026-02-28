@@ -2,28 +2,30 @@ package com.example.nightjar.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// ── Nightjar color palette — late-night zen, midnight moon ─────
-val NjBg = Color(0xFF090E1C)          // warm near-black
-val NjSurface = Color(0xFF0E1420)          // base surface
-val NjSurface2 = Color(0xFF141A28)          // elevated surface
+// ── Nightjar color palette — warm plum midnight, pocket recorder ───
+val NjBg = Color(0xFF110C14)          // deep plum near-black
+val NjSurface = Color(0xFF18121A)          // plum-tinted surface
+val NjSurface2 = Color(0xFF1E1720)          // elevated plum surface
 
-val NjPrimary = Color(0xFF4A6A8F)          // deep steel blue — buttons, accents
-val NjPrimary2 = Color(0xFF5C7DA0)          // muted steel blue — secondary accent
+val NjPrimary = Color(0xFF7A6388)          // dusty mauve — buttons, accents
+val NjPrimary2 = Color(0xFF8B7498)          // lighter mauve — secondary accent
 
-val NjAccent = Color(0xFFC9A96E)          // muted gold — record button, active states
+val NjAccent = Color(0xFFC9A96E)          // muted gold — active states
 
-val NjOnBg = Color(0xFFDEE2ED)          // warm off-white text
-val NjOnSurface = Color(0xFFDEE2ED)
-val NjMuted = Color(0xFF8F98AE)          // secondary text
-val NjMuted2 = Color(0xFF5E6678)          // disabled/tertiary
+val NjOnBg = Color(0xFFE6E0E0)          // warm off-white text (pink-tinted)
+val NjOnSurface = Color(0xFFE6E0E0)
+val NjMuted = Color(0xFF9A8E98)          // warm gray-mauve — secondary text
+val NjMuted2 = Color(0xFF6B5F6A)          // plum-gray — disabled/tertiary
 
-val NjMidnight = Color(0xFF080F21)          // deep midnight blue — studio track lanes
-val NjMidnight2 = Color(0xFF131720)          // slightly lifted midnight — track block bg
-val NjStarlight = Color(0xFF8493C8)          // silver-blue — waveforms, subtle highlights
+val NjMidnight = Color(0xFF0C0910)          // deep plum-black — track lanes
+val NjMidnight2 = Color(0xFF14101A)          // lifted plum-black — track block bg
+val NjStarlight = Color(0xFF9E8CB0)         // warm lilac — waveforms, subtle highlights
 
-val NjStardust = Color(0xFFE2E0EE)          // bright silver-white — starfield base
+val NjStardust = Color(0xFFECE0D4)          // warm gold-cream — starfield base
 
-val NjOutline = Color(0xFF1A2235)          // subtle borders
+val NjOutline = Color(0xFF261D28)          // plum-tinted borders
+
+val NjRecordCoral = Color(0xFFC46050)      // warm muted coral — record button LED
 val NjError = Color(0xFFD4727A)          // muted rose
 
 // ── Studio warm variants — indoor midnight ──────────────────────

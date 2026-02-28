@@ -1,12 +1,17 @@
 package com.example.nightjar.ui.record
 
 import com.example.nightjar.ui.components.NjLiveWaveform
-import com.example.nightjar.ui.components.NjPrimaryButton
-import com.example.nightjar.ui.components.NjSecondaryButton
 import com.example.nightjar.ui.components.NjStarfield
 import com.example.nightjar.ui.components.NjWaveform
+import com.example.nightjar.ui.components.collectIsPressedWithMinDuration
+import com.example.nightjar.ui.studio.NjStudioButton
+import com.example.nightjar.ui.theme.NjAccent
+import com.example.nightjar.ui.theme.NjBg
+import com.example.nightjar.ui.theme.NjRecordCoral
+import com.example.nightjar.ui.theme.NjSurface2
 import android.Manifest
 import android.content.pm.PackageManager
+import android.view.HapticFeedbackConstants
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.LinearEasing
@@ -19,6 +24,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +33,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -49,9 +56,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -62,13 +71,14 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.flow.collectLatest
 
 /**
- * Record screen — the app's landing page.
+ * Record screen -- the app's landing page.
  *
- * Presents a single prominent button to start/stop recording. After
- * stopping, the user stays on this screen and sees a waveform of
- * what they captured, with options to open Overview, open Studio,
- * or start a new recording. Handles microphone permission requests
- * and gracefully saves when the app is backgrounded mid-recording.
+ * Centered around a hardware-style circular record button with a coral
+ * LED indicator. Idle shows a coral circle; recording sinks the button
+ * in, morphs the indicator to a rounded-square stop icon, and pulses
+ * a coral ring. After stopping, the user sees a waveform preview with
+ * options to open Overview, open Studio, or start a new recording.
+ * All secondary actions use hardware-style push buttons (NjStudioButton).
  */
 @Composable
 fun RecordScreen(
@@ -164,14 +174,15 @@ fun RecordScreen(
 
                 Spacer(Modifier.height(14.dp))
 
-                NjPrimaryButton(
+                NjStudioButton(
                     text = "Enable microphone",
                     onClick = { requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
-                    fullWidth = true,
-                    minHeight = 56.dp
+                    isActive = true,
+                    ledColor = NjRecordCoral,
+                    modifier = Modifier.heightIn(min = 48.dp)
                 )
             } else {
-                RecordButton(
+                HardwareRecordButton(
                     isRecording = state.isRecording,
                     onClick = {
                         if (!state.isRecording) vm.onAction(RecordAction.StartRecording)
@@ -242,11 +253,13 @@ fun RecordScreen(
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        NjPrimaryButton(
+                        NjStudioButton(
                             text = "Done",
-                            onClick = { vm.onAction(RecordAction.GoToOverview) }
+                            onClick = { vm.onAction(RecordAction.GoToOverview) },
+                            isActive = true,
+                            ledColor = NjAccent
                         )
-                        NjSecondaryButton(
+                        NjStudioButton(
                             text = "Open in Studio",
                             onClick = { vm.onAction(RecordAction.GoToStudio) }
                         )
@@ -263,11 +276,11 @@ fun RecordScreen(
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        NjSecondaryButton(
+                        NjStudioButton(
                             text = "Write",
                             onClick = { vm.onAction(RecordAction.CreateWriteIdea) }
                         )
-                        NjSecondaryButton(
+                        NjStudioButton(
                             text = "Studio",
                             onClick = { vm.onAction(RecordAction.CreateStudioIdea) }
                         )
@@ -276,10 +289,10 @@ fun RecordScreen(
 
                 Spacer(Modifier.height(26.dp))
 
-                NjSecondaryButton(
+                NjStudioButton(
                     text = "Open Library",
                     onClick = onOpenLibrary,
-                    minHeight = 56.dp
+                    modifier = Modifier.heightIn(min = 48.dp)
                 )
             }
             }
@@ -288,36 +301,48 @@ fun RecordScreen(
 }
 
 /**
- * Crescent-moon record button. Idle state shows a subtle crescent carved
- * from the gold circle. On tap the shadow slides away (crescent → full
- * moon), then the circle shrinks into a rounded-square stop icon. The
- * outer ring pulses gently while recording.
+ * Hardware-style circular record button with beveled edges.
+ *
+ * Idle: dark body with raised bevel and a coral filled circle indicator.
+ * A coral ring breathes slowly (5s cycle). Recording: body sinks in
+ * (bevel inverts), indicator morphs to a coral rounded-square stop icon,
+ * ring pulses faster (900ms), and a coral radial glow appears behind
+ * the button. Haptic feedback on press (CONTEXT_CLICK) and release
+ * (CLOCK_TICK).
  */
 @Composable
-private fun RecordButton(
+private fun HardwareRecordButton(
     isRecording: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val accent = MaterialTheme.colorScheme.tertiary
-    val bg = MaterialTheme.colorScheme.background
-    val ring = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f)
+    val interactionSource = remember { MutableInteractionSource() }
+    val fingerDown by interactionSource.collectIsPressedWithMinDuration()
+    val view = LocalView.current
 
-    // Crescent shadow offset — slides to 0 when recording (full moon)
-    val shadowOffset by animateFloatAsState(
-        targetValue = if (isRecording) 0f else 0.22f,
-        animationSpec = tween(durationMillis = 350),
-        label = "shadowOffset"
+    val visuallyPressed = isRecording || fingerDown
+    val bodyColor = if (visuallyPressed) Color(0xFF12101A) else NjSurface2
+
+    // Haptics on raw press/release events
+    LaunchedEffect(interactionSource) {
+        interactionSource.interactions.collect { interaction ->
+            when (interaction) {
+                is PressInteraction.Press ->
+                    view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                is PressInteraction.Release ->
+                    view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+            }
+        }
+    }
+
+    // Body + indicator scale down when pressed -- physical sink-in feel
+    val pressScale by animateFloatAsState(
+        targetValue = if (visuallyPressed) 0.93f else 1.0f,
+        animationSpec = tween(durationMillis = 80),
+        label = "pressScale"
     )
 
-    // Shadow radius shrinks to 0 when recording so it fully disappears
-    val shadowRadiusFraction by animateFloatAsState(
-        targetValue = if (isRecording) 0f else 1f,
-        animationSpec = tween(durationMillis = 350),
-        label = "shadowRadius"
-    )
-
-    // Inner shape corner radius: 50% (circle) → 26% (rounded square)
+    // Inner shape corner radius: 50% (circle) to 26% (rounded square)
     val cornerFraction by animateFloatAsState(
         targetValue = if (isRecording) 0.26f else 0.50f,
         animationSpec = tween(durationMillis = 250, delayMillis = 150),
@@ -331,7 +356,7 @@ private fun RecordButton(
         label = "innerSize"
     )
 
-    // Ring animation — slow gentle breathing when idle, faster pulse when recording
+    // Ring breathing -- slow when idle, faster pulse when recording
     val ringTransition = rememberInfiniteTransition(label = "ring")
     val ringAlpha by ringTransition.animateFloat(
         initialValue = if (isRecording) 0.15f else 0.10f,
@@ -348,9 +373,9 @@ private fun RecordButton(
 
     Box(
         modifier = modifier
-            .size(80.dp)
+            .size(92.dp)
             .clickable(
-                interactionSource = remember { MutableInteractionSource() },
+                interactionSource = interactionSource,
                 indication = null,
                 role = Role.Button,
                 onClick = onClick
@@ -358,62 +383,128 @@ private fun RecordButton(
         contentAlignment = Alignment.Center
     ) {
         Canvas(Modifier.fillMaxSize()) {
-            val strokeWidth = 2.dp.toPx()
             val center = Offset(size.width / 2f, size.height / 2f)
-            val moonRadius = size.minDimension * 0.72f / 2f
+            val outerRadius = size.minDimension / 2f
+            val bevelStroke = 1.5f.dp.toPx()
+            val ringStroke = 2.dp.toPx()
+            val bodyRadius = outerRadius * 0.82f * pressScale
 
-            // Opaque backing — blocks starfield behind the button
-            drawCircle(
-                color = bg,
-                radius = size.minDimension / 2f,
-                center = center
-            )
-
-            // Outer ring — breathes gently when idle, pulses when recording
-            drawCircle(
-                color = if (isRecording) accent.copy(alpha = ringAlpha)
-                        else ring.copy(alpha = ringAlpha),
-                radius = (size.minDimension / 2f) - (strokeWidth / 2f),
-                style = Stroke(width = strokeWidth)
-            )
-
-            // Gold moon circle
-            drawCircle(
-                color = accent,
-                radius = moonRadius,
-                center = center
-            )
-
-            // Shadow circle carving the crescent — offset to upper-right
-            // When recording, offset and radius animate to 0 (full moon)
-            if (shadowRadiusFraction > 0.001f) {
-                val shadowR = moonRadius * 0.92f * shadowRadiusFraction
-                val offsetPx = moonRadius * shadowOffset
-                drawCircle(
-                    color = bg,
-                    radius = shadowR,
-                    center = Offset(
-                        center.x + offsetPx,
-                        center.y - offsetPx * 0.6f
-                    )
-                )
-            }
-
-            // When recording, draw the stop icon (rounded square) over the full moon
+            // Recording glow -- coral radial gradient behind body
             if (isRecording) {
-                val innerSize = size.minDimension * innerSizeFraction
-                val cr = innerSize * cornerFraction
-                val topLeft = Offset(
-                    (size.width - innerSize) / 2f,
-                    (size.height - innerSize) / 2f
-                )
-                drawRoundRect(
-                    color = bg,
-                    topLeft = topLeft,
-                    size = Size(innerSize, innerSize),
-                    cornerRadius = CornerRadius(cr, cr)
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            NjRecordCoral.copy(alpha = 0.15f),
+                            Color.Transparent
+                        ),
+                        center = center,
+                        radius = outerRadius * 1.3f
+                    ),
+                    radius = outerRadius * 1.3f,
+                    center = center
                 )
             }
+
+            // Opaque backing -- blocks starfield behind the button
+            drawCircle(
+                color = NjBg,
+                radius = outerRadius,
+                center = center
+            )
+
+            // Breathing coral ring
+            drawCircle(
+                color = NjRecordCoral.copy(alpha = ringAlpha),
+                radius = outerRadius - ringStroke / 2f,
+                style = Stroke(width = ringStroke)
+            )
+
+            // Body circle
+            drawCircle(
+                color = bodyColor,
+                radius = bodyRadius,
+                center = center
+            )
+
+            // Inner shadow when pressed -- dark edge gradient for depth
+            if (visuallyPressed) {
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colorStops = arrayOf(
+                            0.75f to Color.Transparent,
+                            1.0f to Color.Black.copy(alpha = 0.25f)
+                        ),
+                        center = center,
+                        radius = bodyRadius
+                    ),
+                    radius = bodyRadius,
+                    center = center
+                )
+            }
+
+            // Circular bevel -- two arcs for highlight and shadow
+            val bevelRadius = bodyRadius - bevelStroke / 2f
+            val bevelLeft = center.x - bevelRadius
+            val bevelTop = center.y - bevelRadius
+            val bevelDiameter = bevelRadius * 2f
+            val bevelSize = Size(bevelDiameter, bevelDiameter)
+
+            if (visuallyPressed) {
+                // Pressed: dark top-left, subtle light bottom-right
+                drawArc(
+                    color = Color.Black.copy(alpha = 0.45f),
+                    startAngle = 225f,
+                    sweepAngle = 180f,
+                    useCenter = false,
+                    topLeft = Offset(bevelLeft, bevelTop),
+                    size = bevelSize,
+                    style = Stroke(width = bevelStroke)
+                )
+                drawArc(
+                    color = Color.White.copy(alpha = 0.06f),
+                    startAngle = 45f,
+                    sweepAngle = 180f,
+                    useCenter = false,
+                    topLeft = Offset(bevelLeft, bevelTop),
+                    size = bevelSize,
+                    style = Stroke(width = bevelStroke)
+                )
+            } else {
+                // Raised: light top-left, dark bottom-right
+                drawArc(
+                    color = Color.White.copy(alpha = 0.09f),
+                    startAngle = 225f,
+                    sweepAngle = 180f,
+                    useCenter = false,
+                    topLeft = Offset(bevelLeft, bevelTop),
+                    size = bevelSize,
+                    style = Stroke(width = bevelStroke)
+                )
+                drawArc(
+                    color = Color.Black.copy(alpha = 0.35f),
+                    startAngle = 45f,
+                    sweepAngle = 180f,
+                    useCenter = false,
+                    topLeft = Offset(bevelLeft, bevelTop),
+                    size = bevelSize,
+                    style = Stroke(width = bevelStroke)
+                )
+            }
+
+            // Coral indicator: circle when idle, rounded-square stop icon when recording
+            // Scales with pressScale so it sinks with the body
+            val innerSize = size.minDimension * innerSizeFraction * pressScale
+            val cr = innerSize * cornerFraction
+            val topLeft = Offset(
+                (size.width - innerSize) / 2f,
+                (size.height - innerSize) / 2f
+            )
+            drawRoundRect(
+                color = NjRecordCoral,
+                topLeft = topLeft,
+                size = Size(innerSize, innerSize),
+                cornerRadius = CornerRadius(cr, cr)
+            )
         }
     }
 }

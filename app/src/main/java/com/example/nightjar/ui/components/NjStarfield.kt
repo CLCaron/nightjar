@@ -73,30 +73,29 @@ private val STARBURST_UNIT_VERTICES: List<Pair<Float, Float>> = buildList {
 }
 
 /**
- * Subtle starfield background — a dense scatter of tiny dots across the
- * canvas, with a handful that gently twinkle at different rates.
+ * Ambient particle field -- a dense scatter of warm-tinted dust motes
+ * drifting across the canvas, like particles caught in dim lamplight.
  *
- * Star count scales to the device's screen size so the density feels
- * consistent across phones, tablets, and foldables. Stars regenerate
+ * Particle count scales to the device's screen size so the density feels
+ * consistent across phones, tablets, and foldables. Particles regenerate
  * only when the canvas dimensions change (e.g. fold/unfold).
  *
- * Each star gets a slight random hue shift from [NjStardust] — some lean
- * warmer (hint of cream), some cooler (hint of blue) — so the field reads
- * as natural variation rather than a uniform dot pattern.
+ * Each particle gets a slight random hue shift from [NjStardust] with a
+ * warm bias (~65% lean cream/candlelight, ~35% lean cool) so the field
+ * reads as natural variation with an overall warm cast.
  *
- * Stars are positioned with minimum-distance rejection sampling so none
- * overlap or clump together. Positions are deterministic (fixed seed)
+ * Particles are positioned with minimum-distance rejection sampling so
+ * none overlap or clump together. Positions are deterministic (fixed seed)
  * so the layout stays stable across recompositions.
  *
- * Most stars are plain circles. Medium-bright stars get subtle diffraction
- * rays (crosshair lines through center). Anchor stars are rendered as
- * 8-point starbursts. A rare ~2% of stars are "beacons" — noticeably
- * larger and brighter starbursts with a persistent soft glow halo that
- * makes them pop against the field.
+ * Most particles are plain circles. Medium-bright ones get subtle
+ * diffraction rays (crosshair lines through center). Anchor particles are
+ * rendered as 8-point starbursts. A rare ~2% are "beacons" with a
+ * warm-tinted glow halo that makes them pop against the field.
  *
- * When [isRecording] is true the sky "holds its breath" — most twinkling
- * stars settle to a steady dim glow while a few anchor stars brighten
- * and hold steady, like the clearest night you've ever seen.
+ * When [isRecording] is true the field "holds its breath" -- most
+ * twinkling particles settle to a steady dim glow while a few anchors
+ * brighten and hold steady.
  */
 @Composable
 fun NjStarfield(modifier: Modifier = Modifier, isRecording: Boolean = false) {
@@ -172,12 +171,18 @@ fun NjStarfield(modifier: Modifier = Modifier, isRecording: Boolean = false) {
 
                 StarShape.STARBURST -> {
                     if (star.beacon) {
-                        // Beacon glow — always visible, soft halo
+                        // Beacon glow — warm-tinted halo, always visible
                         val glowRadius = radiusPx * 2.2f
+                        val warmGlow = Color(
+                            red = (star.color.red * 0.95f + 0.05f).coerceAtMost(1f),
+                            green = star.color.green * 0.92f,
+                            blue = star.color.blue * 0.85f,
+                            alpha = a * 0.3f
+                        )
                         drawCircle(
                             brush = Brush.radialGradient(
                                 colors = listOf(
-                                    star.color.copy(alpha = a * 0.3f),
+                                    warmGlow,
                                     Color.Transparent
                                 ),
                                 center = center,
@@ -253,16 +258,18 @@ private fun computeAlpha(star: Star, time: Float, settle: Float): Float {
 }
 
 /**
- * Tint [NjStardust] along a warm–cool axis.
+ * Tint [NjStardust] along a warm-cool axis with a +0.5 warm bias.
  *
- * [shift] ranges from -1 (cool blue lean) to +1 (warm cream lean).
- * The offset is subtle — max +/-18 on the R/B channels — so stars still
- * read as "white" with natural variation.
+ * [shift] ranges from -1 (cool lean) to +1 (warm gold-cream lean).
+ * The strong bias means ~75% of particles lean warm gold/candlelight,
+ * ~25% lean neutral -- almost none read as cool. Dust motes caught
+ * in warm lamplight, not stars in a night sky.
  */
 private fun tintStardust(shift: Float): Color {
-    val r = (NjStardust.red * 255f + shift * 18f).coerceIn(0f, 255f)
-    val g = (NjStardust.green * 255f).coerceIn(0f, 255f)
-    val b = (NjStardust.blue * 255f - shift * 14f).coerceIn(0f, 255f)
+    val biased = (shift + 0.5f).coerceIn(-1f, 1f)
+    val r = (NjStardust.red * 255f + biased * 20f).coerceIn(0f, 255f)
+    val g = (NjStardust.green * 255f - biased * 4f).coerceIn(0f, 255f)
+    val b = (NjStardust.blue * 255f - biased * 18f).coerceIn(0f, 255f)
     return Color(r / 255f, g / 255f, b / 255f)
 }
 
