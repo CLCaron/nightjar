@@ -33,6 +33,9 @@ struct AtomicTransport {
     /** Loop region end in frames. -1 = no loop. */
     std::atomic<int64_t> loopEndFrames{-1};
 
+    /** Incremented by the audio callback each time the loop resets to loopStart. */
+    std::atomic<int64_t> loopResetCount{0};
+
     /** Returns true if a loop region is active. */
     bool hasLoop() const {
         return loopStartFrames.load(std::memory_order_relaxed) >= 0 &&

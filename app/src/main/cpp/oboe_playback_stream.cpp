@@ -102,6 +102,7 @@ oboe::DataCallbackResult OboePlaybackStream::onAudioReady(
     int64_t loopStart = transport_.loopStartFrames.load(std::memory_order_relaxed);
     if (loopStart >= 0 && loopEnd > loopStart && pos >= loopEnd) {
         pos = loopStart;
+        transport_.loopResetCount.fetch_add(1, std::memory_order_release);
     }
 
     // End-of-timeline check

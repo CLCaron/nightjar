@@ -1,6 +1,7 @@
 package com.example.nightjar.ui.studio
 
 import com.example.nightjar.audio.AudioLatencyEstimator
+import com.example.nightjar.data.db.entity.TakeEntity
 import com.example.nightjar.data.db.entity.TrackEntity
 
 /** UI state for the Studio (multi-track workspace) screen. */
@@ -26,7 +27,18 @@ data class StudioUiState(
     val isLoopEnabled: Boolean = false,
     val showLatencySetupDialog: Boolean = false,
     val latencyDiagnostics: AudioLatencyEstimator.LatencyDiagnostics? = null,
-    val manualOffsetMs: Long = 0L
+    val manualOffsetMs: Long = 0L,
+    val armedTrackId: Long? = null,
+    val trackTakes: Map<Long, List<TakeEntity>> = emptyMap(),
+    val expandedTakeTrackIds: Set<Long> = emptySet(),
+    val renamingTrackId: Long? = null,
+    val renamingTrackCurrentName: String = "",
+    val renamingTakeId: Long? = null,
+    val renamingTakeTrackId: Long? = null,
+    val renamingTakeCurrentName: String = "",
+    val confirmingDeleteTakeId: Long? = null,
+    val confirmingDeleteTakeTrackId: Long? = null,
+    val expandedTakeDrawerIds: Set<Long> = emptySet()
 ) {
     val hasLoopRegion: Boolean get() = loopStartMs != null && loopEndMs != null
 }
@@ -83,6 +95,32 @@ sealed interface StudioAction {
     data object DismissLatencySetup : StudioAction
     data class SetManualOffset(val offsetMs: Long) : StudioAction
     data object ClearManualOffset : StudioAction
+
+    // Arm / Record
+    data class ToggleArm(val trackId: Long) : StudioAction
+    data object StartRecording : StudioAction
+    data object StopRecording : StudioAction
+
+    // Track rename
+    data class RequestRenameTrack(val trackId: Long, val currentName: String) : StudioAction
+    data class ConfirmRenameTrack(val trackId: Long, val newName: String) : StudioAction
+    data object DismissRenameTrack : StudioAction
+
+    // Takes
+    data class ToggleTakesView(val trackId: Long) : StudioAction
+    data class RenameTake(val takeId: Long, val name: String) : StudioAction
+    data class DeleteTake(val takeId: Long, val trackId: Long) : StudioAction
+    data class SetTakeMuted(val takeId: Long, val trackId: Long, val muted: Boolean) : StudioAction
+    data class DragTake(val takeId: Long, val newOffsetMs: Long) : StudioAction
+
+    // Take drawer / rename / delete
+    data class ToggleTakeDrawer(val takeId: Long) : StudioAction
+    data class RequestRenameTake(val takeId: Long, val trackId: Long, val currentName: String) : StudioAction
+    data class ConfirmRenameTake(val takeId: Long, val newName: String) : StudioAction
+    data object DismissRenameTake : StudioAction
+    data class RequestDeleteTake(val takeId: Long, val trackId: Long) : StudioAction
+    data object DismissDeleteTake : StudioAction
+    data object ExecuteDeleteTake : StudioAction
 }
 
 /** One-shot side effects emitted by [StudioViewModel]. */

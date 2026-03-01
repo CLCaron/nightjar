@@ -190,6 +190,15 @@ Java_com_example_nightjar_audio_OboeAudioEngine_nativeSetRecording(
     if (sEngine) sEngine->setRecording(static_cast<bool>(active));
 }
 
+// ── Loop reset tracking ─────────────────────────────────────────────────
+
+JNIEXPORT jlong JNICALL
+Java_com_example_nightjar_audio_OboeAudioEngine_nativeGetLoopResetCount(
+        JNIEnv* /* env */, jobject /* thiz */) {
+    if (!sEngine) return 0;
+    return static_cast<jlong>(sEngine->getLoopResetCount());
+}
+
 // ── Hardware latency measurement ────────────────────────────────────────
 
 JNIEXPORT jlong JNICALL

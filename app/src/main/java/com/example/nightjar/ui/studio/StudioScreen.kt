@@ -28,6 +28,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -46,6 +47,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -60,11 +62,13 @@ import com.example.nightjar.ui.components.NjTopBar
 import com.example.nightjar.ui.theme.NjMuted2
 import com.example.nightjar.ui.theme.NjStudioAccent
 import com.example.nightjar.ui.theme.NjStudioBg
+import com.example.nightjar.ui.theme.NjRecordCoral
 import com.example.nightjar.ui.theme.NjStudioGreen
 import com.example.nightjar.ui.theme.NjStudioOutline
 import com.example.nightjar.ui.theme.NjStudioWaveform
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.FiberManualRecord
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Repeat
 import kotlinx.coroutines.flow.collectLatest
@@ -137,7 +141,7 @@ fun StudioScreen(
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP && currentIsRecording) {
-                vm.onAction(StudioAction.StopOverdubRecording)
+                vm.onAction(StudioAction.StopRecording)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -202,7 +206,7 @@ fun StudioScreen(
             if (state.isRecording) {
                 OverdubRecordingBar(
                     elapsedMs = state.recordingElapsedMs,
-                    onStop = { vm.onAction(StudioAction.StopOverdubRecording) }
+                    onStop = { vm.onAction(StudioAction.StopRecording) }
                 )
             }
 
@@ -213,59 +217,84 @@ fun StudioScreen(
             ) {
                 NjSectionTitle("Timeline")
 
-                if (state.tracks.isNotEmpty() && !state.isRecording) {
+                if (!state.isLoading) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Loop + Clear rocker pill — always both visible
-                        Row(
-                            modifier = Modifier.height(IntrinsicSize.Min),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            NjStudioButton(
-                                text = "Loop",
-                                icon = Icons.Outlined.Repeat,
-                                onClick = { vm.onAction(StudioAction.ToggleLoop) },
-                                isActive = state.isLoopEnabled,
-                                ledColor = NjStudioAccent,
-                            )
+                        // Loop + Clear rocker pill
+                        if (state.tracks.isNotEmpty()) {
+                            Row(
+                                modifier = Modifier.height(IntrinsicSize.Min),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                NjStudioButton(
+                                    text = "Loop",
+                                    icon = Icons.Outlined.Repeat,
+                                    onClick = { vm.onAction(StudioAction.ToggleLoop) },
+                                    isActive = state.isLoopEnabled,
+                                    ledColor = NjStudioAccent,
+                                )
 
-                            Box(
-                                Modifier
-                                    .width(1.dp)
-                                    .fillMaxHeight()
-                                    .background(NjStudioOutline)
-                            )
+                                Box(
+                                    Modifier
+                                        .width(1.dp)
+                                        .fillMaxHeight()
+                                        .background(NjStudioOutline)
+                                )
 
-                            NjStudioButton(
-                                text = "Clear",
-                                icon = Icons.Outlined.Close,
-                                onClick = {
-                                    if (state.hasLoopRegion) {
-                                        vm.onAction(StudioAction.ClearLoopRegion)
-                                    }
-                                },
-                                isActive = !state.hasLoopRegion,
-                                ledColor = NjMuted2,
-                                activeGlow = false,
-                            )
+                                NjStudioButton(
+                                    text = "Clear",
+                                    icon = Icons.Outlined.Close,
+                                    onClick = {
+                                        if (state.hasLoopRegion) {
+                                            vm.onAction(StudioAction.ClearLoopRegion)
+                                        }
+                                    },
+                                    isActive = !state.hasLoopRegion,
+                                    ledColor = NjMuted2,
+                                    activeGlow = false,
+                                )
+                            }
                         }
 
-                        // Play / Pause — toggle with green LED glow when playing
+                        // Record button — coral LED
+                        val recEnabled = state.tracks.isEmpty() || state.armedTrackId != null
                         NjStudioButton(
-                            text = if (state.isPlaying) "Pause" else "Play",
-                            icon = Icons.Outlined.PlayArrow,
+                            text = "Rec",
+                            icon = Icons.Outlined.FiberManualRecord,
                             onClick = {
-                                if (state.isPlaying) {
-                                    vm.onAction(StudioAction.Pause)
+                                if (state.isRecording) {
+                                    vm.onAction(StudioAction.StopRecording)
                                 } else {
-                                    vm.onAction(StudioAction.Play)
+                                    vm.onAction(StudioAction.StartRecording)
                                 }
                             },
-                            isActive = state.isPlaying,
-                            ledColor = NjStudioGreen,
+                            isActive = state.isRecording,
+                            ledColor = NjRecordCoral,
+                            modifier = if (!recEnabled && !state.isRecording) {
+                                Modifier.alpha(0.4f)
+                            } else {
+                                Modifier
+                            }
                         )
+
+                        // Play / Pause
+                        if (state.tracks.isNotEmpty() && !state.isRecording) {
+                            NjStudioButton(
+                                text = if (state.isPlaying) "Pause" else "Play",
+                                icon = Icons.Outlined.PlayArrow,
+                                onClick = {
+                                    if (state.isPlaying) {
+                                        vm.onAction(StudioAction.Pause)
+                                    } else {
+                                        vm.onAction(StudioAction.Play)
+                                    }
+                                },
+                                isActive = state.isPlaying,
+                                ledColor = NjStudioGreen,
+                            )
+                        }
                     }
                 }
             }
@@ -289,6 +318,10 @@ fun StudioScreen(
                     isLoopEnabled = state.isLoopEnabled,
                     expandedTrackIds = state.expandedTrackIds,
                     soloedTrackIds = state.soloedTrackIds,
+                    armedTrackId = state.armedTrackId,
+                    trackTakes = state.trackTakes,
+                    expandedTakeTrackIds = state.expandedTakeTrackIds,
+                    expandedTakeDrawerIds = state.expandedTakeDrawerIds,
                     getAudioFile = vm::getAudioFile,
                     onAction = vm::onAction
                 )
@@ -350,6 +383,59 @@ fun StudioScreen(
             onOffsetChange = { vm.onAction(StudioAction.SetManualOffset(it)) },
             onClearOffset = { vm.onAction(StudioAction.ClearManualOffset) },
             onDismiss = { vm.onAction(StudioAction.DismissLatencySetup) }
+        )
+    }
+
+    // Track rename dialog
+    val renamingTrackId = state.renamingTrackId
+    if (renamingTrackId != null) {
+        RenameDialog(
+            title = "Rename track",
+            currentName = state.renamingTrackCurrentName,
+            onConfirm = { newName ->
+                vm.onAction(
+                    StudioAction.ConfirmRenameTrack(renamingTrackId, newName)
+                )
+            },
+            onDismiss = { vm.onAction(StudioAction.DismissRenameTrack) }
+        )
+    }
+
+    // Take rename dialog
+    val renamingTakeId = state.renamingTakeId
+    if (renamingTakeId != null) {
+        RenameDialog(
+            title = "Rename take",
+            currentName = state.renamingTakeCurrentName,
+            onConfirm = { newName ->
+                vm.onAction(
+                    StudioAction.ConfirmRenameTake(renamingTakeId, newName)
+                )
+            },
+            onDismiss = { vm.onAction(StudioAction.DismissRenameTake) }
+        )
+    }
+
+    // Take delete confirmation dialog
+    if (state.confirmingDeleteTakeId != null) {
+        val takeName = state.trackTakes.values.flatten()
+            .find { it.id == state.confirmingDeleteTakeId }
+            ?.displayName ?: "this take"
+
+        AlertDialog(
+            onDismissRequest = { vm.onAction(StudioAction.DismissDeleteTake) },
+            title = { Text("Delete $takeName?") },
+            text = { Text("This will permanently delete the take and its audio file.") },
+            confirmButton = {
+                TextButton(onClick = { vm.onAction(StudioAction.ExecuteDeleteTake) }) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { vm.onAction(StudioAction.DismissDeleteTake) }) {
+                    Text("Cancel")
+                }
+            }
         )
     }
 }
@@ -520,8 +606,45 @@ private fun OffsetSlider(
     }
 }
 
-/** Snap to 0 when within ±15ms of center, then clamp to range. */
+/** Snap to 0 when within +/-15ms of center, then clamp to range. */
 private fun snapToCenter(rawMs: Long): Long {
     val snapped = if (rawMs in -15L..15L) 0L else rawMs
     return snapped.coerceIn(-500L, 500L)
+}
+
+/** Reusable rename dialog with a pre-filled text field. */
+@Composable
+private fun RenameDialog(
+    title: String,
+    currentName: String,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var text by remember(currentName) { mutableStateOf(currentName) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(text) },
+                enabled = text.isNotBlank()
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }

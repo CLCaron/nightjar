@@ -221,6 +221,13 @@ void AudioEngine::setRecording(bool active) {
     }
 }
 
+// ── Loop reset tracking ─────────────────────────────────────────────
+
+int64_t AudioEngine::getLoopResetCount() const {
+    if (!transport_) return 0;
+    return transport_->loopResetCount.load(std::memory_order_acquire);
+}
+
 // ── Hardware latency measurement ────────────────────────────────────
 
 int64_t AudioEngine::getOutputLatencyMs() const {

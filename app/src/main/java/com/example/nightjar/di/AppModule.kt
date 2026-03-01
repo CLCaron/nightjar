@@ -4,6 +4,7 @@ import android.content.Context
 import com.example.nightjar.data.db.NightjarDatabase
 import com.example.nightjar.data.db.dao.IdeaDao
 import com.example.nightjar.data.db.dao.TagDao
+import com.example.nightjar.data.db.dao.TakeDao
 import com.example.nightjar.data.db.dao.TrackDao
 import com.example.nightjar.data.repository.StudioRepository
 import com.example.nightjar.data.repository.IdeaRepository
@@ -49,11 +50,15 @@ abstract class AppModule {
         fun provideTrackDao(db: NightjarDatabase): TrackDao = db.trackDao()
 
         @Provides
+        fun provideTakeDao(db: NightjarDatabase): TakeDao = db.takeDao()
+
+        @Provides
         @Singleton
         fun provideStudioRepository(
             trackDao: TrackDao,
+            takeDao: TakeDao,
             storage: RecordingStorage
-        ): StudioRepository = StudioRepository(trackDao, storage)
+        ): StudioRepository = StudioRepository(trackDao, takeDao, storage)
 
     }
 }

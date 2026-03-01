@@ -69,6 +69,9 @@ public:
     // ── Overdub support ─────────────────────────────────────────────────
     void setRecording(bool active);
 
+    // ── Loop reset tracking ──────────────────────────────────────────────
+    int64_t getLoopResetCount() const;
+
     // ── Hardware latency measurement ──────────────────────────────────
     int64_t getOutputLatencyMs() const;
     int64_t getInputLatencyMs() const;

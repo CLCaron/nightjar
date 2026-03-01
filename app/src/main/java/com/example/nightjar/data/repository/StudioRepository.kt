@@ -1,7 +1,9 @@
 package com.example.nightjar.data.repository
 
 import android.media.MediaMetadataRetriever
+import com.example.nightjar.data.db.dao.TakeDao
 import com.example.nightjar.data.db.dao.TrackDao
+import com.example.nightjar.data.db.entity.TakeEntity
 import com.example.nightjar.data.db.entity.TrackEntity
 import com.example.nightjar.data.storage.RecordingStorage
 import kotlinx.coroutines.flow.Flow
@@ -16,6 +18,7 @@ import java.io.File
  */
 class StudioRepository(
     private val trackDao: TrackDao,
+    private val takeDao: TakeDao,
     private val storage: RecordingStorage
 ) {
 
@@ -114,6 +117,80 @@ class StudioRepository(
         val track = trackDao.getTrackById(trackId) ?: return null
         return storage.getAudioFile(track.audioFileName)
     }
+
+    // ── Take lifecycle ────────────────────────────────────────────────────
+
+    /**
+     * Promote a track's audio to Take 1 if it has no takes yet.
+     * Returns the current list of takes for the track.
+     */
+    suspend fun ensureTrackHasTakes(trackId: Long): List<TakeEntity> {
+        val existing = takeDao.getTakesForTrack(trackId)
+        if (existing.isNotEmpty()) return existing
+
+        val track = trackDao.getTrackById(trackId) ?: return emptyList()
+        if (track.audioFileName.isBlank()) return emptyList()
+
+        val take = TakeEntity(
+            trackId = trackId,
+            audioFileName = track.audioFileName,
+            displayName = "Take 1",
+            sortIndex = 0,
+            durationMs = track.durationMs,
+            offsetMs = track.offsetMs,
+            trimStartMs = track.trimStartMs,
+            trimEndMs = track.trimEndMs,
+            volume = track.volume,
+            isMuted = false
+        )
+        takeDao.insertTake(take)
+        return takeDao.getTakesForTrack(trackId)
+    }
+
+    /** Add a new take to a track. Returns the new take's ID. */
+    suspend fun addTake(
+        trackId: Long,
+        audioFile: File,
+        durationMs: Long,
+        offsetMs: Long = 0L,
+        trimStartMs: Long = 0L
+    ): Long {
+        val nextIndex = takeDao.getTakeCount(trackId)
+        val take = TakeEntity(
+            trackId = trackId,
+            audioFileName = audioFile.name,
+            displayName = "Take ${nextIndex + 1}",
+            sortIndex = nextIndex,
+            durationMs = durationMs,
+            offsetMs = offsetMs,
+            trimStartMs = trimStartMs
+        )
+        return takeDao.insertTake(take)
+    }
+
+    suspend fun deleteTakeAndAudio(takeId: Long) {
+        val take = takeDao.getTakeById(takeId) ?: return
+        takeDao.deleteTakeById(takeId)
+        storage.deleteAudioFile(take.audioFileName)
+    }
+
+    suspend fun renameTake(takeId: Long, name: String) {
+        takeDao.updateDisplayName(takeId, name)
+    }
+
+    suspend fun setTakeMuted(takeId: Long, muted: Boolean) {
+        takeDao.updateMuted(takeId, muted)
+    }
+
+    suspend fun moveTake(takeId: Long, newOffsetMs: Long) {
+        takeDao.updateOffset(takeId, newOffsetMs)
+    }
+
+    suspend fun getTakesForTrack(trackId: Long): List<TakeEntity> =
+        takeDao.getTakesForTrack(trackId)
+
+    suspend fun getTakesForTracks(trackIds: List<Long>): List<TakeEntity> =
+        if (trackIds.isEmpty()) emptyList() else takeDao.getTakesForTracks(trackIds)
 
     // ── Internal ─────────────────────────────────────────────────────────
 

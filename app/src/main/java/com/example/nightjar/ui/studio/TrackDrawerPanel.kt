@@ -7,12 +7,16 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -33,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import com.example.nightjar.data.db.entity.TrackEntity
 import com.example.nightjar.ui.components.NjKnob
 import com.example.nightjar.ui.components.collectIsPressedWithMinDuration
+import com.example.nightjar.ui.theme.NjRecordCoral
 import com.example.nightjar.ui.theme.NjStudioAccent
 import com.example.nightjar.ui.theme.NjStudioTeal
 import com.example.nightjar.ui.theme.NjError
@@ -40,31 +45,39 @@ import com.example.nightjar.ui.theme.NjMuted2
 import com.example.nightjar.ui.theme.NjStudioSurface2
 import com.example.nightjar.ui.theme.NjStudioYellow
 
-// Pressed-in body — slightly darker than NjStudioSurface2 (0xFF1C1824).
+// Pressed-in body -- slightly darker than NjStudioSurface2 (0xFF1C1824).
 private val PressedBodyColor = Color(0xFF12101A)
 
-// Raised body — semi-transparent muted surface.
+// Raised body -- semi-transparent muted surface.
 private val RaisedBodyColor = NjMuted2.copy(alpha = 0.12f)
 
+// Width threshold below which the drawer wraps to two rows.
+private val NARROW_BREAKPOINT = 320.dp
+
 /**
- * Inline track drawer — expands directly below a track lane in the timeline.
- * Contains volume knob, solo/mute toggles, and delete button.
+ * Inline track drawer -- expands directly below a track lane in the timeline.
+ *
+ * Responsive layout:
+ * - Wide: single row  [Volume] [R][S][M][T] ... [Rename] [Delete]
+ * - Narrow: two rows.  Top: [Volume] [R][S][M][T]
+ *                       Bottom: [Rename] [Delete]
  */
 @Composable
 fun TrackDrawerPanel(
     track: TrackEntity,
     isSoloed: Boolean,
+    isArmed: Boolean,
+    hasTakes: Boolean,
+    takesExpanded: Boolean,
     onAction: (StudioAction) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val goldBorderColor = NjStudioAccent.copy(alpha = 0.5f)
 
-    Box(
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
-            .height(72.dp)
             .drawBehind {
-                // 1dp gold top border
                 drawLine(
                     color = goldBorderColor,
                     start = Offset(0f, 0f),
@@ -73,52 +86,173 @@ fun TrackDrawerPanel(
                 )
             }
             .background(NjStudioSurface2)
-            .padding(horizontal = 16.dp)
+            .padding(horizontal = 12.dp)
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(72.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            // Volume knob
-            NjKnob(
-                value = track.volume,
-                onValueChange = { vol ->
-                    onAction(StudioAction.SetTrackVolume(track.id, vol))
-                },
-                knobSize = 36.dp,
-                label = "${(track.volume * 100).toInt()}%"
-            )
+        val isNarrow = maxWidth < NARROW_BREAKPOINT
 
-            // Solo toggle
-            DrawerToggleButton(
-                label = "S",
-                isActive = isSoloed,
-                ledColor = NjStudioTeal,
-                onClick = { onAction(StudioAction.ToggleSolo(track.id)) }
-            )
+        if (isNarrow) {
+            // Two-row layout for narrow screens
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Row 1: Volume knob + toggle buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    NjKnob(
+                        value = track.volume,
+                        onValueChange = { vol ->
+                            onAction(StudioAction.SetTrackVolume(track.id, vol))
+                        },
+                        knobSize = 36.dp,
+                        label = "${(track.volume * 100).toInt()}%"
+                    )
 
-            // Mute toggle
-            DrawerToggleButton(
-                label = "M",
-                isActive = track.isMuted,
-                ledColor = NjStudioYellow,
-                onClick = {
-                    onAction(StudioAction.SetTrackMuted(track.id, !track.isMuted))
+                    Spacer(Modifier.width(4.dp))
+
+                    DrawerToggleButton(
+                        label = "R",
+                        isActive = isArmed,
+                        ledColor = NjRecordCoral,
+                        onClick = { onAction(StudioAction.ToggleArm(track.id)) }
+                    )
+                    DrawerToggleButton(
+                        label = "S",
+                        isActive = isSoloed,
+                        ledColor = NjStudioTeal,
+                        onClick = { onAction(StudioAction.ToggleSolo(track.id)) }
+                    )
+                    DrawerToggleButton(
+                        label = "M",
+                        isActive = track.isMuted,
+                        ledColor = NjStudioYellow,
+                        onClick = {
+                            onAction(StudioAction.SetTrackMuted(track.id, !track.isMuted))
+                        }
+                    )
+                    DrawerToggleButton(
+                        label = "T",
+                        isActive = takesExpanded,
+                        ledColor = NjStudioAccent,
+                        onClick = { onAction(StudioAction.ToggleTakesView(track.id)) }
+                    )
                 }
-            )
 
-            // Spacer to push delete to the right
-            Box(Modifier.weight(1f))
+                // Row 2: Rename + Delete (text buttons, right-aligned)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    NjStudioButton(
+                        text = "Rename",
+                        onClick = {
+                            onAction(
+                                StudioAction.RequestRenameTrack(
+                                    track.id,
+                                    track.displayName
+                                )
+                            )
+                        },
+                        textColor = NjMuted2.copy(alpha = 0.7f)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    NjStudioButton(
+                        text = "Delete",
+                        onClick = {
+                            onAction(StudioAction.ConfirmDeleteTrack(track.id))
+                        },
+                        textColor = NjError.copy(alpha = 0.7f)
+                    )
+                }
+            }
+        } else {
+            // Single-row layout for wide screens
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(72.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Volume knob
+                NjKnob(
+                    value = track.volume,
+                    onValueChange = { vol ->
+                        onAction(StudioAction.SetTrackVolume(track.id, vol))
+                    },
+                    knobSize = 36.dp,
+                    label = "${(track.volume * 100).toInt()}%"
+                )
 
-            // Delete button
-            NjStudioButton(
-                text = "Delete",
-                onClick = { onAction(StudioAction.ConfirmDeleteTrack(track.id)) },
-                textColor = NjError.copy(alpha = 0.7f)
-            )
+                Spacer(Modifier.width(12.dp))
+
+                // Toggle buttons -- tight 4dp spacing
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    DrawerToggleButton(
+                        label = "R",
+                        isActive = isArmed,
+                        ledColor = NjRecordCoral,
+                        onClick = { onAction(StudioAction.ToggleArm(track.id)) }
+                    )
+                    DrawerToggleButton(
+                        label = "S",
+                        isActive = isSoloed,
+                        ledColor = NjStudioTeal,
+                        onClick = { onAction(StudioAction.ToggleSolo(track.id)) }
+                    )
+                    DrawerToggleButton(
+                        label = "M",
+                        isActive = track.isMuted,
+                        ledColor = NjStudioYellow,
+                        onClick = {
+                            onAction(StudioAction.SetTrackMuted(track.id, !track.isMuted))
+                        }
+                    )
+                    DrawerToggleButton(
+                        label = "T",
+                        isActive = takesExpanded,
+                        ledColor = NjStudioAccent,
+                        onClick = { onAction(StudioAction.ToggleTakesView(track.id)) }
+                    )
+                }
+
+                // Spacer pushes action buttons to the right
+                Box(Modifier.weight(1f))
+
+                // Rename + Delete
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    NjStudioButton(
+                        text = "Rename",
+                        onClick = {
+                            onAction(
+                                StudioAction.RequestRenameTrack(
+                                    track.id,
+                                    track.displayName
+                                )
+                            )
+                        },
+                        textColor = NjMuted2.copy(alpha = 0.7f)
+                    )
+                    NjStudioButton(
+                        text = "Delete",
+                        onClick = {
+                            onAction(StudioAction.ConfirmDeleteTrack(track.id))
+                        },
+                        textColor = NjError.copy(alpha = 0.7f)
+                    )
+                }
+            }
         }
     }
 }
@@ -130,7 +264,7 @@ fun TrackDrawerPanel(
  * Haptic click on press and release. LED glow when active.
  */
 @Composable
-private fun DrawerToggleButton(
+fun DrawerToggleButton(
     label: String,
     isActive: Boolean,
     ledColor: Color,
@@ -144,7 +278,7 @@ private fun DrawerToggleButton(
     val bgColor = if (visuallyPressed) PressedBodyColor else RaisedBodyColor
     val textColor = if (isActive) ledColor else NjMuted2
 
-    // Haptics — fire on raw press/release events.
+    // Haptics -- fire on raw press/release events.
     LaunchedEffect(interactionSource) {
         interactionSource.interactions.collect { interaction ->
             when (interaction) {
