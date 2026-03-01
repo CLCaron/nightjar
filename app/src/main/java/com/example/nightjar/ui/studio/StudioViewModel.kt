@@ -78,6 +78,9 @@ class StudioViewModel @Inject constructor(
     private var recordingFile: File? = null
     private var tickJob: Job? = null
 
+    // Live waveform amplitude buffer (mirrors RecordViewModel pattern)
+    private val amplitudeBuffer = ArrayList<Float>()
+
     // Loop recording: track loop reset timestamps for post-split
     private var loopResetTimestampsMs: MutableList<Long> = mutableListOf()
     private var lastLoopResetCount: Long = 0L
@@ -97,11 +100,19 @@ class StudioViewModel @Inject constructor(
         tickJob = viewModelScope.launch {
             while (isActive) {
                 audioEngine.pollState()
+                val engineDuration = audioEngine.totalDurationMs.value
+                val st = _state.value
+                // Extend timeline width while recording so the waveform has room to grow
+                val effectiveDuration = if (st.isRecording && st.recordingStartGlobalMs != null) {
+                    maxOf(engineDuration, st.recordingStartGlobalMs + st.recordingElapsedMs)
+                } else {
+                    engineDuration
+                }
                 _state.update {
                     it.copy(
                         isPlaying = audioEngine.isPlaying.value,
                         globalPositionMs = audioEngine.positionMs.value,
-                        totalDurationMs = audioEngine.totalDurationMs.value
+                        totalDurationMs = effectiveDuration
                     )
                 }
 
@@ -484,15 +495,29 @@ class StudioViewModel @Inject constructor(
                     "armedTrackId=$recordingArmedTrackId, " +
                     "isFirstTrack=$isFirstTrackRecording")
 
+                amplitudeBuffer.clear()
                 _state.update {
-                    it.copy(isRecording = true, recordingElapsedMs = 0L)
+                    it.copy(
+                        isRecording = true,
+                        recordingElapsedMs = 0L,
+                        liveAmplitudes = FloatArray(0),
+                        recordingStartGlobalMs = intendedStartMs,
+                        recordingTargetTrackId = recordingArmedTrackId
+                    )
                 }
 
+                // Single tick job for both elapsed time and amplitude polling (~60fps)
                 recordingTickJob = viewModelScope.launch {
                     while (true) {
-                        delay(100L)
+                        delay(TICK_MS)
                         val elapsed = (System.nanoTime() - recordingStartNanos) / 1_000_000L
-                        _state.update { it.copy(recordingElapsedMs = elapsed) }
+                        amplitudeBuffer.add(audioEngine.getLatestPeakAmplitude())
+                        _state.update {
+                            it.copy(
+                                recordingElapsedMs = elapsed,
+                                liveAmplitudes = amplitudeBuffer.toFloatArray()
+                            )
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -532,7 +557,15 @@ class StudioViewModel @Inject constructor(
         recordingArmedTrackId = null
         isFirstTrackRecording = false
 
-        _state.update { it.copy(isRecording = false, recordingElapsedMs = 0L) }
+        _state.update {
+            it.copy(
+                isRecording = false,
+                recordingElapsedMs = 0L,
+                liveAmplitudes = FloatArray(0),
+                recordingStartGlobalMs = null,
+                recordingTargetTrackId = null
+            )
+        }
 
         if (durationMs <= 0 || file == null) {
             viewModelScope.launch {
@@ -1092,6 +1125,7 @@ class StudioViewModel @Inject constructor(
     override fun onCleared() {
         super.onCleared()
         tickJob?.cancel()
+        recordingTickJob?.cancel()
         if (audioEngine.isRecordingActive()) {
             audioEngine.stopRecording()
         }

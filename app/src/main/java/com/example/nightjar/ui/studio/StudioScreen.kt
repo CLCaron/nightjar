@@ -203,13 +203,6 @@ fun StudioScreen(
                 return@Column
             }
 
-            if (state.isRecording) {
-                OverdubRecordingBar(
-                    elapsedMs = state.recordingElapsedMs,
-                    onStop = { vm.onAction(StudioAction.StopRecording) }
-                )
-            }
-
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -293,7 +286,7 @@ fun StudioScreen(
                 }
             }
 
-            if (state.tracks.isEmpty()) {
+            if (state.tracks.isEmpty() && !state.isRecording) {
                 TimelinePlaceholder("No tracks yet.")
             } else {
                 val displayPositionMs =
@@ -305,6 +298,11 @@ fun StudioScreen(
                     totalDurationMs = state.totalDurationMs,
                     msPerDp = state.msPerDp,
                     isPlaying = state.isPlaying,
+                    isRecording = state.isRecording,
+                    liveAmplitudes = state.liveAmplitudes,
+                    recordingStartGlobalMs = state.recordingStartGlobalMs,
+                    recordingTargetTrackId = state.recordingTargetTrackId,
+                    recordingElapsedMs = state.recordingElapsedMs,
                     dragState = state.dragState,
                     trimState = state.trimState,
                     loopStartMs = state.loopStartMs,
