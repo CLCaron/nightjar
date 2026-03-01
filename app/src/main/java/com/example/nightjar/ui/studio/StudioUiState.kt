@@ -15,6 +15,9 @@ data class StudioUiState(
     val totalDurationMs: Long = 0L,
     val isRecording: Boolean = false,
     val recordingElapsedMs: Long = 0L,
+    val liveAmplitudes: FloatArray = FloatArray(0),
+    val recordingStartGlobalMs: Long? = null,
+    val recordingTargetTrackId: Long? = null,
     val showAddTrackSheet: Boolean = false,
     val msPerDp: Float = 10f,
     val dragState: TrackDragState? = null,
@@ -41,6 +44,87 @@ data class StudioUiState(
     val expandedTakeDrawerIds: Set<Long> = emptySet()
 ) {
     val hasLoopRegion: Boolean get() = loopStartMs != null && loopEndMs != null
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is StudioUiState) return false
+        return ideaTitle == other.ideaTitle &&
+                tracks == other.tracks &&
+                isLoading == other.isLoading &&
+                errorMessage == other.errorMessage &&
+                isPlaying == other.isPlaying &&
+                globalPositionMs == other.globalPositionMs &&
+                totalDurationMs == other.totalDurationMs &&
+                isRecording == other.isRecording &&
+                recordingElapsedMs == other.recordingElapsedMs &&
+                liveAmplitudes.contentEquals(other.liveAmplitudes) &&
+                recordingStartGlobalMs == other.recordingStartGlobalMs &&
+                recordingTargetTrackId == other.recordingTargetTrackId &&
+                showAddTrackSheet == other.showAddTrackSheet &&
+                msPerDp == other.msPerDp &&
+                dragState == other.dragState &&
+                trimState == other.trimState &&
+                confirmingDeleteTrackId == other.confirmingDeleteTrackId &&
+                expandedTrackIds == other.expandedTrackIds &&
+                soloedTrackIds == other.soloedTrackIds &&
+                loopStartMs == other.loopStartMs &&
+                loopEndMs == other.loopEndMs &&
+                isLoopEnabled == other.isLoopEnabled &&
+                showLatencySetupDialog == other.showLatencySetupDialog &&
+                latencyDiagnostics == other.latencyDiagnostics &&
+                manualOffsetMs == other.manualOffsetMs &&
+                armedTrackId == other.armedTrackId &&
+                trackTakes == other.trackTakes &&
+                expandedTakeTrackIds == other.expandedTakeTrackIds &&
+                renamingTrackId == other.renamingTrackId &&
+                renamingTrackCurrentName == other.renamingTrackCurrentName &&
+                renamingTakeId == other.renamingTakeId &&
+                renamingTakeTrackId == other.renamingTakeTrackId &&
+                renamingTakeCurrentName == other.renamingTakeCurrentName &&
+                confirmingDeleteTakeId == other.confirmingDeleteTakeId &&
+                confirmingDeleteTakeTrackId == other.confirmingDeleteTakeTrackId &&
+                expandedTakeDrawerIds == other.expandedTakeDrawerIds
+    }
+
+    override fun hashCode(): Int {
+        var result = ideaTitle.hashCode()
+        result = 31 * result + tracks.hashCode()
+        result = 31 * result + isLoading.hashCode()
+        result = 31 * result + (errorMessage?.hashCode() ?: 0)
+        result = 31 * result + isPlaying.hashCode()
+        result = 31 * result + globalPositionMs.hashCode()
+        result = 31 * result + totalDurationMs.hashCode()
+        result = 31 * result + isRecording.hashCode()
+        result = 31 * result + recordingElapsedMs.hashCode()
+        result = 31 * result + liveAmplitudes.contentHashCode()
+        result = 31 * result + (recordingStartGlobalMs?.hashCode() ?: 0)
+        result = 31 * result + (recordingTargetTrackId?.hashCode() ?: 0)
+        result = 31 * result + showAddTrackSheet.hashCode()
+        result = 31 * result + msPerDp.hashCode()
+        result = 31 * result + (dragState?.hashCode() ?: 0)
+        result = 31 * result + (trimState?.hashCode() ?: 0)
+        result = 31 * result + (confirmingDeleteTrackId?.hashCode() ?: 0)
+        result = 31 * result + expandedTrackIds.hashCode()
+        result = 31 * result + soloedTrackIds.hashCode()
+        result = 31 * result + (loopStartMs?.hashCode() ?: 0)
+        result = 31 * result + (loopEndMs?.hashCode() ?: 0)
+        result = 31 * result + isLoopEnabled.hashCode()
+        result = 31 * result + showLatencySetupDialog.hashCode()
+        result = 31 * result + (latencyDiagnostics?.hashCode() ?: 0)
+        result = 31 * result + manualOffsetMs.hashCode()
+        result = 31 * result + (armedTrackId?.hashCode() ?: 0)
+        result = 31 * result + trackTakes.hashCode()
+        result = 31 * result + expandedTakeTrackIds.hashCode()
+        result = 31 * result + (renamingTrackId?.hashCode() ?: 0)
+        result = 31 * result + renamingTrackCurrentName.hashCode()
+        result = 31 * result + (renamingTakeId?.hashCode() ?: 0)
+        result = 31 * result + (renamingTakeTrackId?.hashCode() ?: 0)
+        result = 31 * result + renamingTakeCurrentName.hashCode()
+        result = 31 * result + (confirmingDeleteTakeId?.hashCode() ?: 0)
+        result = 31 * result + (confirmingDeleteTakeTrackId?.hashCode() ?: 0)
+        result = 31 * result + expandedTakeDrawerIds.hashCode()
+        return result
+    }
 }
 
 /** User-initiated actions on the Studio screen. */

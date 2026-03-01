@@ -49,6 +49,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
@@ -107,6 +108,11 @@ fun TimelinePanel(
     totalDurationMs: Long,
     msPerDp: Float,
     isPlaying: Boolean,
+    isRecording: Boolean = false,
+    liveAmplitudes: FloatArray = FloatArray(0),
+    recordingStartGlobalMs: Long? = null,
+    recordingTargetTrackId: Long? = null,
+    recordingElapsedMs: Long = 0L,
     dragState: TrackDragState?,
     trimState: TrackTrimState?,
     loopStartMs: Long?,
@@ -128,25 +134,25 @@ fun TimelinePanel(
     }
     val density = LocalDensity.current
 
-    // Auto-scroll: keep playhead visible during playback
-    LaunchedEffect(scrollState, isPlaying) {
-        if (!isPlaying) return@LaunchedEffect
+    // Auto-scroll: keep playhead/recording edge visible during playback or recording
+    LaunchedEffect(scrollState, isPlaying, isRecording) {
+        if (!isPlaying && !isRecording) return@LaunchedEffect
         snapshotFlow { globalPositionMs }
             .map { ms -> with(density) { (ms / msPerDp).dp.toPx() }.toInt() }
             .distinctUntilChanged()
-            .collect { playheadPx ->
+            .collect { edgePx ->
                 val viewportStart = scrollState.value
                 val viewportEnd = viewportStart + scrollState.viewportSize
                 val margin = with(density) { 60.dp.toPx() }.toInt()
 
                 when {
-                    playheadPx > viewportEnd - margin ->
+                    edgePx > viewportEnd - margin ->
                         scrollState.scrollTo(
-                            (playheadPx - scrollState.viewportSize + margin)
+                            (edgePx - scrollState.viewportSize + margin)
                                 .coerceAtLeast(0)
                         )
-                    playheadPx < viewportStart + margin ->
-                        scrollState.scrollTo((playheadPx - margin).coerceAtLeast(0))
+                    edgePx < viewportStart + margin ->
+                        scrollState.scrollTo((edgePx - margin).coerceAtLeast(0))
                 }
             }
     }
@@ -322,6 +328,36 @@ fun TimelinePanel(
                     }
                 }
             }
+
+            // Live recording take row below armed track
+            if (isRecording && recordingTargetTrackId == track.id &&
+                recordingStartGlobalMs != null
+            ) {
+                RecordingLaneRow(
+                    liveAmplitudes = liveAmplitudes,
+                    recordingStartGlobalMs = recordingStartGlobalMs,
+                    recordingElapsedMs = recordingElapsedMs,
+                    globalPositionMs = globalPositionMs,
+                    msPerDp = msPerDp,
+                    timelineWidthDp = timelineWidthDp,
+                    scrollState = scrollState
+                )
+            }
+        }
+
+        // Phantom recording row when creating a new track (no armed track)
+        if (isRecording && recordingTargetTrackId == null &&
+            recordingStartGlobalMs != null
+        ) {
+            RecordingTrackRow(
+                liveAmplitudes = liveAmplitudes,
+                recordingStartGlobalMs = recordingStartGlobalMs,
+                recordingElapsedMs = recordingElapsedMs,
+                globalPositionMs = globalPositionMs,
+                msPerDp = msPerDp,
+                timelineWidthDp = timelineWidthDp,
+                scrollState = scrollState
+            )
         }
     }
 }
@@ -1092,5 +1128,216 @@ private fun TakeMiniDrawer(
             },
             textColor = NjError.copy(alpha = 0.7f)
         )
+    }
+}
+
+// ── Live recording composables ──────────────────────────────────────────
+
+/**
+ * Full-height phantom track row shown when recording with no armed track.
+ * Disappears once recording stops and the real track is saved.
+ */
+@Composable
+private fun RecordingTrackRow(
+    liveAmplitudes: FloatArray,
+    recordingStartGlobalMs: Long,
+    recordingElapsedMs: Long,
+    globalPositionMs: Long,
+    msPerDp: Float,
+    timelineWidthDp: Dp,
+    scrollState: ScrollState
+) {
+    Row(Modifier.fillMaxWidth()) {
+        RecordingHeader(
+            label = "New Track",
+            elapsedMs = recordingElapsedMs,
+            height = TRACK_LANE_HEIGHT
+        )
+
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .horizontalScroll(scrollState)
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(timelineWidthDp)
+                    .height(TRACK_LANE_HEIGHT)
+            ) {
+                RecordingWaveformBlock(
+                    liveAmplitudes = liveAmplitudes,
+                    recordingStartGlobalMs = recordingStartGlobalMs,
+                    globalPositionMs = globalPositionMs,
+                    msPerDp = msPerDp,
+                    height = TRACK_LANE_HEIGHT
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Take-height recording row shown below the armed track during recording.
+ */
+@Composable
+private fun RecordingLaneRow(
+    liveAmplitudes: FloatArray,
+    recordingStartGlobalMs: Long,
+    recordingElapsedMs: Long,
+    globalPositionMs: Long,
+    msPerDp: Float,
+    timelineWidthDp: Dp,
+    scrollState: ScrollState
+) {
+    Row(Modifier.fillMaxWidth()) {
+        RecordingHeader(
+            label = "Recording",
+            elapsedMs = recordingElapsedMs,
+            height = TAKE_ROW_HEIGHT
+        )
+
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .horizontalScroll(scrollState)
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(timelineWidthDp)
+                    .height(TAKE_ROW_HEIGHT)
+            ) {
+                RecordingWaveformBlock(
+                    liveAmplitudes = liveAmplitudes,
+                    recordingStartGlobalMs = recordingStartGlobalMs,
+                    globalPositionMs = globalPositionMs,
+                    msPerDp = msPerDp,
+                    height = TAKE_ROW_HEIGHT
+                )
+            }
+        }
+    }
+}
+
+/** Coral-bordered header for a recording row, showing label + elapsed time. */
+@Composable
+private fun RecordingHeader(
+    label: String,
+    elapsedMs: Long,
+    height: Dp
+) {
+    val totalSeconds = elapsedMs / 1000
+    val min = totalSeconds / 60
+    val sec = totalSeconds % 60
+
+    Column(
+        modifier = Modifier
+            .width(HEADER_WIDTH)
+            .height(height)
+            .drawBehind {
+                drawLine(
+                    color = NjRecordCoral.copy(alpha = 0.6f),
+                    start = Offset(0f, 0f),
+                    end = Offset(0f, size.height),
+                    strokeWidth = 2.dp.toPx()
+                )
+            }
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = NjRecordCoral.copy(alpha = 0.85f),
+            maxLines = 1
+        )
+        Text(
+            text = "%d:%02d".format(min, sec),
+            style = MaterialTheme.typography.labelSmall,
+            color = NjRecordCoral.copy(alpha = 0.5f)
+        )
+    }
+}
+
+/**
+ * Positioned live waveform block on the timeline. Starts at
+ * [recordingStartGlobalMs] and grows rightward, width derived from
+ * [globalPositionMs] so it stays perfectly in sync with the playhead.
+ *
+ * Renders amplitudes directly (not via [NjLiveWaveform]) because the
+ * Studio waveform must always fill 100% of the block width. The block
+ * is already sized to match elapsed recording time, so every amplitude
+ * sample stretches edge-to-edge. [NjLiveWaveform] uses a proportional
+ * grow mode that would leave empty space on the right.
+ */
+@Composable
+private fun RecordingWaveformBlock(
+    liveAmplitudes: FloatArray,
+    recordingStartGlobalMs: Long,
+    globalPositionMs: Long,
+    msPerDp: Float,
+    height: Dp
+) {
+    val offsetDp = (recordingStartGlobalMs / msPerDp).dp
+    val widthMs = (globalPositionMs - recordingStartGlobalMs).coerceAtLeast(0L)
+    val widthDp = (widthMs / msPerDp).dp.coerceAtLeast(4.dp)
+    val waveformColor = NjRecordCoral.copy(alpha = 0.6f)
+    val minBarFraction = 0.05f
+
+    Box(
+        modifier = Modifier
+            .offset(x = offsetDp)
+            .width(widthDp)
+            .height(height)
+            .clip(RoundedCornerShape(4.dp))
+            .background(NjStudioLane.copy(alpha = 0.45f))
+            .padding(vertical = 2.dp)
+    ) {
+        Canvas(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(height - 4.dp)
+        ) {
+            val amps = liveAmplitudes
+            if (amps.isEmpty()) return@Canvas
+
+            val canvasW = size.width
+            val canvasH = size.height
+            val centerY = canvasH / 2f
+            val count = amps.size
+            val divisor = (count - 1).coerceAtLeast(1)
+
+            val path = Path()
+
+            // Top edge -- left to right
+            for (i in 0 until count) {
+                val amp = amps[i].coerceIn(minBarFraction, 1f)
+                val px = canvasW * i / divisor
+                val y = centerY - amp * centerY
+                if (i == 0) path.moveTo(px, y) else path.lineTo(px, y)
+            }
+
+            // Bottom edge -- right to left (mirrored envelope)
+            for (i in count - 1 downTo 0) {
+                val amp = amps[i].coerceIn(minBarFraction, 1f)
+                val px = canvasW * i / divisor
+                val y = centerY + amp * centerY
+                path.lineTo(px, y)
+            }
+
+            path.close()
+            drawPath(path, color = waveformColor)
+
+            // Leading-edge glow
+            val glowWidth = 6.dp.toPx()
+            drawRect(
+                brush = Brush.horizontalGradient(
+                    colors = listOf(Color.Transparent, waveformColor.copy(alpha = 0.35f)),
+                    startX = (canvasW - glowWidth).coerceAtLeast(0f),
+                    endX = canvasW
+                ),
+                topLeft = Offset((canvasW - glowWidth).coerceAtLeast(0f), 0f),
+                size = androidx.compose.ui.geometry.Size(glowWidth, canvasH)
+            )
+        }
     }
 }
