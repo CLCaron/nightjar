@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import com.example.nightjar.data.db.entity.TrackEntity
 import com.example.nightjar.ui.components.NjKnob
 import com.example.nightjar.ui.components.collectIsPressedWithMinDuration
+import com.example.nightjar.ui.theme.NjRecordCoral
 import com.example.nightjar.ui.theme.NjStudioAccent
 import com.example.nightjar.ui.theme.NjStudioTeal
 import com.example.nightjar.ui.theme.NjError
@@ -54,6 +55,9 @@ private val RaisedBodyColor = NjMuted2.copy(alpha = 0.12f)
 fun TrackDrawerPanel(
     track: TrackEntity,
     isSoloed: Boolean,
+    isArmed: Boolean,
+    hasTakes: Boolean,
+    takesExpanded: Boolean,
     onAction: (StudioAction) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -92,6 +96,14 @@ fun TrackDrawerPanel(
                 label = "${(track.volume * 100).toInt()}%"
             )
 
+            // Arm toggle (record on this track)
+            DrawerToggleButton(
+                label = "R",
+                isActive = isArmed,
+                ledColor = NjRecordCoral,
+                onClick = { onAction(StudioAction.ToggleArm(track.id)) }
+            )
+
             // Solo toggle
             DrawerToggleButton(
                 label = "S",
@@ -108,6 +120,14 @@ fun TrackDrawerPanel(
                 onClick = {
                     onAction(StudioAction.SetTrackMuted(track.id, !track.isMuted))
                 }
+            )
+
+            // Takes toggle
+            DrawerToggleButton(
+                label = "T",
+                isActive = takesExpanded,
+                ledColor = NjStudioAccent,
+                onClick = { onAction(StudioAction.ToggleTakesView(track.id)) }
             )
 
             // Spacer to push delete to the right

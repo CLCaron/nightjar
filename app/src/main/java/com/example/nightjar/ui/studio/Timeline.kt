@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -64,10 +65,13 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.nightjar.data.db.entity.TakeEntity
 import com.example.nightjar.data.db.entity.TrackEntity
 import com.example.nightjar.ui.components.NjWaveform
+import com.example.nightjar.ui.theme.NjRecordCoral
 import com.example.nightjar.ui.theme.NjStudioAccent
 import com.example.nightjar.ui.theme.NjStudioLane
+import com.example.nightjar.ui.theme.NjStudioSurface2
 import com.example.nightjar.ui.theme.NjStudioWaveform
 import com.example.nightjar.ui.theme.NjTrackColors
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -83,6 +87,7 @@ private val TIMELINE_END_PADDING_DP = 120.dp
 private const val MIN_EFFECTIVE_DURATION_MS = 200L
 private val TRIM_HANDLE_WIDTH = 12.dp
 private val TRIM_TOUCH_ZONE = 36.dp
+private val TAKE_ROW_HEIGHT = 48.dp
 private const val FAST_LONG_PRESS_MS = 200L
 
 /**
@@ -105,6 +110,9 @@ fun TimelinePanel(
     isLoopEnabled: Boolean,
     expandedTrackIds: Set<Long>,
     soloedTrackIds: Set<Long>,
+    armedTrackId: Long?,
+    trackTakes: Map<Long, List<TakeEntity>>,
+    expandedTakeTrackIds: Set<Long>,
     getAudioFile: (String) -> File,
     onAction: (StudioAction) -> Unit,
     modifier: Modifier = Modifier
@@ -201,12 +209,15 @@ fun TimelinePanel(
             }
         }
 
-        // ── Per-track rows with drawer slots ──────────────────────
+        // ── Per-track rows with drawer + take slots ─────────────
         tracks.forEachIndexed { index, track ->
             val isSoloed = track.id in soloedTrackIds
             val anySoloed = soloedTrackIds.isNotEmpty()
             val effectivelyMuted = track.isMuted || (anySoloed && !isSoloed)
             val trackColor = NjTrackColors[index % NjTrackColors.size]
+            val isArmed = track.id == armedTrackId
+            val takes = trackTakes[track.id] ?: emptyList()
+            val takesExpanded = track.id in expandedTakeTrackIds
 
             // Track row: header + scrollable lane
             Row(Modifier.fillMaxWidth()) {
@@ -215,6 +226,7 @@ fun TimelinePanel(
                     height = TRACK_LANE_HEIGHT,
                     isExpanded = track.id in expandedTrackIds,
                     isSoloed = isSoloed,
+                    isArmed = isArmed,
                     onAction = onAction
                 )
 
@@ -257,7 +269,7 @@ fun TimelinePanel(
                 }
             }
 
-            // Drawer slot — expands below the track
+            // Drawer slot
             AnimatedVisibility(
                 visible = track.id in expandedTrackIds,
                 enter = drawerEnter,
@@ -266,8 +278,32 @@ fun TimelinePanel(
                 TrackDrawerPanel(
                     track = track,
                     isSoloed = isSoloed,
+                    isArmed = isArmed,
+                    hasTakes = takes.isNotEmpty(),
+                    takesExpanded = takesExpanded,
                     onAction = onAction
                 )
+            }
+
+            // Take rows slot
+            AnimatedVisibility(
+                visible = takesExpanded && takes.isNotEmpty(),
+                enter = drawerEnter,
+                exit = drawerExit
+            ) {
+                Column {
+                    takes.forEach { take ->
+                        TakeRow(
+                            take = take,
+                            trackColor = trackColor,
+                            msPerDp = msPerDp,
+                            timelineWidthDp = timelineWidthDp,
+                            scrollState = scrollState,
+                            getAudioFile = getAudioFile,
+                            onAction = onAction
+                        )
+                    }
+                }
             }
         }
     }
@@ -602,17 +638,22 @@ private fun TrackHeader(
     height: Dp,
     isExpanded: Boolean,
     isSoloed: Boolean,
+    isArmed: Boolean = false,
     onAction: (StudioAction) -> Unit
 ) {
-    val borderColor = if (isExpanded) NjStudioAccent.copy(alpha = 0.5f) else NjStudioAccent.copy(alpha = 0f)
+    val borderColor = when {
+        isArmed -> NjRecordCoral.copy(alpha = 0.6f)
+        isExpanded -> NjStudioAccent.copy(alpha = 0.5f)
+        else -> NjStudioAccent.copy(alpha = 0f)
+    }
 
     Column(
         modifier = Modifier
             .width(HEADER_WIDTH)
             .height(height)
             .drawBehind {
-                // Gold left border when expanded
-                if (isExpanded) {
+                // Left border: coral when armed, gold when expanded
+                if (isArmed || isExpanded) {
                     drawLine(
                         color = borderColor,
                         start = Offset(0f, 0f),
@@ -650,14 +691,18 @@ private fun TrackHeader(
         )
         // Status indicators
         val statusParts = mutableListOf<String>()
+        if (isArmed) statusParts.add("Armed")
         if (isSoloed) statusParts.add("Solo")
         if (track.isMuted) statusParts.add("Muted")
         if (statusParts.isNotEmpty()) {
             Text(
                 text = statusParts.joinToString(" / "),
                 style = MaterialTheme.typography.labelSmall,
-                color = if (isSoloed) NjStudioAccent.copy(alpha = 0.7f)
-                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
+                color = when {
+                    isArmed -> NjRecordCoral.copy(alpha = 0.7f)
+                    isSoloed -> NjStudioAccent.copy(alpha = 0.7f)
+                    else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
+                }
             )
         }
     }
@@ -864,4 +909,106 @@ private fun LoopRulerGestureLayer(
                 }
             }
     )
+}
+
+/**
+ * A single take row displayed below its parent track when takes are expanded.
+ * Shows the take name on the left and a waveform on the right.
+ * Muted takes are visually dimmed.
+ */
+@Composable
+private fun TakeRow(
+    take: TakeEntity,
+    trackColor: Color,
+    msPerDp: Float,
+    timelineWidthDp: Dp,
+    scrollState: ScrollState,
+    getAudioFile: (String) -> File,
+    onAction: (StudioAction) -> Unit
+) {
+    val effectiveDurationMs = (take.durationMs - take.trimStartMs - take.trimEndMs)
+        .coerceAtLeast(MIN_EFFECTIVE_DURATION_MS)
+    val offsetDp = (take.offsetMs / msPerDp).dp
+    val widthDp = (effectiveDurationMs / msPerDp).dp
+
+    Row(Modifier.fillMaxWidth()) {
+        // Take header (left side)
+        Column(
+            modifier = Modifier
+                .width(HEADER_WIDTH)
+                .height(TAKE_ROW_HEIGHT)
+                .background(NjStudioSurface2.copy(alpha = 0.5f))
+                .clickable {
+                    onAction(StudioAction.SetTakeMuted(take.id, take.trackId, !take.isMuted))
+                }
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = take.displayName,
+                style = MaterialTheme.typography.labelSmall,
+                color = if (take.isMuted) {
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
+                } else {
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                },
+                maxLines = 1
+            )
+            if (take.isMuted) {
+                Text(
+                    text = "Muted",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f)
+                )
+            }
+        }
+
+        // Take waveform lane (scrollable, shares scroll state)
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .horizontalScroll(scrollState)
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(timelineWidthDp)
+                    .height(TAKE_ROW_HEIGHT)
+            ) {
+                // Waveform block
+                Box(
+                    modifier = Modifier
+                        .offset(x = offsetDp)
+                        .width(widthDp)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(
+                            NjStudioLane.copy(
+                                alpha = if (take.isMuted) 0.2f else 0.45f
+                            )
+                        )
+                        .padding(vertical = 2.dp)
+                ) {
+                    val barColor = if (take.isMuted) {
+                        trackColor.copy(alpha = 0.12f)
+                    } else {
+                        trackColor.copy(alpha = 0.5f)
+                    }
+
+                    val startFrac = if (take.durationMs > 0)
+                        take.trimStartMs.toFloat() / take.durationMs else 0f
+                    val endFrac = if (take.durationMs > 0)
+                        1f - take.trimEndMs.toFloat() / take.durationMs else 1f
+
+                    NjWaveform(
+                        audioFile = getAudioFile(take.audioFileName),
+                        modifier = Modifier.fillMaxWidth(),
+                        barColor = barColor,
+                        height = TAKE_ROW_HEIGHT - 4.dp,
+                        startFraction = startFrac,
+                        endFraction = endFrac
+                    )
+                }
+            }
+        }
+    }
 }

@@ -141,6 +141,11 @@ class OboeAudioEngine @Inject constructor() {
 
     fun setRecording(active: Boolean) = nativeSetRecording(active)
 
+    // ── Loop reset tracking ─────────────────────────────────────────────
+
+    /** Returns the number of times the playback loop has reset to loopStart. */
+    fun getLoopResetCount(): Long = nativeGetLoopResetCount()
+
     // ── Hardware latency measurement ──────────────────────────────────────
 
     /**
@@ -197,6 +202,9 @@ class OboeAudioEngine @Inject constructor() {
 
     // Overdub
     private external fun nativeSetRecording(active: Boolean)
+
+    // Loop reset tracking
+    private external fun nativeGetLoopResetCount(): Long
 
     // Hardware latency
     private external fun nativeGetOutputLatencyMs(): Long

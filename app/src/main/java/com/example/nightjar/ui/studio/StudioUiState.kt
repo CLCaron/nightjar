@@ -1,6 +1,7 @@
 package com.example.nightjar.ui.studio
 
 import com.example.nightjar.audio.AudioLatencyEstimator
+import com.example.nightjar.data.db.entity.TakeEntity
 import com.example.nightjar.data.db.entity.TrackEntity
 
 /** UI state for the Studio (multi-track workspace) screen. */
@@ -26,7 +27,10 @@ data class StudioUiState(
     val isLoopEnabled: Boolean = false,
     val showLatencySetupDialog: Boolean = false,
     val latencyDiagnostics: AudioLatencyEstimator.LatencyDiagnostics? = null,
-    val manualOffsetMs: Long = 0L
+    val manualOffsetMs: Long = 0L,
+    val armedTrackId: Long? = null,
+    val trackTakes: Map<Long, List<TakeEntity>> = emptyMap(),
+    val expandedTakeTrackIds: Set<Long> = emptySet()
 ) {
     val hasLoopRegion: Boolean get() = loopStartMs != null && loopEndMs != null
 }
@@ -83,6 +87,18 @@ sealed interface StudioAction {
     data object DismissLatencySetup : StudioAction
     data class SetManualOffset(val offsetMs: Long) : StudioAction
     data object ClearManualOffset : StudioAction
+
+    // Arm / Record
+    data class ToggleArm(val trackId: Long) : StudioAction
+    data object StartRecording : StudioAction
+    data object StopRecording : StudioAction
+
+    // Takes
+    data class ToggleTakesView(val trackId: Long) : StudioAction
+    data class RenameTake(val takeId: Long, val name: String) : StudioAction
+    data class DeleteTake(val takeId: Long, val trackId: Long) : StudioAction
+    data class SetTakeMuted(val takeId: Long, val trackId: Long, val muted: Boolean) : StudioAction
+    data class DragTake(val takeId: Long, val newOffsetMs: Long) : StudioAction
 }
 
 /** One-shot side effects emitted by [StudioViewModel]. */

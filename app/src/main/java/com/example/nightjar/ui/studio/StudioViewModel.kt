@@ -5,10 +5,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.nightjar.audio.AudioLatencyEstimator
 import com.example.nightjar.audio.OboeAudioEngine
+import com.example.nightjar.audio.WavSplitter
+import com.example.nightjar.data.db.entity.TakeEntity
 import com.example.nightjar.data.repository.StudioRepository
 import com.example.nightjar.data.repository.IdeaRepository
 import com.example.nightjar.data.storage.RecordingStorage
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -18,6 +21,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -35,6 +39,13 @@ import javax.inject.Inject
  * 2. Open write gate and start playback.
  * 3. Measure pre-roll for latency compensation.
  * 4. On stop, save the new track at the captured timeline offset.
+ *
+ * ## Arm + Record + Takes
+ * Tracks can be "armed" via the drawer. The Record button in the button panel
+ * starts recording on the armed track. When no tracks exist, Record creates
+ * the first track automatically. Recordings are saved as takes on the armed
+ * track. When loop is active during recording, the continuous recording is
+ * split at loop boundaries into individual takes on stop.
  */
 @HiltViewModel
 class StudioViewModel @Inject constructor(
@@ -67,6 +78,15 @@ class StudioViewModel @Inject constructor(
     private var recordingFile: File? = null
     private var tickJob: Job? = null
 
+    // Loop recording: track loop reset timestamps for post-split
+    private var loopResetTimestampsMs: MutableList<Long> = mutableListOf()
+    private var lastLoopResetCount: Long = 0L
+    private var isLoopRecording: Boolean = false
+    // Track ID that was armed when recording started (for saving takes)
+    private var recordingArmedTrackId: Long? = null
+    // Whether this is a first-track-creation recording (no armed track)
+    private var isFirstTrackRecording: Boolean = false
+
     init {
         startTick()
     }
@@ -84,6 +104,20 @@ class StudioViewModel @Inject constructor(
                         totalDurationMs = audioEngine.totalDurationMs.value
                     )
                 }
+
+                // Track loop resets during recording for post-split
+                if (isLoopRecording) {
+                    val currentCount = audioEngine.getLoopResetCount()
+                    if (currentCount > lastLoopResetCount) {
+                        val elapsedMs = (System.nanoTime() - recordingStartNanos) / 1_000_000L
+                        for (i in lastLoopResetCount until currentCount) {
+                            loopResetTimestampsMs.add(elapsedMs)
+                            Log.d(TAG, "Loop reset #${loopResetTimestampsMs.size} at ${elapsedMs}ms")
+                        }
+                        lastLoopResetCount = currentCount
+                    }
+                }
+
                 delay(TICK_MS)
             }
         }
@@ -108,8 +142,8 @@ class StudioViewModel @Inject constructor(
                     }
                 }
             }
-            StudioAction.MicPermissionGranted -> startOverdubRecording()
-            StudioAction.StopOverdubRecording -> stopOverdubRecording()
+            StudioAction.MicPermissionGranted -> startRecordingAfterPermission()
+            StudioAction.StopOverdubRecording -> stopRecording()
             StudioAction.Play -> audioEngine.play()
             StudioAction.Pause -> audioEngine.pause()
             is StudioAction.SeekTo -> audioEngine.seekTo(action.positionMs)
@@ -143,7 +177,7 @@ class StudioViewModel @Inject constructor(
             }
             StudioAction.ExecuteDeleteTrack -> executeDeleteTrack()
 
-            // Track drawer (inline settings panel) — toggle open/closed
+            // Track drawer (inline settings panel)
             is StudioAction.OpenTrackSettings -> {
                 _state.update {
                     val newSet = if (action.trackId in it.expandedTrackIds) {
@@ -187,6 +221,18 @@ class StudioViewModel @Inject constructor(
                 latencyEstimator.clearManualOffset()
                 _state.update { it.copy(manualOffsetMs = 0L) }
             }
+
+            // Arm / Record
+            is StudioAction.ToggleArm -> toggleArm(action.trackId)
+            StudioAction.StartRecording -> requestRecording()
+            StudioAction.StopRecording -> stopRecording()
+
+            // Takes
+            is StudioAction.ToggleTakesView -> toggleTakesView(action.trackId)
+            is StudioAction.RenameTake -> renameTake(action.takeId, action.name)
+            is StudioAction.DeleteTake -> deleteTake(action.takeId, action.trackId)
+            is StudioAction.SetTakeMuted -> setTakeMuted(action.takeId, action.trackId, action.muted)
+            is StudioAction.DragTake -> dragTake(action.takeId, action.newOffsetMs)
         }
     }
 
@@ -224,31 +270,126 @@ class StudioViewModel @Inject constructor(
         }
     }
 
-    private fun loadTracksIntoEngine(tracks: List<com.example.nightjar.data.db.entity.TrackEntity>) {
+    /**
+     * Load tracks into the native engine. If a track has takes in [trackTakes],
+     * load each unmuted take as a separate engine track. Otherwise load the
+     * track's own audio directly (backwards compatible).
+     */
+    private fun loadTracksIntoEngine(
+        tracks: List<com.example.nightjar.data.db.entity.TrackEntity>
+    ) {
         audioEngine.removeAllTracks()
+        val takesMap = _state.value.trackTakes
+
         for (track in tracks) {
-            val file = getAudioFile(track.audioFileName)
-            audioEngine.addTrack(
-                trackId = track.id.toInt(),
-                filePath = file.absolutePath,
-                durationMs = track.durationMs,
-                offsetMs = track.offsetMs,
-                trimStartMs = track.trimStartMs,
-                trimEndMs = track.trimEndMs,
-                volume = track.volume,
-                isMuted = track.isMuted
-            )
+            val takes = takesMap[track.id]
+            if (takes != null && takes.isNotEmpty()) {
+                // Load each unmuted take as a separate engine track
+                for (take in takes) {
+                    val effectivelyMuted = take.isMuted || track.isMuted
+                    val file = getAudioFile(take.audioFileName)
+                    // Use synthetic trackId: trackId * 1000 + sortIndex
+                    val engineId = (track.id * 1000 + take.sortIndex).toInt()
+                    audioEngine.addTrack(
+                        trackId = engineId,
+                        filePath = file.absolutePath,
+                        durationMs = take.durationMs,
+                        offsetMs = take.offsetMs,
+                        trimStartMs = take.trimStartMs,
+                        trimEndMs = take.trimEndMs,
+                        volume = take.volume * track.volume,
+                        isMuted = effectivelyMuted
+                    )
+                }
+            } else {
+                // No takes -- load track audio directly
+                val file = getAudioFile(track.audioFileName)
+                audioEngine.addTrack(
+                    trackId = track.id.toInt(),
+                    filePath = file.absolutePath,
+                    durationMs = track.durationMs,
+                    offsetMs = track.offsetMs,
+                    trimStartMs = track.trimStartMs,
+                    trimEndMs = track.trimEndMs,
+                    volume = track.volume,
+                    isMuted = track.isMuted
+                )
+            }
         }
     }
 
-    private fun startOverdubRecording() {
-        val ideaId = currentIdeaId ?: return
+    // ── Arm ────────────────────────────────────────────────────────────────
 
-        // Disable looping during recording — Step C will change this
-        if (_state.value.isLoopEnabled) {
-            _state.update { it.copy(isLoopEnabled = false) }
-            audioEngine.clearLoopRegion()
+    private fun toggleArm(trackId: Long) {
+        viewModelScope.launch {
+            val currentArmed = _state.value.armedTrackId
+            if (currentArmed == trackId) {
+                // Unarm
+                _state.update { it.copy(armedTrackId = null) }
+            } else {
+                // Arm this track -- lazy promote to ensure it has takes
+                val takes = studioRepo.ensureTrackHasTakes(trackId)
+                _state.update {
+                    it.copy(
+                        armedTrackId = trackId,
+                        trackTakes = it.trackTakes + (trackId to takes)
+                    )
+                }
+            }
         }
+    }
+
+    // ── Record button ──────────────────────────────────────────────────────
+
+    /**
+     * Called when the user taps the Record button.
+     * If no tracks exist, creates the first track automatically.
+     * If tracks exist but none are armed, shows an error toast.
+     * If a track is armed, requests mic permission (which triggers recording).
+     */
+    private fun requestRecording() {
+        val st = _state.value
+        if (st.isRecording) {
+            stopRecording()
+            return
+        }
+
+        if (st.tracks.isEmpty()) {
+            // No tracks -- this will create a new track
+            isFirstTrackRecording = true
+            recordingArmedTrackId = null
+            viewModelScope.launch {
+                _effects.emit(StudioEffect.RequestMicPermission)
+            }
+        } else if (st.armedTrackId != null) {
+            // Armed track exists -- record a take on it
+            isFirstTrackRecording = false
+            recordingArmedTrackId = st.armedTrackId
+            viewModelScope.launch {
+                _effects.emit(StudioEffect.RequestMicPermission)
+            }
+        } else {
+            // Tracks exist but none armed
+            viewModelScope.launch {
+                _effects.emit(StudioEffect.ShowError("Arm a track first (tap R in the track drawer)."))
+            }
+        }
+    }
+
+    /**
+     * Called after mic permission is granted. Starts the actual recording.
+     * Handles both first-track creation and armed-track take recording.
+     */
+    private fun startRecordingAfterPermission() {
+        val ideaId = currentIdeaId ?: return
+        val st = _state.value
+
+        // Determine if loop recording should be active
+        isLoopRecording = st.isLoopEnabled && st.hasLoopRegion
+        loopResetTimestampsMs.clear()
+        lastLoopResetCount = audioEngine.getLoopResetCount()
+
+        // Keep loop enabled during recording (no longer disable it)
 
         viewModelScope.launch {
             try {
@@ -256,12 +397,9 @@ class StudioViewModel @Inject constructor(
                 val file = recordingStorage.getAudioFile("nightjar_overdub_$ts.wav")
                 recordingFile = file
 
-                // Capture the user's intended start position BEFORE any
-                // startup latency shifts the clock forward.
                 val intendedStartMs = audioEngine.positionMs.value
 
-                // ── Pre-roll capture protocol ────────────────────────────
-                // 1. Start Oboe recording and wait for pipeline to become hot
+                // Pre-roll capture protocol
                 val started = audioEngine.startRecording(file.absolutePath)
                 if (!started) {
                     _effects.emit(StudioEffect.ShowError("Failed to start recording."))
@@ -269,20 +407,13 @@ class StudioViewModel @Inject constructor(
                 }
                 audioEngine.awaitFirstBuffer()
 
-                // 2. Open write gate BEFORE playback — captures pre-roll
-                //    silence that serves as a safety buffer for compensation
                 audioEngine.openWriteGate()
                 val writeGateNanos = System.nanoTime()
 
-                // 3. Start playback
-                val hasPlayableTracks = _state.value.tracks.any { !it.isMuted }
+                val hasPlayableTracks = st.tracks.any { !it.isMuted }
                 audioEngine.setRecording(true)
                 audioEngine.play()
 
-                // 4. Measure pre-roll and compute total compensation
-                // With Oboe, playback starts nearly instantly from the audio
-                // callback. The pre-roll is just the time between write gate
-                // and play.
                 val preRollMs = (System.nanoTime() - writeGateNanos) / 1_000_000L
                 val compensation = latencyEstimator.computeCompensationMs(
                     preRollMs = preRollMs,
@@ -293,9 +424,12 @@ class StudioViewModel @Inject constructor(
                 recordingTrimStartMs = compensation
                 recordingStartNanos = System.nanoTime()
 
-                Log.d(TAG, "Overdub started: intendedStart=${intendedStartMs}ms, " +
+                Log.d(TAG, "Recording started: intendedStart=${intendedStartMs}ms, " +
                     "preRoll=${preRollMs}ms, compensation=${compensation}ms, " +
-                    "hasPlayableTracks=$hasPlayableTracks")
+                    "hasPlayableTracks=$hasPlayableTracks, " +
+                    "isLoopRecording=$isLoopRecording, " +
+                    "armedTrackId=$recordingArmedTrackId, " +
+                    "isFirstTrack=$isFirstTrackRecording")
 
                 _state.update {
                     it.copy(isRecording = true, recordingElapsedMs = 0L)
@@ -316,7 +450,13 @@ class StudioViewModel @Inject constructor(
         }
     }
 
-    private fun stopOverdubRecording() {
+    /**
+     * Stop recording and save the result. Handles three cases:
+     * 1. First track creation (no armed track)
+     * 2. Simple take recording (armed track, no loop)
+     * 3. Loop recording with post-split (armed track + loop)
+     */
+    private fun stopRecording() {
         val ideaId = currentIdeaId ?: return
 
         audioEngine.setRecording(false)
@@ -328,40 +468,252 @@ class StudioViewModel @Inject constructor(
         val file = recordingFile
         recordingFile = null
 
+        val wasLoopRecording = isLoopRecording
+        val loopResets = loopResetTimestampsMs.toList()
+        val armedId = recordingArmedTrackId
+        val wasFirstTrack = isFirstTrackRecording
+
+        // Reset recording state
+        isLoopRecording = false
+        loopResetTimestampsMs.clear()
+        recordingArmedTrackId = null
+        isFirstTrackRecording = false
+
         _state.update { it.copy(isRecording = false, recordingElapsedMs = 0L) }
 
         if (durationMs <= 0 || file == null) {
             viewModelScope.launch {
-                _effects.emit(StudioEffect.ShowError("Recording failed — no audio captured."))
+                _effects.emit(StudioEffect.ShowError("Recording failed -- no audio captured."))
             }
             return
         }
 
-        // Clamp trimStartMs so it never exceeds what would leave less than
-        // MIN_EFFECTIVE_DURATION_MS of audible audio.
         val maxTrim = (durationMs - MIN_EFFECTIVE_DURATION_MS).coerceAtLeast(0L)
         val safeTrimStartMs = recordingTrimStartMs.coerceIn(0L, maxTrim)
 
         Log.d(TAG, "Recording stopped: file=${file.name}, " +
             "durationMs=$durationMs, offsetMs=$recordingStartGlobalMs, " +
-            "trimStartMs=$safeTrimStartMs (raw=${recordingTrimStartMs})")
+            "trimStartMs=$safeTrimStartMs (raw=${recordingTrimStartMs}), " +
+            "loopResets=${loopResets.size}, wasFirstTrack=$wasFirstTrack")
 
         viewModelScope.launch {
             try {
-                studioRepo.addTrack(
-                    ideaId = ideaId,
-                    audioFile = file,
-                    durationMs = durationMs,
-                    offsetMs = recordingStartGlobalMs,
-                    trimStartMs = safeTrimStartMs
-                )
+                if (wasFirstTrack) {
+                    // Case 1: Create a new track with the recording
+                    studioRepo.addTrack(
+                        ideaId = ideaId,
+                        audioFile = file,
+                        durationMs = durationMs,
+                        offsetMs = recordingStartGlobalMs,
+                        trimStartMs = safeTrimStartMs
+                    )
+                } else if (armedId != null && wasLoopRecording && loopResets.isNotEmpty()) {
+                    // Case 3: Loop recording -- split into takes
+                    saveLoopRecordingAsTakes(
+                        armedTrackId = armedId,
+                        file = file,
+                        totalDurationMs = durationMs,
+                        trimStartMs = safeTrimStartMs,
+                        loopResetTimestampsMs = loopResets
+                    )
+                } else if (armedId != null) {
+                    // Case 2: Simple take recording
+                    studioRepo.addTake(
+                        trackId = armedId,
+                        audioFile = file,
+                        durationMs = durationMs,
+                        offsetMs = recordingStartGlobalMs,
+                        trimStartMs = safeTrimStartMs
+                    )
+                    reloadTakesForTrack(armedId)
+                }
 
                 reloadAndPrepare()
             } catch (e: Exception) {
                 _effects.emit(
-                    StudioEffect.ShowError(e.message ?: "Failed to save track.")
+                    StudioEffect.ShowError(e.message ?: "Failed to save recording.")
                 )
             }
+        }
+    }
+
+    /**
+     * Split a continuous loop recording into individual takes.
+     * The recording file is split at the loop reset timestamps,
+     * creating one take per loop cycle.
+     */
+    private suspend fun saveLoopRecordingAsTakes(
+        armedTrackId: Long,
+        file: File,
+        totalDurationMs: Long,
+        trimStartMs: Long,
+        loopResetTimestampsMs: List<Long>
+    ) {
+        val st = _state.value
+        val loopStartMs = st.loopStartMs ?: recordingStartGlobalMs
+        val outputDir = file.parentFile ?: return
+
+        // Split the WAV file at loop reset points
+        val splitFiles = withContext(Dispatchers.IO) {
+            WavSplitter.split(
+                sourceFile = file,
+                splitPointsMs = loopResetTimestampsMs,
+                outputDir = outputDir,
+                namePrefix = file.nameWithoutExtension + "_take"
+            )
+        }
+
+        if (splitFiles.isEmpty()) {
+            // Split failed or only one segment -- save as a single take
+            Log.w(TAG, "WAV split returned no files, saving as single take")
+            studioRepo.addTake(
+                trackId = armedTrackId,
+                audioFile = file,
+                durationMs = totalDurationMs,
+                offsetMs = recordingStartGlobalMs,
+                trimStartMs = trimStartMs
+            )
+        } else {
+            // Save each segment as a separate take
+            for ((index, segFile) in splitFiles.withIndex()) {
+                val segDurationMs = getFileDurationMs(segFile)
+                val segOffsetMs = if (index == 0) {
+                    // First segment starts at the original recording position
+                    recordingStartGlobalMs
+                } else {
+                    // Subsequent segments start at loop region start
+                    loopStartMs
+                }
+                val segTrimStart = if (index == 0) trimStartMs else 0L
+
+                studioRepo.addTake(
+                    trackId = armedTrackId,
+                    audioFile = segFile,
+                    durationMs = segDurationMs,
+                    offsetMs = segOffsetMs,
+                    trimStartMs = segTrimStart
+                )
+            }
+
+            // Delete the original unsplit file
+            withContext(Dispatchers.IO) {
+                file.delete()
+            }
+        }
+
+        reloadTakesForTrack(armedTrackId)
+    }
+
+    /** Get the duration of a WAV file in ms from its header. */
+    private fun getFileDurationMs(file: File): Long {
+        if (!file.exists() || file.length() < 44) return 0L
+        // For PCM WAV at 44100Hz, 16-bit mono: bytesPerMs = 44100 * 2 / 1000 = 88.2
+        // Read from header for accuracy
+        val dataSize = file.length() - 44
+        val bytesPerSample = 2 // 16-bit
+        val channels = 1 // mono
+        val sampleRate = 44100
+        val bytesPerMs = (sampleRate.toLong() * bytesPerSample * channels) / 1000L
+        return if (bytesPerMs > 0) dataSize / bytesPerMs else 0L
+    }
+
+    // ── Legacy overdub (FAB path) ──────────────────────────────────────────
+
+    @Suppress("unused")
+    private fun startOverdubRecording() {
+        // Legacy path: kept for FAB "+" -> Audio Recording flow
+        // Now delegates to the same recording logic
+        isFirstTrackRecording = _state.value.tracks.isEmpty()
+        recordingArmedTrackId = _state.value.armedTrackId
+        startRecordingAfterPermission()
+    }
+
+    @Suppress("unused")
+    private fun stopOverdubRecording() {
+        stopRecording()
+    }
+
+    // ── Takes ──────────────────────────────────────────────────────────────
+
+    private fun toggleTakesView(trackId: Long) {
+        viewModelScope.launch {
+            // Ensure takes are loaded
+            if (trackId !in _state.value.trackTakes) {
+                val takes = studioRepo.ensureTrackHasTakes(trackId)
+                _state.update {
+                    it.copy(trackTakes = it.trackTakes + (trackId to takes))
+                }
+            }
+
+            _state.update {
+                val newSet = if (trackId in it.expandedTakeTrackIds) {
+                    it.expandedTakeTrackIds - trackId
+                } else {
+                    it.expandedTakeTrackIds + trackId
+                }
+                it.copy(expandedTakeTrackIds = newSet)
+            }
+        }
+    }
+
+    private fun renameTake(takeId: Long, name: String) {
+        viewModelScope.launch {
+            studioRepo.renameTake(takeId, name)
+            // Find the track that owns this take and reload
+            reloadAllTakes()
+        }
+    }
+
+    private fun deleteTake(takeId: Long, trackId: Long) {
+        viewModelScope.launch {
+            try {
+                studioRepo.deleteTakeAndAudio(takeId)
+                reloadTakesForTrack(trackId)
+                reloadAndPrepare()
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to delete take."))
+            }
+        }
+    }
+
+    private fun setTakeMuted(takeId: Long, trackId: Long, muted: Boolean) {
+        viewModelScope.launch {
+            try {
+                studioRepo.setTakeMuted(takeId, muted)
+                reloadTakesForTrack(trackId)
+                reloadAndPrepare()
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to update take."))
+            }
+        }
+    }
+
+    private fun dragTake(takeId: Long, newOffsetMs: Long) {
+        viewModelScope.launch {
+            try {
+                studioRepo.moveTake(takeId, newOffsetMs.coerceAtLeast(0L))
+                reloadAllTakes()
+                reloadAndPrepare()
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to move take."))
+            }
+        }
+    }
+
+    private suspend fun reloadTakesForTrack(trackId: Long) {
+        val takes = studioRepo.getTakesForTrack(trackId)
+        _state.update {
+            it.copy(trackTakes = it.trackTakes + (trackId to takes))
+        }
+    }
+
+    private suspend fun reloadAllTakes() {
+        val trackIds = _state.value.trackTakes.keys.toList()
+        if (trackIds.isEmpty()) return
+        val allTakes = studioRepo.getTakesForTracks(trackIds)
+        val grouped = allTakes.groupBy { it.trackId }
+        _state.update {
+            it.copy(trackTakes = it.trackTakes + grouped)
         }
     }
 
@@ -514,7 +866,10 @@ class StudioViewModel @Inject constructor(
             it.copy(
                 confirmingDeleteTrackId = null,
                 expandedTrackIds = it.expandedTrackIds - trackId,
-                soloedTrackIds = it.soloedTrackIds - trackId
+                soloedTrackIds = it.soloedTrackIds - trackId,
+                armedTrackId = if (it.armedTrackId == trackId) null else it.armedTrackId,
+                trackTakes = it.trackTakes - trackId,
+                expandedTakeTrackIds = it.expandedTakeTrackIds - trackId
             )
         }
 

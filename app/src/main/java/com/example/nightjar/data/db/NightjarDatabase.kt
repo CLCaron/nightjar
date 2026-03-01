@@ -6,9 +6,11 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import com.example.nightjar.data.db.dao.IdeaDao
 import com.example.nightjar.data.db.dao.TagDao
+import com.example.nightjar.data.db.dao.TakeDao
 import com.example.nightjar.data.db.dao.TrackDao
 import com.example.nightjar.data.db.entity.IdeaEntity
 import com.example.nightjar.data.db.entity.TagEntity
+import com.example.nightjar.data.db.entity.TakeEntity
 import com.example.nightjar.data.db.entity.TrackEntity
 
 /**
@@ -19,10 +21,11 @@ import com.example.nightjar.data.db.entity.TrackEntity
  * - **v2** — Added `tags` and `idea_tags` tables for user-defined tagging.
  * - **v3** — Added `tracks` table for multi-track Studio projects.
  * - **v4** — Removed `audioFileName` from `ideas`; IdeaEntity is now a pure metadata container.
+ * - **v5** — Added `takes` table for per-track multi-take support.
  */
 @Database(
-    entities = [IdeaEntity::class, TagEntity::class, IdeaTagCrossRef::class, TrackEntity::class],
-    version = 4,
+    entities = [IdeaEntity::class, TagEntity::class, IdeaTagCrossRef::class, TrackEntity::class, TakeEntity::class],
+    version = 5,
     exportSchema = false
 )
 abstract class NightjarDatabase : RoomDatabase() {
@@ -30,6 +33,7 @@ abstract class NightjarDatabase : RoomDatabase() {
     abstract fun ideaDao(): IdeaDao
     abstract fun tagDao(): TagDao
     abstract fun trackDao(): TrackDao
+    abstract fun takeDao(): TakeDao
 
     companion object {
         @Volatile private var INSTANCE: NightjarDatabase? = null
@@ -132,13 +136,40 @@ abstract class NightjarDatabase : RoomDatabase() {
             }
         }
 
+        /** v4 -> v5: Add takes table for per-track multi-take support. */
+        private val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS takes (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        trackId INTEGER NOT NULL,
+                        audioFileName TEXT NOT NULL,
+                        displayName TEXT NOT NULL,
+                        sortIndex INTEGER NOT NULL,
+                        durationMs INTEGER NOT NULL,
+                        offsetMs INTEGER NOT NULL DEFAULT 0,
+                        trimStartMs INTEGER NOT NULL DEFAULT 0,
+                        trimEndMs INTEGER NOT NULL DEFAULT 0,
+                        isMuted INTEGER NOT NULL DEFAULT 0,
+                        volume REAL NOT NULL DEFAULT 1.0,
+                        createdAtEpochMs INTEGER NOT NULL,
+                        FOREIGN KEY(trackId) REFERENCES tracks(id) ON DELETE CASCADE
+                    )
+                """.trimIndent())
+
+                db.execSQL("""
+                    CREATE INDEX IF NOT EXISTS index_takes_trackId ON takes(trackId)
+                """.trimIndent())
+            }
+        }
+
         fun getInstance(context: Context): NightjarDatabase {
             return INSTANCE ?: synchronized(this) {
                 val db = Room.databaseBuilder(
                     context.applicationContext,
                     NightjarDatabase::class.java,
                     "nightjar.db"
-                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build()
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build()
                 INSTANCE = db
                 db
             }

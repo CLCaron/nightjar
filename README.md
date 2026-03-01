@@ -31,10 +31,12 @@ The home screen for a single idea. Play it back, edit the title and notes (auto-
 A lightweight multi-track workspace. Not a replacement for professional tools, but the bridge between "I just thought of something" and "let me sit down and produce this." Layer recordings on top of each other, shift their timing, trim the edges, adjust volume and mute per track. Enough to know whether an idea is worth pursuing. Enough to jumpstart true production later.
 
 - **Overdub** -- record new layers while existing tracks play back, with hardware-compensated sync
+- **Takes** -- arm a track and record multiple takes. Each take is an independent audio clip on the timeline. Mute, drag, and layer takes freely.
+- **Loop recording** -- with a loop region active, record continuously. On stop, the recording is automatically split into individual takes at each loop boundary -- zero gaps, no manual slicing.
 - **Loop playback** -- drag on the ruler to define a loop region, with draggable handles
 - **Drag to reposition** -- long-press a track and slide it along the timeline
 - **Non-destructive trim** -- drag handles on track edges
-- **Per-track controls** -- volume knob, solo, mute, delete via inline track drawer
+- **Per-track controls** -- volume knob, arm (R), solo (S), mute (M), takes (T), delete via inline track drawer
 - **Hardware-style controls** -- beveled toggle buttons with LED glow, rotary knob with haptic detents, consistent across all screens
 
 ---
@@ -66,15 +68,16 @@ Nightjar is in active development, working toward a v1.0 Play Store release.
 - Live waveform during recording with post-recording preview
 - Native C++ audio engine (Oboe) — low-latency recording and multi-track playback
 - Multi-track overdub with hardware timestamp latency compensation
+- Per-track takes with arm toggle, loop recording with auto-split into takes
 - Drag-to-reposition, non-destructive trim, per-track volume/mute/solo/delete
 - Loop playback with ruler-based region selection and toggle controls
-- Inline track drawer with hardware-style controls (LED toggle buttons, volume knob)
+- Record button in the Studio button panel (alongside Loop and Play/Pause)
+- Inline track drawer with hardware-style controls (arm, solo, mute, takes, volume knob)
 - Library with tag filtering and sort options
 - Overview with playback, waveform visualization, auto-saving notes, tags, sharing, and delete
 
 **What's next:**
 - Track rename/reorder, track labels
-- Loop recording with auto-takes
 - Library long-press menu
 - Contextual gesture hints for discoverability
 - Play Store release prep

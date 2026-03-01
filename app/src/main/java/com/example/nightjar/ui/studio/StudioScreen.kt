@@ -46,6 +46,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -60,11 +61,13 @@ import com.example.nightjar.ui.components.NjTopBar
 import com.example.nightjar.ui.theme.NjMuted2
 import com.example.nightjar.ui.theme.NjStudioAccent
 import com.example.nightjar.ui.theme.NjStudioBg
+import com.example.nightjar.ui.theme.NjRecordCoral
 import com.example.nightjar.ui.theme.NjStudioGreen
 import com.example.nightjar.ui.theme.NjStudioOutline
 import com.example.nightjar.ui.theme.NjStudioWaveform
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.FiberManualRecord
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Repeat
 import kotlinx.coroutines.flow.collectLatest
@@ -137,7 +140,7 @@ fun StudioScreen(
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP && currentIsRecording) {
-                vm.onAction(StudioAction.StopOverdubRecording)
+                vm.onAction(StudioAction.StopRecording)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -202,7 +205,7 @@ fun StudioScreen(
             if (state.isRecording) {
                 OverdubRecordingBar(
                     elapsedMs = state.recordingElapsedMs,
-                    onStop = { vm.onAction(StudioAction.StopOverdubRecording) }
+                    onStop = { vm.onAction(StudioAction.StopRecording) }
                 )
             }
 
@@ -213,59 +216,84 @@ fun StudioScreen(
             ) {
                 NjSectionTitle("Timeline")
 
-                if (state.tracks.isNotEmpty() && !state.isRecording) {
+                if (!state.isLoading) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Loop + Clear rocker pill — always both visible
-                        Row(
-                            modifier = Modifier.height(IntrinsicSize.Min),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            NjStudioButton(
-                                text = "Loop",
-                                icon = Icons.Outlined.Repeat,
-                                onClick = { vm.onAction(StudioAction.ToggleLoop) },
-                                isActive = state.isLoopEnabled,
-                                ledColor = NjStudioAccent,
-                            )
+                        // Loop + Clear rocker pill
+                        if (state.tracks.isNotEmpty()) {
+                            Row(
+                                modifier = Modifier.height(IntrinsicSize.Min),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                NjStudioButton(
+                                    text = "Loop",
+                                    icon = Icons.Outlined.Repeat,
+                                    onClick = { vm.onAction(StudioAction.ToggleLoop) },
+                                    isActive = state.isLoopEnabled,
+                                    ledColor = NjStudioAccent,
+                                )
 
-                            Box(
-                                Modifier
-                                    .width(1.dp)
-                                    .fillMaxHeight()
-                                    .background(NjStudioOutline)
-                            )
+                                Box(
+                                    Modifier
+                                        .width(1.dp)
+                                        .fillMaxHeight()
+                                        .background(NjStudioOutline)
+                                )
 
-                            NjStudioButton(
-                                text = "Clear",
-                                icon = Icons.Outlined.Close,
-                                onClick = {
-                                    if (state.hasLoopRegion) {
-                                        vm.onAction(StudioAction.ClearLoopRegion)
-                                    }
-                                },
-                                isActive = !state.hasLoopRegion,
-                                ledColor = NjMuted2,
-                                activeGlow = false,
-                            )
+                                NjStudioButton(
+                                    text = "Clear",
+                                    icon = Icons.Outlined.Close,
+                                    onClick = {
+                                        if (state.hasLoopRegion) {
+                                            vm.onAction(StudioAction.ClearLoopRegion)
+                                        }
+                                    },
+                                    isActive = !state.hasLoopRegion,
+                                    ledColor = NjMuted2,
+                                    activeGlow = false,
+                                )
+                            }
                         }
 
-                        // Play / Pause — toggle with green LED glow when playing
+                        // Record button — coral LED
+                        val recEnabled = state.tracks.isEmpty() || state.armedTrackId != null
                         NjStudioButton(
-                            text = if (state.isPlaying) "Pause" else "Play",
-                            icon = Icons.Outlined.PlayArrow,
+                            text = "Rec",
+                            icon = Icons.Outlined.FiberManualRecord,
                             onClick = {
-                                if (state.isPlaying) {
-                                    vm.onAction(StudioAction.Pause)
+                                if (state.isRecording) {
+                                    vm.onAction(StudioAction.StopRecording)
                                 } else {
-                                    vm.onAction(StudioAction.Play)
+                                    vm.onAction(StudioAction.StartRecording)
                                 }
                             },
-                            isActive = state.isPlaying,
-                            ledColor = NjStudioGreen,
+                            isActive = state.isRecording,
+                            ledColor = NjRecordCoral,
+                            modifier = if (!recEnabled && !state.isRecording) {
+                                Modifier.alpha(0.4f)
+                            } else {
+                                Modifier
+                            }
                         )
+
+                        // Play / Pause
+                        if (state.tracks.isNotEmpty() && !state.isRecording) {
+                            NjStudioButton(
+                                text = if (state.isPlaying) "Pause" else "Play",
+                                icon = Icons.Outlined.PlayArrow,
+                                onClick = {
+                                    if (state.isPlaying) {
+                                        vm.onAction(StudioAction.Pause)
+                                    } else {
+                                        vm.onAction(StudioAction.Play)
+                                    }
+                                },
+                                isActive = state.isPlaying,
+                                ledColor = NjStudioGreen,
+                            )
+                        }
                     }
                 }
             }
@@ -289,6 +317,9 @@ fun StudioScreen(
                     isLoopEnabled = state.isLoopEnabled,
                     expandedTrackIds = state.expandedTrackIds,
                     soloedTrackIds = state.soloedTrackIds,
+                    armedTrackId = state.armedTrackId,
+                    trackTakes = state.trackTakes,
+                    expandedTakeTrackIds = state.expandedTakeTrackIds,
                     getAudioFile = vm::getAudioFile,
                     onAction = vm::onAction
                 )
