@@ -17,8 +17,10 @@ import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
 import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.gestures.horizontalDrag
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -69,6 +71,8 @@ import com.example.nightjar.data.db.entity.TakeEntity
 import com.example.nightjar.data.db.entity.TrackEntity
 import com.example.nightjar.ui.components.NjWaveform
 import com.example.nightjar.ui.theme.NjRecordCoral
+import com.example.nightjar.ui.theme.NjError
+import com.example.nightjar.ui.theme.NjMuted2
 import com.example.nightjar.ui.theme.NjStudioAccent
 import com.example.nightjar.ui.theme.NjStudioLane
 import com.example.nightjar.ui.theme.NjStudioSurface2
@@ -113,6 +117,7 @@ fun TimelinePanel(
     armedTrackId: Long?,
     trackTakes: Map<Long, List<TakeEntity>>,
     expandedTakeTrackIds: Set<Long>,
+    expandedTakeDrawerIds: Set<Long>,
     getAudioFile: (String) -> File,
     onAction: (StudioAction) -> Unit,
     modifier: Modifier = Modifier
@@ -293,6 +298,7 @@ fun TimelinePanel(
             ) {
                 Column {
                     takes.forEach { take ->
+                        val takeDrawerOpen = take.id in expandedTakeDrawerIds
                         TakeRow(
                             take = take,
                             trackColor = trackColor,
@@ -302,6 +308,17 @@ fun TimelinePanel(
                             getAudioFile = getAudioFile,
                             onAction = onAction
                         )
+                        // Take mini-drawer
+                        AnimatedVisibility(
+                            visible = takeDrawerOpen,
+                            enter = drawerEnter,
+                            exit = drawerExit
+                        ) {
+                            TakeMiniDrawer(
+                                take = take,
+                                onAction = onAction
+                            )
+                        }
                     }
                 }
             }
@@ -914,8 +931,10 @@ private fun LoopRulerGestureLayer(
 /**
  * A single take row displayed below its parent track when takes are expanded.
  * Shows the take name on the left and a waveform on the right.
- * Muted takes are visually dimmed.
+ * Tap the header to toggle mute. Long-press the header to open/close
+ * the mini-drawer (Rename / Delete).
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun TakeRow(
     take: TakeEntity,
@@ -932,15 +951,26 @@ private fun TakeRow(
     val widthDp = (effectiveDurationMs / msPerDp).dp
 
     Row(Modifier.fillMaxWidth()) {
-        // Take header (left side)
+        // Take header (left side) -- tap to mute, long-press for drawer
         Column(
             modifier = Modifier
                 .width(HEADER_WIDTH)
                 .height(TAKE_ROW_HEIGHT)
                 .background(NjStudioSurface2.copy(alpha = 0.5f))
-                .clickable {
-                    onAction(StudioAction.SetTakeMuted(take.id, take.trackId, !take.isMuted))
-                }
+                .combinedClickable(
+                    onClick = {
+                        onAction(
+                            StudioAction.SetTakeMuted(
+                                take.id,
+                                take.trackId,
+                                !take.isMuted
+                            )
+                        )
+                    },
+                    onLongClick = {
+                        onAction(StudioAction.ToggleTakeDrawer(take.id))
+                    }
+                )
                 .padding(horizontal = 8.dp, vertical = 4.dp),
             verticalArrangement = Arrangement.Center
         ) {
@@ -1010,5 +1040,57 @@ private fun TakeRow(
                 }
             }
         }
+    }
+}
+
+/**
+ * Slim mini-drawer for a take -- Rename and Delete buttons.
+ * Appears below the take row when toggled via long-press.
+ */
+@Composable
+private fun TakeMiniDrawer(
+    take: TakeEntity,
+    onAction: (StudioAction) -> Unit
+) {
+    val goldBorderColor = NjStudioAccent.copy(alpha = 0.3f)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(40.dp)
+            .drawBehind {
+                drawLine(
+                    color = goldBorderColor,
+                    start = Offset(0f, 0f),
+                    end = Offset(size.width, 0f),
+                    strokeWidth = 0.5.dp.toPx()
+                )
+            }
+            .background(NjStudioSurface2.copy(alpha = 0.7f))
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.End
+    ) {
+        NjStudioButton(
+            text = "Rename",
+            onClick = {
+                onAction(
+                    StudioAction.RequestRenameTake(
+                        take.id,
+                        take.trackId,
+                        take.displayName
+                    )
+                )
+            },
+            textColor = NjMuted2.copy(alpha = 0.7f)
+        )
+        Spacer(Modifier.width(8.dp))
+        NjStudioButton(
+            text = "Delete",
+            onClick = {
+                onAction(StudioAction.RequestDeleteTake(take.id, take.trackId))
+            },
+            textColor = NjError.copy(alpha = 0.7f)
+        )
     }
 }

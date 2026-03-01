@@ -28,6 +28,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -320,6 +321,7 @@ fun StudioScreen(
                     armedTrackId = state.armedTrackId,
                     trackTakes = state.trackTakes,
                     expandedTakeTrackIds = state.expandedTakeTrackIds,
+                    expandedTakeDrawerIds = state.expandedTakeDrawerIds,
                     getAudioFile = vm::getAudioFile,
                     onAction = vm::onAction
                 )
@@ -381,6 +383,59 @@ fun StudioScreen(
             onOffsetChange = { vm.onAction(StudioAction.SetManualOffset(it)) },
             onClearOffset = { vm.onAction(StudioAction.ClearManualOffset) },
             onDismiss = { vm.onAction(StudioAction.DismissLatencySetup) }
+        )
+    }
+
+    // Track rename dialog
+    val renamingTrackId = state.renamingTrackId
+    if (renamingTrackId != null) {
+        RenameDialog(
+            title = "Rename track",
+            currentName = state.renamingTrackCurrentName,
+            onConfirm = { newName ->
+                vm.onAction(
+                    StudioAction.ConfirmRenameTrack(renamingTrackId, newName)
+                )
+            },
+            onDismiss = { vm.onAction(StudioAction.DismissRenameTrack) }
+        )
+    }
+
+    // Take rename dialog
+    val renamingTakeId = state.renamingTakeId
+    if (renamingTakeId != null) {
+        RenameDialog(
+            title = "Rename take",
+            currentName = state.renamingTakeCurrentName,
+            onConfirm = { newName ->
+                vm.onAction(
+                    StudioAction.ConfirmRenameTake(renamingTakeId, newName)
+                )
+            },
+            onDismiss = { vm.onAction(StudioAction.DismissRenameTake) }
+        )
+    }
+
+    // Take delete confirmation dialog
+    if (state.confirmingDeleteTakeId != null) {
+        val takeName = state.trackTakes.values.flatten()
+            .find { it.id == state.confirmingDeleteTakeId }
+            ?.displayName ?: "this take"
+
+        AlertDialog(
+            onDismissRequest = { vm.onAction(StudioAction.DismissDeleteTake) },
+            title = { Text("Delete $takeName?") },
+            text = { Text("This will permanently delete the take and its audio file.") },
+            confirmButton = {
+                TextButton(onClick = { vm.onAction(StudioAction.ExecuteDeleteTake) }) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { vm.onAction(StudioAction.DismissDeleteTake) }) {
+                    Text("Cancel")
+                }
+            }
         )
     }
 }
@@ -551,8 +606,45 @@ private fun OffsetSlider(
     }
 }
 
-/** Snap to 0 when within ±15ms of center, then clamp to range. */
+/** Snap to 0 when within +/-15ms of center, then clamp to range. */
 private fun snapToCenter(rawMs: Long): Long {
     val snapped = if (rawMs in -15L..15L) 0L else rawMs
     return snapped.coerceIn(-500L, 500L)
+}
+
+/** Reusable rename dialog with a pre-filled text field. */
+@Composable
+private fun RenameDialog(
+    title: String,
+    currentName: String,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var text by remember(currentName) { mutableStateOf(currentName) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(text) },
+                enabled = text.isNotBlank()
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }

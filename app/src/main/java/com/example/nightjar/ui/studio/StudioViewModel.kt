@@ -227,12 +227,71 @@ class StudioViewModel @Inject constructor(
             StudioAction.StartRecording -> requestRecording()
             StudioAction.StopRecording -> stopRecording()
 
+            // Track rename
+            is StudioAction.RequestRenameTrack -> {
+                _state.update {
+                    it.copy(
+                        renamingTrackId = action.trackId,
+                        renamingTrackCurrentName = action.currentName
+                    )
+                }
+            }
+            is StudioAction.ConfirmRenameTrack -> confirmRenameTrack(action.trackId, action.newName)
+            StudioAction.DismissRenameTrack -> {
+                _state.update { it.copy(renamingTrackId = null, renamingTrackCurrentName = "") }
+            }
+
             // Takes
             is StudioAction.ToggleTakesView -> toggleTakesView(action.trackId)
             is StudioAction.RenameTake -> renameTake(action.takeId, action.name)
             is StudioAction.DeleteTake -> deleteTake(action.takeId, action.trackId)
             is StudioAction.SetTakeMuted -> setTakeMuted(action.takeId, action.trackId, action.muted)
             is StudioAction.DragTake -> dragTake(action.takeId, action.newOffsetMs)
+
+            // Take drawer / rename / delete
+            is StudioAction.ToggleTakeDrawer -> {
+                _state.update {
+                    val newSet = if (action.takeId in it.expandedTakeDrawerIds) {
+                        it.expandedTakeDrawerIds - action.takeId
+                    } else {
+                        it.expandedTakeDrawerIds + action.takeId
+                    }
+                    it.copy(expandedTakeDrawerIds = newSet)
+                }
+            }
+            is StudioAction.RequestRenameTake -> {
+                _state.update {
+                    it.copy(
+                        renamingTakeId = action.takeId,
+                        renamingTakeTrackId = action.trackId,
+                        renamingTakeCurrentName = action.currentName
+                    )
+                }
+            }
+            is StudioAction.ConfirmRenameTake -> confirmRenameTake(action.takeId, action.newName)
+            StudioAction.DismissRenameTake -> {
+                _state.update {
+                    it.copy(
+                        renamingTakeId = null,
+                        renamingTakeTrackId = null,
+                        renamingTakeCurrentName = ""
+                    )
+                }
+            }
+            is StudioAction.RequestDeleteTake -> {
+                _state.update {
+                    it.copy(
+                        confirmingDeleteTakeId = action.takeId,
+                        confirmingDeleteTakeTrackId = action.trackId
+                    )
+                }
+            }
+            StudioAction.DismissDeleteTake -> {
+                _state.update {
+                    it.copy(confirmingDeleteTakeId = null, confirmingDeleteTakeTrackId = null)
+                }
+            }
+            StudioAction.ExecuteDeleteTake -> executeDeleteTake()
         }
     }
 
@@ -659,12 +718,55 @@ class StudioViewModel @Inject constructor(
     private fun renameTake(takeId: Long, name: String) {
         viewModelScope.launch {
             studioRepo.renameTake(takeId, name)
-            // Find the track that owns this take and reload
             reloadAllTakes()
         }
     }
 
+    private fun confirmRenameTake(takeId: Long, newName: String) {
+        val trimmed = newName.trim()
+        if (trimmed.isBlank()) return
+        _state.update {
+            it.copy(
+                renamingTakeId = null,
+                renamingTakeTrackId = null,
+                renamingTakeCurrentName = ""
+            )
+        }
+        viewModelScope.launch {
+            try {
+                studioRepo.renameTake(takeId, trimmed)
+                reloadAllTakes()
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to rename take."))
+            }
+        }
+    }
+
     private fun deleteTake(takeId: Long, trackId: Long) {
+        viewModelScope.launch {
+            try {
+                studioRepo.deleteTakeAndAudio(takeId)
+                _state.update {
+                    it.copy(expandedTakeDrawerIds = it.expandedTakeDrawerIds - takeId)
+                }
+                reloadTakesForTrack(trackId)
+                reloadAndPrepare()
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to delete take."))
+            }
+        }
+    }
+
+    private fun executeDeleteTake() {
+        val takeId = _state.value.confirmingDeleteTakeId ?: return
+        val trackId = _state.value.confirmingDeleteTakeTrackId ?: return
+        _state.update {
+            it.copy(
+                confirmingDeleteTakeId = null,
+                confirmingDeleteTakeTrackId = null,
+                expandedTakeDrawerIds = it.expandedTakeDrawerIds - takeId
+            )
+        }
         viewModelScope.launch {
             try {
                 studioRepo.deleteTakeAndAudio(takeId)
@@ -714,6 +816,22 @@ class StudioViewModel @Inject constructor(
         val grouped = allTakes.groupBy { it.trackId }
         _state.update {
             it.copy(trackTakes = it.trackTakes + grouped)
+        }
+    }
+
+    // ── Track rename ─────────────────────────────────────────────────────
+
+    private fun confirmRenameTrack(trackId: Long, newName: String) {
+        val trimmed = newName.trim()
+        if (trimmed.isBlank()) return
+        _state.update { it.copy(renamingTrackId = null, renamingTrackCurrentName = "") }
+        viewModelScope.launch {
+            try {
+                studioRepo.renameTrack(trackId, trimmed)
+                reloadTracks()
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to rename track."))
+            }
         }
     }
 
