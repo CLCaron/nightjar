@@ -30,6 +30,7 @@ The home screen for a single idea. Play it back, edit the title and notes (auto-
 ### Studio
 A lightweight multi-track workspace. Not a replacement for professional tools, but the bridge between "I just thought of something" and "let me sit down and produce this." Layer recordings on top of each other, shift their timing, trim the edges, adjust volume and mute per track. Enough to know whether an idea is worth pursuing. Enough to jumpstart true production later.
 
+- **Auto-create tracks** -- tap Record any time, even with existing tracks. No armed track? Nightjar creates a new one automatically. Arm a track when you want to add takes to a specific layer.
 - **Overdub** -- record new layers while existing tracks play back, with hardware-compensated sync
 - **Takes** -- arm a track and record multiple takes. Each take is an independent audio clip on the timeline. Tap to mute, long-press for rename/delete. Drag and layer takes freely.
 - **Loop recording** -- with a loop region active, record continuously. On stop, the recording is automatically split into individual takes at each loop boundary -- zero gaps, no manual slicing.

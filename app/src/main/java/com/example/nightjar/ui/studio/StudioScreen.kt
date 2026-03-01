@@ -258,8 +258,7 @@ fun StudioScreen(
                             }
                         }
 
-                        // Record button — coral LED
-                        val recEnabled = state.tracks.isEmpty() || state.armedTrackId != null
+                        // Record button — coral LED, always enabled
                         NjStudioButton(
                             text = "Rec",
                             icon = Icons.Outlined.FiberManualRecord,
@@ -272,11 +271,6 @@ fun StudioScreen(
                             },
                             isActive = state.isRecording,
                             ledColor = NjRecordCoral,
-                            modifier = if (!recEnabled && !state.isRecording) {
-                                Modifier.alpha(0.4f)
-                            } else {
-                                Modifier
-                            }
                         )
 
                         // Play / Pause

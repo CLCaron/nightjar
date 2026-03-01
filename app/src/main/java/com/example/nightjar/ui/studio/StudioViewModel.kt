@@ -402,9 +402,9 @@ class StudioViewModel @Inject constructor(
 
     /**
      * Called when the user taps the Record button.
-     * If no tracks exist, creates the first track automatically.
-     * If tracks exist but none are armed, shows an error toast.
-     * If a track is armed, requests mic permission (which triggers recording).
+     * - If already recording, stops.
+     * - If a track is armed, records a take into that track.
+     * - Otherwise (no tracks, or tracks but none armed), creates a new track.
      */
     private fun requestRecording() {
         val st = _state.value
@@ -413,31 +413,25 @@ class StudioViewModel @Inject constructor(
             return
         }
 
-        if (st.tracks.isEmpty()) {
-            // No tracks -- this will create a new track
-            isFirstTrackRecording = true
-            recordingArmedTrackId = null
-            viewModelScope.launch {
-                _effects.emit(StudioEffect.RequestMicPermission)
-            }
-        } else if (st.armedTrackId != null) {
+        if (st.armedTrackId != null) {
             // Armed track exists -- record a take on it
             isFirstTrackRecording = false
             recordingArmedTrackId = st.armedTrackId
-            viewModelScope.launch {
-                _effects.emit(StudioEffect.RequestMicPermission)
-            }
         } else {
-            // Tracks exist but none armed
-            viewModelScope.launch {
-                _effects.emit(StudioEffect.ShowError("Arm a track first (tap R in the track drawer)."))
-            }
+            // No armed track -- create a new track (works whether tracks list
+            // is empty or not; the "first track" path handles new-track creation)
+            isFirstTrackRecording = true
+            recordingArmedTrackId = null
+        }
+
+        viewModelScope.launch {
+            _effects.emit(StudioEffect.RequestMicPermission)
         }
     }
 
     /**
      * Called after mic permission is granted. Starts the actual recording.
-     * Handles both first-track creation and armed-track take recording.
+     * Handles both new-track creation (no armed track) and armed-track take recording.
      */
     private fun startRecordingAfterPermission() {
         val ideaId = currentIdeaId ?: return
