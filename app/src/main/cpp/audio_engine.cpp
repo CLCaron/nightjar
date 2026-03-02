@@ -2,6 +2,7 @@
 #include "oboe_recording_stream.h"
 #include "oboe_playback_stream.h"
 #include "track_mixer.h"
+#include "synth_engine.h"
 #include "atomic_transport.h"
 #include "common.h"
 
@@ -25,7 +26,8 @@ bool AudioEngine::initialize() {
     recordingStream_ = std::make_unique<OboeRecordingStream>();
     transport_ = std::make_unique<AtomicTransport>();
     mixer_ = std::make_unique<TrackMixer>();
-    playbackStream_ = std::make_unique<OboePlaybackStream>(*mixer_, *transport_);
+    synthEngine_ = std::make_unique<SynthEngine>();
+    playbackStream_ = std::make_unique<OboePlaybackStream>(*mixer_, *transport_, synthEngine_.get());
 
     // Start the output stream — it sits idle (outputting silence) until play()
     if (!playbackStream_->start()) {
@@ -51,7 +53,12 @@ void AudioEngine::shutdown() {
         playbackStream_->stop();
     }
 
+    if (synthEngine_) {
+        synthEngine_->stop();
+    }
+
     mixer_.reset();
+    synthEngine_.reset();
     transport_.reset();
     playbackStream_.reset();
     recordingStream_.reset();
@@ -226,6 +233,30 @@ void AudioEngine::setRecording(bool active) {
 int64_t AudioEngine::getLoopResetCount() const {
     if (!transport_) return 0;
     return transport_->loopResetCount.load(std::memory_order_acquire);
+}
+
+// ── Synth API ──────────────────────────────────────────────────────────
+
+bool AudioEngine::loadSoundFont(const char* path) {
+    if (!synthEngine_) return false;
+    bool ok = synthEngine_->loadSoundFont(std::string(path));
+    if (ok) {
+        synthEngine_->start();
+        LOGD("AudioEngine: SoundFont loaded, synth render thread started");
+    }
+    return ok;
+}
+
+void AudioEngine::synthNoteOn(int channel, int note, int velocity) {
+    if (synthEngine_) synthEngine_->noteOn(channel, note, velocity);
+}
+
+void AudioEngine::synthNoteOff(int channel, int note) {
+    if (synthEngine_) synthEngine_->noteOff(channel, note);
+}
+
+void AudioEngine::setSynthVolume(float volume) {
+    if (synthEngine_) synthEngine_->setVolume(volume);
 }
 
 // ── Hardware latency measurement ────────────────────────────────────

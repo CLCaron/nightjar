@@ -352,6 +352,9 @@ class StudioViewModel @Inject constructor(
         val takesMap = _state.value.trackTakes
 
         for (track in tracks) {
+            // Drum tracks are handled by the synth engine, not the WAV mixer
+            if (!track.isAudio) continue
+
             val takes = takesMap[track.id]
             if (takes != null && takes.isNotEmpty()) {
                 // Load each unmuted take as a separate engine track
@@ -371,7 +374,7 @@ class StudioViewModel @Inject constructor(
                         isMuted = effectivelyMuted
                     )
                 }
-            } else {
+            } else if (track.audioFileName != null) {
                 // No takes -- load track audio directly
                 val file = getAudioFile(track.audioFileName)
                 audioEngine.addTrack(

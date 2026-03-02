@@ -55,7 +55,8 @@ The **Library** is where ideas live long-term. Sort by newest, oldest, or favori
 - Hilt dependency injection
 - Coroutines + Flow
 - Navigation Compose
-- Oboe audio engine (C++ via NDK) — lock-free, callback-based recording and multi-track playback with hardware timestamp latency compensation
+- Oboe audio engine (C++ via NDK) -- lock-free, callback-based recording and multi-track playback with hardware timestamp latency compensation
+- FluidSynth (C++ via NDK) -- SoundFont-based synthesis for drum sequencer and future MIDI instruments
 
 ---
 
@@ -79,6 +80,7 @@ Nightjar is in active development, working toward a v1.0 Play Store release.
 - Overview with playback, waveform visualization, auto-saving notes, tags, sharing, and delete
 
 **What's next:**
+- Drum step sequencer (C++ engine, pattern editor UI, timeline integration)
 - Track reorder, track labels
 - Library long-press menu
 - Contextual gesture hints for discoverability

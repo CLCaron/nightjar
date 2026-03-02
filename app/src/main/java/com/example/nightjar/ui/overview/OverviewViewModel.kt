@@ -146,6 +146,7 @@ class OverviewViewModel @Inject constructor(
     ) {
         audioEngine.removeAllTracks()
         for (track in tracks) {
+            if (!track.isAudio || track.audioFileName == null) continue
             val file = getAudioFile(track.audioFileName)
             audioEngine.addTrack(
                 trackId = track.id.toInt(),

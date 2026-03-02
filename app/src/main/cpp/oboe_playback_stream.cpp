@@ -1,11 +1,13 @@
 #include "oboe_playback_stream.h"
 #include "common.h"
+#include <cmath>
 #include <cstring>
 
 namespace nightjar {
 
-OboePlaybackStream::OboePlaybackStream(TrackMixer& mixer, AtomicTransport& transport)
-    : mixer_(mixer), transport_(transport) {}
+OboePlaybackStream::OboePlaybackStream(TrackMixer& mixer, AtomicTransport& transport,
+                                       SynthEngine* synth)
+    : mixer_(mixer), transport_(transport), synth_(synth) {}
 
 OboePlaybackStream::~OboePlaybackStream() {
     stop();
@@ -91,8 +93,21 @@ oboe::DataCallbackResult OboePlaybackStream::onAudioReady(
     int64_t pos = transport_.posFrames.load(std::memory_order_relaxed);
     int64_t total = transport_.totalFrames.load(std::memory_order_relaxed);
 
-    // Render mixed audio
+    // Render WAV track audio (zeros buffer first, then sums all tracks)
     mixer_.renderFrames(output, numFrames, pos);
+
+    // Sum synth audio from the render thread's ring buffer
+    if (synth_ && synth_->isRunning()) {
+        synth_->readFrames(output, numFrames);
+    }
+
+    // Soft-clip at the final mix point (after all sources are summed).
+    // tanh provides smooth saturation that prevents harsh digital clipping
+    // when many tracks + synth overlap.
+    int32_t totalSamples = numFrames * kOutputChannelCount;
+    for (int32_t i = 0; i < totalSamples; ++i) {
+        output[i] = std::tanh(output[i]);
+    }
 
     // Advance position
     pos += numFrames;
@@ -103,6 +118,11 @@ oboe::DataCallbackResult OboePlaybackStream::onAudioReady(
     if (loopStart >= 0 && loopEnd > loopStart && pos >= loopEnd) {
         pos = loopStart;
         transport_.loopResetCount.fetch_add(1, std::memory_order_release);
+        // Flush synth ring buffer so stale audio from the previous loop
+        // iteration doesn't bleed into the new one
+        if (synth_ && synth_->isRunning()) {
+            synth_->requestFlush();
+        }
     }
 
     // End-of-timeline check

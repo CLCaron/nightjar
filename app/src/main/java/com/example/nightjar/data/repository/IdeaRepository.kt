@@ -113,7 +113,7 @@ class IdeaRepository(
     suspend fun deleteIdeaAndAudio(id: Long) {
         val tracks = trackDao.getTracksForIdea(id)
         ideaDao.deleteIdeaById(id) // cascade deletes track rows
-        tracks.forEach { storage.deleteAudioFile(it.audioFileName) }
+        tracks.forEach { it.audioFileName?.let { name -> storage.deleteAudioFile(name) } }
     }
 
     /**
@@ -122,8 +122,8 @@ class IdeaRepository(
      */
     suspend fun getFirstTrackFile(ideaId: Long): File? {
         val tracks = trackDao.getTracksForIdea(ideaId)
-        val first = tracks.minByOrNull { it.sortIndex } ?: return null
-        return storage.getAudioFile(first.audioFileName)
+        val first = tracks.filter { it.isAudio }.minByOrNull { it.sortIndex } ?: return null
+        return first.audioFileName?.let { storage.getAudioFile(it) }
     }
 
     // ── Library ──────────────────────────────────────────────────────────

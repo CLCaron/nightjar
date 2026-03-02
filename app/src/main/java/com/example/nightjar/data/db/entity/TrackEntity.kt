@@ -6,23 +6,31 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 
 /**
- * A single audio track within an Explore multi-track project.
+ * A single track within a Studio multi-track project.
+ *
+ * Supports two track types:
+ * - **"audio"** (default): WAV audio recorded via Oboe. Has a non-null [audioFileName].
+ * - **"drum"**: Drum sequencer track. [audioFileName] is null; pattern data lives
+ *   in [DrumPatternEntity] + [DrumStepEntity].
  *
  * Track 1 is created automatically when the user first opens an idea in
- * Explore mode (promoted from the original [IdeaEntity] recording).
- * Additional tracks are added via overdub recording. Deleting the parent
- * idea cascades to all its tracks.
+ * Studio mode (promoted from the original [IdeaEntity] recording).
+ * Additional tracks are added via overdub recording or the add-track sheet.
+ * Deleting the parent idea cascades to all its tracks.
  *
  * @property ideaId        Foreign key to the parent [IdeaEntity].
- * @property audioFileName Filename of the audio file (M4A or WAV) in the recordings directory.
+ * @property trackType     Track type: "audio" or "drum".
+ * @property audioFileName Filename of the audio file (WAV) in the recordings directory.
+ *                         Null for drum tracks.
  * @property displayName   User-visible label shown in the timeline header (e.g. "Track 1").
  * @property sortIndex     Vertical ordering in the timeline (0 = topmost).
- * @property offsetMs      Horizontal offset on the timeline — delay before this track starts playing.
+ * @property offsetMs      Horizontal offset on the timeline.
  * @property trimStartMs   Milliseconds trimmed from the start of the audio (non-destructive).
  * @property trimEndMs     Milliseconds trimmed from the end of the audio (non-destructive).
  * @property durationMs    Total duration of the underlying audio file (before trim).
+ *                         For drum tracks, computed from pattern length and BPM.
  * @property isMuted       When true, this track is silenced during playback.
- * @property volume        Playback volume multiplier (0.0–1.0).
+ * @property volume        Playback volume multiplier (0.0-1.0).
  */
 @Entity(
     tableName = "tracks",
@@ -37,7 +45,8 @@ import androidx.room.PrimaryKey
 data class TrackEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0L,
     val ideaId: Long,
-    val audioFileName: String,
+    val trackType: String = "audio",
+    val audioFileName: String? = null,
     val displayName: String,
     val sortIndex: Int,
     val offsetMs: Long = 0L,
@@ -47,4 +56,7 @@ data class TrackEntity(
     val isMuted: Boolean = false,
     val volume: Float = 1.0f,
     val createdAtEpochMs: Long = System.currentTimeMillis()
-)
+) {
+    val isAudio: Boolean get() = trackType == "audio"
+    val isDrum: Boolean get() = trackType == "drum"
+}

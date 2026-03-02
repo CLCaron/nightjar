@@ -14,6 +14,7 @@ namespace nightjar {
 class OboeRecordingStream;
 class OboePlaybackStream;
 class TrackMixer;
+class SynthEngine;
 struct AtomicTransport;
 
 /**
@@ -72,6 +73,12 @@ public:
     // ── Loop reset tracking ──────────────────────────────────────────────
     int64_t getLoopResetCount() const;
 
+    // ── Synth API ─────────────────────────────────────────────────────
+    bool loadSoundFont(const char* path);
+    void synthNoteOn(int channel, int note, int velocity);
+    void synthNoteOff(int channel, int note);
+    void setSynthVolume(float volume);
+
     // ── Hardware latency measurement ──────────────────────────────────
     int64_t getOutputLatencyMs() const;
     int64_t getInputLatencyMs() const;
@@ -80,6 +87,7 @@ private:
     std::atomic<bool> initialized_{false};
     std::unique_ptr<OboeRecordingStream> recordingStream_;
     std::unique_ptr<TrackMixer> mixer_;
+    std::unique_ptr<SynthEngine> synthEngine_;
     std::unique_ptr<AtomicTransport> transport_;
     std::unique_ptr<OboePlaybackStream> playbackStream_;
 };

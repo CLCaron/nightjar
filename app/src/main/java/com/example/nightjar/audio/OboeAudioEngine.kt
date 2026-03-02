@@ -146,6 +146,27 @@ class OboeAudioEngine @Inject constructor() {
     /** Returns the number of times the playback loop has reset to loopStart. */
     fun getLoopResetCount(): Long = nativeGetLoopResetCount()
 
+    // ── Synth API ────────────────────────────────────────────────────────
+
+    /**
+     * Load a SoundFont file by absolute path and start the synth render thread.
+     * Must be called once after [initialize] before any note events.
+     */
+    fun loadSoundFont(path: String): Boolean {
+        val ok = nativeLoadSoundFont(path)
+        Log.d(TAG, "loadSoundFont($path) -> $ok")
+        return ok
+    }
+
+    fun synthNoteOn(channel: Int, note: Int, velocity: Int) =
+        nativeSynthNoteOn(channel, note, velocity)
+
+    fun synthNoteOff(channel: Int, note: Int) =
+        nativeSynthNoteOff(channel, note)
+
+    fun setSynthVolume(volume: Float) =
+        nativeSetSynthVolume(volume)
+
     // ── Hardware latency measurement ──────────────────────────────────────
 
     /**
@@ -205,6 +226,12 @@ class OboeAudioEngine @Inject constructor() {
 
     // Loop reset tracking
     private external fun nativeGetLoopResetCount(): Long
+
+    // Synth
+    private external fun nativeLoadSoundFont(path: String): Boolean
+    private external fun nativeSynthNoteOn(channel: Int, note: Int, velocity: Int)
+    private external fun nativeSynthNoteOff(channel: Int, note: Int)
+    private external fun nativeSetSynthVolume(volume: Float)
 
     // Hardware latency
     private external fun nativeGetOutputLatencyMs(): Long

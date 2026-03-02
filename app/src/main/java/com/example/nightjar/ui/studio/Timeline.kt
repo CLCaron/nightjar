@@ -621,14 +621,16 @@ private fun TimelineTrackLane(
             val endFrac = if (track.durationMs > 0)
                 1f - effectiveTrimEndMs.toFloat() / track.durationMs else 1f
 
-            NjWaveform(
-                audioFile = getAudioFile(track.audioFileName),
-                modifier = Modifier.fillMaxWidth(),
-                barColor = barColor,
-                height = laneHeight - 8.dp,
-                startFraction = startFrac,
-                endFraction = endFrac
-            )
+            if (track.audioFileName != null) {
+                NjWaveform(
+                    audioFile = getAudioFile(track.audioFileName),
+                    modifier = Modifier.fillMaxWidth(),
+                    barColor = barColor,
+                    height = laneHeight - 8.dp,
+                    startFraction = startFrac,
+                    endFraction = endFrac
+                )
+            }
 
             // Visual-only trim handles at each edge
             TrimHandle(

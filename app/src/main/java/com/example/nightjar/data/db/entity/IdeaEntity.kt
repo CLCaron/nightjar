@@ -13,6 +13,8 @@ import androidx.room.PrimaryKey
  * @property title         User-editable title, auto-generated on creation (e.g. "Idea Feb 17, 3:42 PM").
  * @property notes         Free-form text for lyrics, chords, or other notes.
  * @property isFavorite    Pinned to the top of the library when sorting by favorites.
+ * @property bpm           Project-level tempo in beats per minute (default 120.0).
+ *                         Used by drum sequencer, metronome, snap-to-grid, and MIDI tracks.
  * @property createdAtEpochMs Unix timestamp of when the idea was first recorded.
  */
 @Entity(tableName = "ideas")
@@ -21,5 +23,6 @@ data class IdeaEntity(
     val title: String,
     val notes: String = "",
     val isFavorite: Boolean = false,
+    val bpm: Double = 120.0,
     val createdAtEpochMs: Long = System.currentTimeMillis()
 )

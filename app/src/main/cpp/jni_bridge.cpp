@@ -215,4 +215,34 @@ Java_com_example_nightjar_audio_OboeAudioEngine_nativeGetInputLatencyMs(
     return static_cast<jlong>(sEngine->getInputLatencyMs());
 }
 
+// ── Synth API ────────────────────────────────────────────────────────────
+
+JNIEXPORT jboolean JNICALL
+Java_com_example_nightjar_audio_OboeAudioEngine_nativeLoadSoundFont(
+        JNIEnv* env, jobject /* thiz */, jstring path) {
+    if (!sEngine) return JNI_FALSE;
+    const char* cPath = env->GetStringUTFChars(path, nullptr);
+    bool ok = sEngine->loadSoundFont(cPath);
+    env->ReleaseStringUTFChars(path, cPath);
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_nightjar_audio_OboeAudioEngine_nativeSynthNoteOn(
+        JNIEnv* /* env */, jobject /* thiz */, jint channel, jint note, jint velocity) {
+    if (sEngine) sEngine->synthNoteOn(static_cast<int>(channel), static_cast<int>(note), static_cast<int>(velocity));
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_nightjar_audio_OboeAudioEngine_nativeSynthNoteOff(
+        JNIEnv* /* env */, jobject /* thiz */, jint channel, jint note) {
+    if (sEngine) sEngine->synthNoteOff(static_cast<int>(channel), static_cast<int>(note));
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_nightjar_audio_OboeAudioEngine_nativeSetSynthVolume(
+        JNIEnv* /* env */, jobject /* thiz */, jfloat volume) {
+    if (sEngine) sEngine->setSynthVolume(static_cast<float>(volume));
+}
+
 }  // extern "C"

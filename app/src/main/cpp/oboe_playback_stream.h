@@ -2,6 +2,7 @@
 
 #include "audio_engine.h"
 #include "track_mixer.h"
+#include "synth_engine.h"
 #include "atomic_transport.h"
 #include <oboe/Oboe.h>
 
@@ -20,7 +21,8 @@ namespace nightjar {
 class OboePlaybackStream : public oboe::AudioStreamDataCallback,
                            public oboe::AudioStreamErrorCallback {
 public:
-    OboePlaybackStream(TrackMixer& mixer, AtomicTransport& transport);
+    OboePlaybackStream(TrackMixer& mixer, AtomicTransport& transport,
+                       SynthEngine* synth = nullptr);
     ~OboePlaybackStream();
 
     /** Open and start the output stream. */
@@ -56,6 +58,7 @@ private:
 
     TrackMixer& mixer_;
     AtomicTransport& transport_;
+    SynthEngine* synth_;  // nullable, owned by AudioEngine
     std::shared_ptr<oboe::AudioStream> stream_;
 };
 
