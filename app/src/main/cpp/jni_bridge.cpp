@@ -245,4 +245,58 @@ Java_com_example_nightjar_audio_OboeAudioEngine_nativeSetSynthVolume(
     if (sEngine) sEngine->setSynthVolume(static_cast<float>(volume));
 }
 
+// ── Drum Sequencer API ───────────────────────────────────────────────────
+
+JNIEXPORT void JNICALL
+Java_com_example_nightjar_audio_OboeAudioEngine_nativeUpdateDrumPattern(
+        JNIEnv* env, jobject /* thiz */,
+        jint stepsPerBar, jint bars, jlong offsetMs,
+        jfloat volume, jboolean muted,
+        jintArray stepIndicesArr, jintArray drumNotesArr, jfloatArray velocitiesArr,
+        jlongArray clipOffsetsMsArr) {
+    if (!sEngine) return;
+
+    jint hitCount = env->GetArrayLength(stepIndicesArr);
+    jint* stepIndices = env->GetIntArrayElements(stepIndicesArr, nullptr);
+    jint* drumNotes = env->GetIntArrayElements(drumNotesArr, nullptr);
+    jfloat* velocities = env->GetFloatArrayElements(velocitiesArr, nullptr);
+
+    // Extract clip offsets
+    jint clipCount = env->GetArrayLength(clipOffsetsMsArr);
+    jlong* clipOffsetsMs = nullptr;
+    if (clipCount > 0) {
+        clipOffsetsMs = env->GetLongArrayElements(clipOffsetsMsArr, nullptr);
+    }
+
+    sEngine->updateDrumPattern(
+        static_cast<int>(stepsPerBar), static_cast<int>(bars),
+        static_cast<int64_t>(offsetMs),
+        static_cast<float>(volume), static_cast<bool>(muted),
+        static_cast<const int*>(stepIndices),
+        static_cast<const int*>(drumNotes),
+        static_cast<const float*>(velocities),
+        static_cast<int>(hitCount),
+        clipOffsetsMs != nullptr ? reinterpret_cast<const int64_t*>(clipOffsetsMs) : nullptr,
+        static_cast<int>(clipCount));
+
+    env->ReleaseIntArrayElements(stepIndicesArr, stepIndices, JNI_ABORT);
+    env->ReleaseIntArrayElements(drumNotesArr, drumNotes, JNI_ABORT);
+    env->ReleaseFloatArrayElements(velocitiesArr, velocities, JNI_ABORT);
+    if (clipOffsetsMs != nullptr) {
+        env->ReleaseLongArrayElements(clipOffsetsMsArr, clipOffsetsMs, JNI_ABORT);
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_nightjar_audio_OboeAudioEngine_nativeSetBpm(
+        JNIEnv* /* env */, jobject /* thiz */, jdouble bpm) {
+    if (sEngine) sEngine->setBpm(static_cast<double>(bpm));
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_nightjar_audio_OboeAudioEngine_nativeSetDrumSequencerEnabled(
+        JNIEnv* /* env */, jobject /* thiz */, jboolean enabled) {
+    if (sEngine) sEngine->setDrumSequencerEnabled(static_cast<bool>(enabled));
+}
+
 }  // extern "C"

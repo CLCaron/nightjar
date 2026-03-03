@@ -167,6 +167,31 @@ class OboeAudioEngine @Inject constructor() {
     fun setSynthVolume(volume: Float) =
         nativeSetSynthVolume(volume)
 
+    // ── Drum Sequencer ─────────────────────────────────────────────────────
+
+    /**
+     * Replace the drum pattern in the C++ step sequencer.
+     * Parallel arrays represent active steps: stepIndices[i], drumNotes[i], velocities[i].
+     * Optional clipOffsetsMs specifies timeline positions for multiple clip placements.
+     */
+    fun updateDrumPattern(
+        stepsPerBar: Int,
+        bars: Int,
+        offsetMs: Long,
+        volume: Float,
+        muted: Boolean,
+        stepIndices: IntArray,
+        drumNotes: IntArray,
+        velocities: FloatArray,
+        clipOffsetsMs: LongArray = LongArray(0)
+    ) = nativeUpdateDrumPattern(stepsPerBar, bars, offsetMs, volume, muted,
+        stepIndices, drumNotes, velocities, clipOffsetsMs)
+
+    fun setBpm(bpm: Double) = nativeSetBpm(bpm)
+
+    fun setDrumSequencerEnabled(enabled: Boolean) =
+        nativeSetDrumSequencerEnabled(enabled)
+
     // ── Hardware latency measurement ──────────────────────────────────────
 
     /**
@@ -232,6 +257,16 @@ class OboeAudioEngine @Inject constructor() {
     private external fun nativeSynthNoteOn(channel: Int, note: Int, velocity: Int)
     private external fun nativeSynthNoteOff(channel: Int, note: Int)
     private external fun nativeSetSynthVolume(volume: Float)
+
+    // Drum sequencer
+    private external fun nativeUpdateDrumPattern(
+        stepsPerBar: Int, bars: Int, offsetMs: Long,
+        volume: Float, muted: Boolean,
+        stepIndices: IntArray, drumNotes: IntArray, velocities: FloatArray,
+        clipOffsetsMs: LongArray
+    )
+    private external fun nativeSetBpm(bpm: Double)
+    private external fun nativeSetDrumSequencerEnabled(enabled: Boolean)
 
     // Hardware latency
     private external fun nativeGetOutputLatencyMs(): Long

@@ -36,6 +36,9 @@ struct AtomicTransport {
     /** Incremented by the audio callback each time the loop resets to loopStart. */
     std::atomic<int64_t> loopResetCount{0};
 
+    /** Project-level tempo in BPM. Read by the step sequencer on the render thread. */
+    std::atomic<double> bpm{120.0};
+
     /** Returns true if a loop region is active. */
     bool hasLoop() const {
         return loopStartFrames.load(std::memory_order_relaxed) >= 0 &&

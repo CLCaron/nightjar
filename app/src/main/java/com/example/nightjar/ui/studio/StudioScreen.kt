@@ -314,6 +314,8 @@ fun StudioScreen(
                     trackTakes = state.trackTakes,
                     expandedTakeTrackIds = state.expandedTakeTrackIds,
                     expandedTakeDrawerIds = state.expandedTakeDrawerIds,
+                    drumPatterns = state.drumPatterns,
+                    bpm = state.bpm,
                     getAudioFile = vm::getAudioFile,
                     onAction = vm::onAction
                 )

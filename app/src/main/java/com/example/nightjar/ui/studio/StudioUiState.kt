@@ -1,8 +1,26 @@
 package com.example.nightjar.ui.studio
 
 import com.example.nightjar.audio.AudioLatencyEstimator
+import com.example.nightjar.data.db.entity.DrumStepEntity
 import com.example.nightjar.data.db.entity.TakeEntity
 import com.example.nightjar.data.db.entity.TrackEntity
+
+/** Snapshot of a drum clip for UI rendering. */
+data class DrumClipUiState(
+    val clipId: Long,
+    val offsetMs: Long
+)
+
+/** Snapshot of a drum pattern for UI rendering, keyed by track ID. */
+data class DrumPatternUiState(
+    val patternId: Long = 0L,
+    val stepsPerBar: Int = 16,
+    val bars: Int = 1,
+    val steps: List<DrumStepEntity> = emptyList(),
+    val clips: List<DrumClipUiState> = emptyList()
+) {
+    val totalSteps: Int get() = stepsPerBar * bars
+}
 
 /** UI state for the Studio (multi-track workspace) screen. */
 data class StudioUiState(
@@ -41,7 +59,9 @@ data class StudioUiState(
     val renamingTakeCurrentName: String = "",
     val confirmingDeleteTakeId: Long? = null,
     val confirmingDeleteTakeTrackId: Long? = null,
-    val expandedTakeDrawerIds: Set<Long> = emptySet()
+    val expandedTakeDrawerIds: Set<Long> = emptySet(),
+    val bpm: Double = 120.0,
+    val drumPatterns: Map<Long, DrumPatternUiState> = emptyMap()
 ) {
     val hasLoopRegion: Boolean get() = loopStartMs != null && loopEndMs != null
 
@@ -83,7 +103,9 @@ data class StudioUiState(
                 renamingTakeCurrentName == other.renamingTakeCurrentName &&
                 confirmingDeleteTakeId == other.confirmingDeleteTakeId &&
                 confirmingDeleteTakeTrackId == other.confirmingDeleteTakeTrackId &&
-                expandedTakeDrawerIds == other.expandedTakeDrawerIds
+                expandedTakeDrawerIds == other.expandedTakeDrawerIds &&
+                bpm == other.bpm &&
+                drumPatterns == other.drumPatterns
     }
 
     override fun hashCode(): Int {
@@ -123,6 +145,8 @@ data class StudioUiState(
         result = 31 * result + (confirmingDeleteTakeId?.hashCode() ?: 0)
         result = 31 * result + (confirmingDeleteTakeTrackId?.hashCode() ?: 0)
         result = 31 * result + expandedTakeDrawerIds.hashCode()
+        result = 31 * result + bpm.hashCode()
+        result = 31 * result + drumPatterns.hashCode()
         return result
     }
 }
@@ -205,6 +229,20 @@ sealed interface StudioAction {
     data class RequestDeleteTake(val takeId: Long, val trackId: Long) : StudioAction
     data object DismissDeleteTake : StudioAction
     data object ExecuteDeleteTake : StudioAction
+
+    // Drum sequencer
+    data class ToggleDrumStep(
+        val trackId: Long,
+        val stepIndex: Int,
+        val drumNote: Int
+    ) : StudioAction
+    data class SetBpm(val bpm: Double) : StudioAction
+    data class SetPatternBars(val trackId: Long, val bars: Int) : StudioAction
+
+    // Drum clips
+    data class DuplicateClip(val trackId: Long, val clipId: Long) : StudioAction
+    data class MoveClip(val trackId: Long, val clipId: Long, val newOffsetMs: Long) : StudioAction
+    data class DeleteClip(val trackId: Long, val clipId: Long) : StudioAction
 }
 
 /** One-shot side effects emitted by [StudioViewModel]. */
@@ -216,5 +254,6 @@ sealed interface StudioEffect {
 
 /** Available track types for the "Add Track" bottom sheet. */
 enum class NewTrackType(val label: String, val description: String) {
-    AUDIO_RECORDING("Audio Recording", "Record with your microphone")
+    AUDIO_RECORDING("Audio Recording", "Record with your microphone"),
+    DRUM_SEQUENCER("Drum Sequencer", "Step-based drum pattern")
 }

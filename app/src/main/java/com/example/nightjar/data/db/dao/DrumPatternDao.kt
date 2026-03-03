@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
 import androidx.room.Transaction
+import com.example.nightjar.data.db.entity.DrumClipEntity
 import com.example.nightjar.data.db.entity.DrumPatternEntity
 import com.example.nightjar.data.db.entity.DrumStepEntity
 import kotlinx.coroutines.flow.Flow
@@ -70,4 +71,27 @@ interface DrumPatternDao {
             return true
         }
     }
+
+    // -- Clip CRUD --
+
+    @Insert
+    suspend fun insertClip(clip: DrumClipEntity): Long
+
+    @Query("SELECT * FROM drum_clips WHERE patternId = :patternId ORDER BY sortIndex, offsetMs")
+    suspend fun getClipsForPattern(patternId: Long): List<DrumClipEntity>
+
+    @Query("SELECT * FROM drum_clips WHERE patternId = :patternId ORDER BY sortIndex, offsetMs")
+    fun observeClipsForPattern(patternId: Long): Flow<List<DrumClipEntity>>
+
+    @Query("SELECT * FROM drum_clips WHERE id = :clipId")
+    suspend fun getClipById(clipId: Long): DrumClipEntity?
+
+    @Query("UPDATE drum_clips SET offsetMs = :offsetMs WHERE id = :clipId")
+    suspend fun updateClipOffset(clipId: Long, offsetMs: Long)
+
+    @Query("DELETE FROM drum_clips WHERE id = :clipId")
+    suspend fun deleteClip(clipId: Long)
+
+    @Query("SELECT MAX(sortIndex) FROM drum_clips WHERE patternId = :patternId")
+    suspend fun getMaxClipSortIndex(patternId: Long): Int?
 }

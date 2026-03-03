@@ -5,8 +5,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.nightjar.audio.AudioLatencyEstimator
 import com.example.nightjar.audio.OboeAudioEngine
+import com.example.nightjar.audio.SoundFontManager
 import com.example.nightjar.audio.WavSplitter
 import com.example.nightjar.data.db.entity.TakeEntity
+import com.example.nightjar.data.repository.DrumRepository
 import com.example.nightjar.data.repository.StudioRepository
 import com.example.nightjar.data.repository.IdeaRepository
 import com.example.nightjar.data.storage.RecordingStorage
@@ -51,9 +53,11 @@ import javax.inject.Inject
 class StudioViewModel @Inject constructor(
     private val ideaRepo: IdeaRepository,
     private val studioRepo: StudioRepository,
+    private val drumRepo: DrumRepository,
     private val audioEngine: OboeAudioEngine,
     private val recordingStorage: RecordingStorage,
-    private val latencyEstimator: AudioLatencyEstimator
+    private val latencyEstimator: AudioLatencyEstimator,
+    private val soundFontManager: SoundFontManager
 ) : ViewModel() {
 
     private var currentIdeaId: Long? = null
@@ -85,6 +89,10 @@ class StudioViewModel @Inject constructor(
     private var loopResetTimestampsMs: MutableList<Long> = mutableListOf()
     private var lastLoopResetCount: Long = 0L
     private var isLoopRecording: Boolean = false
+    // SoundFont loading (one-time)
+    private var soundFontLoaded: Boolean = false
+    // Active drum pattern observation jobs per track
+    private val drumPatternJobs: MutableMap<Long, Job> = mutableMapOf()
     // Track ID that was armed when recording started (for saving takes)
     private var recordingArmedTrackId: Long? = null
     // Whether this is a first-track-creation recording (no armed track)
@@ -151,6 +159,7 @@ class StudioViewModel @Inject constructor(
                             _effects.emit(StudioEffect.RequestMicPermission)
                         }
                     }
+                    NewTrackType.DRUM_SEQUENCER -> addDrumTrack()
                 }
             }
             StudioAction.MicPermissionGranted -> startRecordingAfterPermission()
@@ -303,6 +312,18 @@ class StudioViewModel @Inject constructor(
                 }
             }
             StudioAction.ExecuteDeleteTake -> executeDeleteTake()
+
+            // Drum sequencer
+            is StudioAction.ToggleDrumStep -> toggleDrumStep(
+                action.trackId, action.stepIndex, action.drumNote
+            )
+            is StudioAction.SetBpm -> setBpm(action.bpm)
+            is StudioAction.SetPatternBars -> setPatternBars(action.trackId, action.bars)
+
+            // Drum clips
+            is StudioAction.DuplicateClip -> duplicateClip(action.trackId, action.clipId)
+            is StudioAction.MoveClip -> moveClip(action.trackId, action.clipId, action.newOffsetMs)
+            is StudioAction.DeleteClip -> deleteClip(action.trackId, action.clipId)
         }
     }
 
@@ -327,11 +348,18 @@ class StudioViewModel @Inject constructor(
                         ideaTitle = idea.title,
                         tracks = tracks,
                         isLoading = false,
-                        errorMessage = null
+                        errorMessage = null,
+                        bpm = idea.bpm
                     )
                 }
 
+                // Set project BPM in the native engine
+                audioEngine.setBpm(idea.bpm)
+
                 loadTracksIntoEngine(tracks)
+
+                // Load drum patterns for any drum tracks
+                loadDrumPatterns(tracks)
             } catch (e: Exception) {
                 val msg = e.message ?: "Failed to load project."
                 _state.update { it.copy(isLoading = false, errorMessage = msg) }
@@ -394,6 +422,10 @@ class StudioViewModel @Inject constructor(
     // ── Arm ────────────────────────────────────────────────────────────────
 
     private fun toggleArm(trackId: Long) {
+        // Only audio tracks can be armed
+        val track = _state.value.tracks.find { it.id == trackId } ?: return
+        if (!track.isAudio) return
+
         viewModelScope.launch {
             val currentArmed = _state.value.armedTrackId
             if (currentArmed == trackId) {
@@ -988,14 +1020,39 @@ class StudioViewModel @Inject constructor(
         for (track in st.tracks) {
             val effectivelyMuted = track.isMuted ||
                 (anySoloed && track.id !in st.soloedTrackIds)
-            audioEngine.setTrackMuted(track.id.toInt(), effectivelyMuted)
+            if (track.isAudio) {
+                audioEngine.setTrackMuted(track.id.toInt(), effectivelyMuted)
+            } else if (track.isDrum) {
+                // Re-push pattern with updated mute state
+                val pattern = st.drumPatterns[track.id] ?: continue
+                pushDrumPatternToEngine(
+                    track.copy(isMuted = effectivelyMuted),
+                    pattern.stepsPerBar,
+                    pattern.bars,
+                    pattern.steps,
+                    pattern.clips.map { it.offsetMs }
+                )
+            }
         }
     }
 
     private fun setTrackVolume(trackId: Long, volume: Float) {
         val clamped = volume.coerceIn(0f, 1f)
-        // Update native engine immediately for instant feedback
-        audioEngine.setTrackVolume(trackId.toInt(), clamped)
+        val track = _state.value.tracks.find { it.id == trackId }
+        if (track != null && track.isDrum) {
+            // Re-push pattern with updated volume
+            val pattern = _state.value.drumPatterns[trackId]
+            if (pattern != null) {
+                pushDrumPatternToEngine(
+                    track.copy(volume = clamped),
+                    pattern.stepsPerBar, pattern.bars, pattern.steps,
+                    pattern.clips.map { it.offsetMs }
+                )
+            }
+        } else {
+            // Update native engine immediately for instant feedback
+            audioEngine.setTrackVolume(trackId.toInt(), clamped)
+        }
         viewModelScope.launch {
             try {
                 studioRepo.setTrackVolume(trackId, clamped)
@@ -1017,9 +1074,14 @@ class StudioViewModel @Inject constructor(
                 soloedTrackIds = it.soloedTrackIds - trackId,
                 armedTrackId = if (it.armedTrackId == trackId) null else it.armedTrackId,
                 trackTakes = it.trackTakes - trackId,
-                expandedTakeTrackIds = it.expandedTakeTrackIds - trackId
+                expandedTakeTrackIds = it.expandedTakeTrackIds - trackId,
+                drumPatterns = it.drumPatterns - trackId
             )
         }
+
+        // Clean up drum observation if this is a drum track
+        drumPatternJobs[trackId]?.cancel()
+        drumPatternJobs.remove(trackId)
 
         viewModelScope.launch {
             try {
@@ -1027,6 +1089,12 @@ class StudioViewModel @Inject constructor(
                 studioRepo.deleteTrackAndAudio(trackId)
                 reloadAndPrepare()
                 reapplyEffectiveMute()
+
+                // Disable sequencer if no drum tracks remain
+                val hasDrumTracks = _state.value.tracks.any { it.isDrum }
+                if (!hasDrumTracks) {
+                    audioEngine.setDrumSequencerEnabled(false)
+                }
             } catch (e: Exception) {
                 _effects.emit(
                     StudioEffect.ShowError(e.message ?: "Failed to delete track.")
@@ -1086,6 +1154,268 @@ class StudioViewModel @Inject constructor(
         }
     }
 
+    // ── Drum sequencer ─────────────────────────────────────────────────
+
+    /** Load SoundFont if not already loaded. Returns true on success. */
+    private suspend fun ensureSoundFontLoaded(): Boolean {
+        if (soundFontLoaded) return true
+        val path = soundFontManager.getSoundFontPath()
+        if (path == null) {
+            _effects.emit(StudioEffect.ShowError("Failed to load SoundFont."))
+            return false
+        }
+        val ok = audioEngine.loadSoundFont(path)
+        if (!ok) {
+            _effects.emit(StudioEffect.ShowError("Failed to initialize synth."))
+            return false
+        }
+        soundFontLoaded = true
+        Log.d(TAG, "SoundFont loaded successfully")
+        return true
+    }
+
+    /** Create a new drum track, initialize its pattern, and observe it. */
+    private fun addDrumTrack() {
+        val ideaId = currentIdeaId ?: return
+        viewModelScope.launch {
+            try {
+                if (!ensureSoundFontLoaded()) return@launch
+
+                val trackId = studioRepo.addDrumTrack(ideaId)
+                val pattern = drumRepo.ensurePatternExists(trackId)
+                val clips = drumRepo.ensureClipsExist(pattern.id)
+                val clipUiStates = clips.map { DrumClipUiState(clipId = it.id, offsetMs = it.offsetMs) }
+
+                _state.update {
+                    it.copy(
+                        drumPatterns = it.drumPatterns + (trackId to DrumPatternUiState(
+                            patternId = pattern.id,
+                            stepsPerBar = pattern.stepsPerBar,
+                            bars = pattern.bars,
+                            clips = clipUiStates
+                        ))
+                    )
+                }
+
+                audioEngine.setDrumSequencerEnabled(true)
+                observeDrumPattern(trackId, pattern.id)
+                reloadAndPrepare()
+            } catch (e: Exception) {
+                _effects.emit(
+                    StudioEffect.ShowError(e.message ?: "Failed to add drum track.")
+                )
+            }
+        }
+    }
+
+    /**
+     * Load drum patterns for all drum tracks. Called once during [load].
+     * Starts Flow observation for each pattern so step changes push to the engine.
+     */
+    private suspend fun loadDrumPatterns(
+        tracks: List<com.example.nightjar.data.db.entity.TrackEntity>
+    ) {
+        val drumTracks = tracks.filter { it.isDrum }
+        if (drumTracks.isEmpty()) return
+
+        if (!ensureSoundFontLoaded()) return
+
+        val patterns = mutableMapOf<Long, DrumPatternUiState>()
+        for (track in drumTracks) {
+            val pattern = drumRepo.ensurePatternExists(track.id)
+            val steps = drumRepo.getSteps(pattern.id)
+            val clips = drumRepo.ensureClipsExist(pattern.id)
+            val clipUiStates = clips.map { DrumClipUiState(clipId = it.id, offsetMs = it.offsetMs) }
+            val clipOffsetsMs = clipUiStates.map { it.offsetMs }
+
+            patterns[track.id] = DrumPatternUiState(
+                patternId = pattern.id,
+                stepsPerBar = pattern.stepsPerBar,
+                bars = pattern.bars,
+                steps = steps,
+                clips = clipUiStates
+            )
+            pushDrumPatternToEngine(track, pattern.stepsPerBar, pattern.bars, steps, clipOffsetsMs)
+            observeDrumPattern(track.id, pattern.id)
+        }
+
+        _state.update { it.copy(drumPatterns = it.drumPatterns + patterns) }
+        audioEngine.setDrumSequencerEnabled(true)
+    }
+
+    /** Start observing a drum pattern's steps via Flow. */
+    private fun observeDrumPattern(trackId: Long, patternId: Long) {
+        drumPatternJobs[trackId]?.cancel()
+        drumPatternJobs[trackId] = viewModelScope.launch {
+            drumRepo.observeSteps(patternId).collect { steps ->
+                val pattern = _state.value.drumPatterns[trackId] ?: return@collect
+                _state.update {
+                    it.copy(
+                        drumPatterns = it.drumPatterns + (trackId to pattern.copy(steps = steps))
+                    )
+                }
+                val track = _state.value.tracks.find { it.id == trackId } ?: return@collect
+                val clipOffsetsMs = pattern.clips.map { it.offsetMs }
+                pushDrumPatternToEngine(track, pattern.stepsPerBar, pattern.bars, steps, clipOffsetsMs)
+            }
+        }
+    }
+
+    /** Push drum pattern data to the C++ step sequencer. */
+    private fun pushDrumPatternToEngine(
+        track: com.example.nightjar.data.db.entity.TrackEntity,
+        stepsPerBar: Int,
+        bars: Int,
+        steps: List<com.example.nightjar.data.db.entity.DrumStepEntity>,
+        clipOffsetsMs: List<Long> = emptyList()
+    ) {
+        val stepIndices: IntArray
+        val drumNotes: IntArray
+        val velocities: FloatArray
+
+        if (steps.isEmpty()) {
+            stepIndices = IntArray(0)
+            drumNotes = IntArray(0)
+            velocities = FloatArray(0)
+        } else {
+            stepIndices = IntArray(steps.size)
+            drumNotes = IntArray(steps.size)
+            velocities = FloatArray(steps.size)
+            for (i in steps.indices) {
+                stepIndices[i] = steps[i].stepIndex
+                drumNotes[i] = steps[i].drumNote
+                velocities[i] = steps[i].velocity
+            }
+        }
+
+        audioEngine.updateDrumPattern(
+            stepsPerBar = stepsPerBar,
+            bars = bars,
+            offsetMs = track.offsetMs,
+            volume = track.volume,
+            muted = track.isMuted,
+            stepIndices = stepIndices,
+            drumNotes = drumNotes,
+            velocities = velocities,
+            clipOffsetsMs = if (clipOffsetsMs.isNotEmpty()) {
+                clipOffsetsMs.toLongArray()
+            } else {
+                LongArray(0)
+            }
+        )
+    }
+
+    /** Toggle a step in a drum pattern. The Flow observer handles the UI update. */
+    private fun toggleDrumStep(trackId: Long, stepIndex: Int, drumNote: Int) {
+        val patternState = _state.value.drumPatterns[trackId] ?: return
+        viewModelScope.launch {
+            try {
+                drumRepo.toggleStep(patternState.patternId, stepIndex, drumNote)
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to toggle step."))
+            }
+        }
+    }
+
+    /** Update project BPM on the idea and in the native engine. */
+    private fun setBpm(bpm: Double) {
+        val clamped = bpm.coerceIn(30.0, 300.0)
+        _state.update { it.copy(bpm = clamped) }
+        audioEngine.setBpm(clamped)
+        val ideaId = currentIdeaId ?: return
+        viewModelScope.launch {
+            try {
+                ideaRepo.updateBpm(ideaId, clamped)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to persist BPM: ${e.message}")
+            }
+        }
+    }
+
+    /** Change the number of bars for a drum pattern. */
+    private fun setPatternBars(trackId: Long, bars: Int) {
+        val clamped = bars.coerceIn(1, 8)
+        val patternState = _state.value.drumPatterns[trackId] ?: return
+        viewModelScope.launch {
+            try {
+                drumRepo.updatePatternGrid(patternState.patternId, patternState.stepsPerBar, clamped)
+                // Update local state immediately
+                _state.update {
+                    it.copy(
+                        drumPatterns = it.drumPatterns + (trackId to patternState.copy(bars = clamped))
+                    )
+                }
+                // Re-push to engine with new bar count
+                val track = _state.value.tracks.find { it.id == trackId } ?: return@launch
+                val updatedPattern = _state.value.drumPatterns[trackId]
+                val steps = updatedPattern?.steps ?: emptyList()
+                val clipOffsetsMs = updatedPattern?.clips?.map { it.offsetMs } ?: emptyList()
+                pushDrumPatternToEngine(track, patternState.stepsPerBar, clamped, steps, clipOffsetsMs)
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to update bar count."))
+            }
+        }
+    }
+
+    // ── Drum clips ──────────────────────────────────────────────────────
+
+    private fun duplicateClip(trackId: Long, clipId: Long) {
+        viewModelScope.launch {
+            try {
+                val patternState = _state.value.drumPatterns[trackId]
+                // Compute pattern duration: bars * 4 beats * (60_000 / bpm)
+                val bpm = _state.value.bpm
+                val bars = patternState?.bars ?: 1
+                val patternDurationMs = ((bars * 4.0 * 60_000.0) / bpm).toLong()
+                drumRepo.duplicateClip(clipId, patternDurationMs)
+                reloadClipsForTrack(trackId)
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to duplicate clip."))
+            }
+        }
+    }
+
+    private fun moveClip(trackId: Long, clipId: Long, newOffsetMs: Long) {
+        viewModelScope.launch {
+            try {
+                drumRepo.moveClip(clipId, newOffsetMs.coerceAtLeast(0L))
+                reloadClipsForTrack(trackId)
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to move clip."))
+            }
+        }
+    }
+
+    private fun deleteClip(trackId: Long, clipId: Long) {
+        viewModelScope.launch {
+            try {
+                drumRepo.deleteClip(clipId)
+                reloadClipsForTrack(trackId)
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to delete clip."))
+            }
+        }
+    }
+
+    /** Reload clips for a drum track and re-push pattern to engine. */
+    private suspend fun reloadClipsForTrack(trackId: Long) {
+        val patternState = _state.value.drumPatterns[trackId] ?: return
+        val clips = drumRepo.getClips(patternState.patternId)
+        val clipUiStates = clips.map { DrumClipUiState(clipId = it.id, offsetMs = it.offsetMs) }
+
+        _state.update {
+            it.copy(
+                drumPatterns = it.drumPatterns + (trackId to patternState.copy(clips = clipUiStates))
+            )
+        }
+
+        // Re-push to engine with updated clip offsets
+        val track = _state.value.tracks.find { it.id == trackId } ?: return
+        val steps = patternState.steps
+        pushDrumPatternToEngine(track, patternState.stepsPerBar, patternState.bars, steps,
+            clipUiStates.map { it.offsetMs })
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────
 
     /** Reload tracks from DB and re-prepare the native engine. */
@@ -1129,9 +1459,12 @@ class StudioViewModel @Inject constructor(
         super.onCleared()
         tickJob?.cancel()
         recordingTickJob?.cancel()
+        drumPatternJobs.values.forEach { it.cancel() }
+        drumPatternJobs.clear()
         if (audioEngine.isRecordingActive()) {
             audioEngine.stopRecording()
         }
+        audioEngine.setDrumSequencerEnabled(false)
         audioEngine.removeAllTracks()
     }
 }

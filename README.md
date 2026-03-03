@@ -37,7 +37,8 @@ A lightweight multi-track workspace. Not a replacement for professional tools, b
 - **Loop playback** -- drag on the ruler to define a loop region, with draggable handles
 - **Drag to reposition** -- long-press a track and slide it along the timeline
 - **Non-destructive trim** -- drag handles on track edges
-- **Per-track controls** -- volume knob, arm (R), solo (S), mute (M), takes (T), rename, delete via inline track drawer. Responsive layout adapts to narrow screens (e.g. Galaxy Fold cover display).
+- **Drum sequencer** -- step-based drum patterns powered by FluidSynth (SoundFont synthesis). Tap cells in the pattern editor grid to place hits across 10 GM drum instruments. Adjust bar count (1-8), set project BPM. Patterns play as one-shot clips on the timeline -- duplicate, move, and delete clips to arrange. Mini-grid visualization on the timeline with per-instrument colored dots.
+- **Per-track controls** -- volume knob, arm (R), solo (S), mute (M), takes (T), rename, delete via inline track drawer. Drum tracks get a specialized drawer with pattern editor, bar count controls, and BPM display. Responsive layout adapts to narrow screens (e.g. Galaxy Fold cover display).
 - **Hardware-style controls** -- beveled toggle buttons with LED glow, rotary knob with haptic detents, consistent across all screens
 
 ---
@@ -75,12 +76,12 @@ Nightjar is in active development, working toward a v1.0 Play Store release.
 - Loop playback with ruler-based region selection and toggle controls
 - Record button in the Studio button panel (alongside Loop and Play/Pause)
 - Inline track drawer with hardware-style controls (arm, solo, mute, takes, volume knob, rename, delete)
+- Drum step sequencer with FluidSynth synthesis, pattern editor, clip-based timeline arrangement, and per-track BPM
 - Take mini-drawer with rename and delete (long-press take header to open)
 - Library with tag filtering and sort options
 - Overview with playback, waveform visualization, auto-saving notes, tags, sharing, and delete
 
 **What's next:**
-- Drum step sequencer (C++ engine, pattern editor UI, timeline integration)
 - Track reorder, track labels
 - Library long-press menu
 - Contextual gesture hints for discoverability

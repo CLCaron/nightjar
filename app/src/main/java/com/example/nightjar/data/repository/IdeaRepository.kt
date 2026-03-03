@@ -90,6 +90,9 @@ class IdeaRepository(
     suspend fun updateFavorite(id: Long, isFavorite: Boolean) =
         ideaDao.updateFavorite(id, isFavorite)
 
+    suspend fun updateBpm(id: Long, bpm: Double) =
+        ideaDao.updateBpm(id, bpm)
+
     suspend fun addTagToIdea(ideaId: Long, rawName: String) {
         val name = rawName.trim()
         if (name.isBlank()) return

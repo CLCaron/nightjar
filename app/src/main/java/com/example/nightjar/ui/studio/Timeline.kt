@@ -55,6 +55,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -124,6 +125,8 @@ fun TimelinePanel(
     trackTakes: Map<Long, List<TakeEntity>>,
     expandedTakeTrackIds: Set<Long>,
     expandedTakeDrawerIds: Set<Long>,
+    drumPatterns: Map<Long, DrumPatternUiState> = emptyMap(),
+    bpm: Double = 120.0,
     getAudioFile: (String) -> File,
     onAction: (StudioAction) -> Unit,
     modifier: Modifier = Modifier
@@ -247,18 +250,33 @@ fun TimelinePanel(
                         .horizontalScroll(scrollState)
                 ) {
                     Box(Modifier.width(timelineWidthDp)) {
-                        TimelineTrackLane(
-                            track = track,
-                            trackColor = trackColor,
-                            msPerDp = msPerDp,
-                            timelineWidth = timelineWidthDp,
-                            laneHeight = TRACK_LANE_HEIGHT,
-                            dragState = dragState,
-                            trimState = trimState,
-                            effectivelyMuted = effectivelyMuted,
-                            getAudioFile = getAudioFile,
-                            onAction = onAction
-                        )
+                        if (track.isDrum) {
+                            val drumPattern = drumPatterns[track.id]
+                            DrumTrackLane(
+                                track = track,
+                                trackColor = trackColor,
+                                msPerDp = msPerDp,
+                                bpm = bpm,
+                                pattern = drumPattern,
+                                timelineWidth = timelineWidthDp,
+                                laneHeight = TRACK_LANE_HEIGHT,
+                                effectivelyMuted = effectivelyMuted,
+                                onAction = onAction
+                            )
+                        } else {
+                            TimelineTrackLane(
+                                track = track,
+                                trackColor = trackColor,
+                                msPerDp = msPerDp,
+                                timelineWidth = timelineWidthDp,
+                                laneHeight = TRACK_LANE_HEIGHT,
+                                dragState = dragState,
+                                trimState = trimState,
+                                effectivelyMuted = effectivelyMuted,
+                                getAudioFile = getAudioFile,
+                                onAction = onAction
+                            )
+                        }
 
                         if (loopStartMs != null && loopEndMs != null) {
                             LoopOverlaySegment(
@@ -286,14 +304,25 @@ fun TimelinePanel(
                 enter = drawerEnter,
                 exit = drawerExit
             ) {
-                TrackDrawerPanel(
-                    track = track,
-                    isSoloed = isSoloed,
-                    isArmed = isArmed,
-                    hasTakes = takes.isNotEmpty(),
-                    takesExpanded = takesExpanded,
-                    onAction = onAction
-                )
+                if (track.isDrum) {
+                    val drumPattern = drumPatterns[track.id]
+                    DrumTrackDrawer(
+                        track = track,
+                        isSoloed = isSoloed,
+                        pattern = drumPattern,
+                        bpm = bpm,
+                        onAction = onAction
+                    )
+                } else {
+                    TrackDrawerPanel(
+                        track = track,
+                        isSoloed = isSoloed,
+                        isArmed = isArmed,
+                        hasTakes = takes.isNotEmpty(),
+                        takesExpanded = takesExpanded,
+                        onAction = onAction
+                    )
+                }
             }
 
             // Take rows slot
@@ -644,6 +673,127 @@ private fun TimelineTrackLane(
         }
     }
     } // CompositionLocalProvider
+}
+
+/**
+ * Compact drum track lane in the timeline. Shows colored clip blocks with
+ * small step indicators. Each clip is a separate block positioned at its
+ * offset. Width is computed from pattern length and BPM.
+ */
+@Composable
+private fun DrumTrackLane(
+    track: TrackEntity,
+    trackColor: Color,
+    msPerDp: Float,
+    bpm: Double,
+    pattern: DrumPatternUiState?,
+    timelineWidth: Dp,
+    laneHeight: Dp,
+    effectivelyMuted: Boolean,
+    onAction: (StudioAction) -> Unit = {}
+) {
+    val stepsPerBar = pattern?.stepsPerBar ?: 16
+    val bars = pattern?.bars ?: 1
+    val totalSteps = stepsPerBar * bars
+
+    // Compute pattern duration in ms from BPM
+    // 1 bar = 4 beats, duration = (bars * 4 * 60_000) / bpm
+    val patternDurationMs = ((bars * 4.0 * 60_000.0) / bpm).toLong()
+    val widthDp = (patternDurationMs / msPerDp).dp.coerceAtLeast(40.dp)
+
+    val bgAlpha = if (effectivelyMuted) 0.25f else 0.5f
+    val stepColor = if (effectivelyMuted) {
+        trackColor.copy(alpha = 0.15f)
+    } else {
+        trackColor.copy(alpha = 0.6f)
+    }
+
+    val steps = pattern?.steps ?: emptyList()
+
+    // Build a map: stepIndex -> list of rowIndex for per-instrument rendering
+    val noteToRowIndex = remember {
+        GM_DRUM_ROWS.withIndex().associate { (idx, row) -> row.note to idx }
+    }
+    val stepHits = remember(steps) {
+        val map = mutableMapOf<Int, MutableList<Int>>()
+        steps.forEach { step ->
+            val rowIdx = noteToRowIndex[step.drumNote] ?: return@forEach
+            map.getOrPut(step.stepIndex) { mutableListOf() }.add(rowIdx)
+        }
+        map
+    }
+
+    // Use clips if available, otherwise fall back to single clip at track offset
+    val clips = pattern?.clips ?: emptyList()
+    val clipOffsets = if (clips.isNotEmpty()) {
+        clips
+    } else {
+        listOf(DrumClipUiState(clipId = -1, offsetMs = track.offsetMs))
+    }
+
+    Box(
+        modifier = Modifier
+            .width(timelineWidth)
+            .height(laneHeight)
+    ) {
+        clipOffsets.forEach { clip ->
+            val offsetDp = (clip.offsetMs / msPerDp).dp
+
+            Box(
+                modifier = Modifier
+                    .offset(x = offsetDp)
+                    .width(widthDp)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(NjStudioLane.copy(alpha = bgAlpha))
+                    .padding(vertical = 4.dp, horizontal = 4.dp)
+            ) {
+                // Mini step grid -- per-instrument colored dots
+                Canvas(modifier = Modifier.matchParentSize()) {
+                    val canvasW = size.width
+                    val canvasH = size.height
+                    val numRows = GM_DRUM_ROWS.size
+                    val stepW = canvasW / totalSteps.coerceAtLeast(1)
+                    val rowH = canvasH / numRows
+                    val dotRadius = minOf(rowH, stepW) * 0.35f
+
+                    // Draw active hits as colored dots
+                    for ((stepIdx, rowIndices) in stepHits) {
+                        if (stepIdx >= totalSteps) continue
+                        val cx = stepIdx * stepW + stepW / 2f
+                        rowIndices.forEach { rowIdx ->
+                            val cy = rowIdx * rowH + rowH / 2f
+                            val dotColor = if (effectivelyMuted) {
+                                DRUM_ROW_COLORS[rowIdx].copy(alpha = 0.3f)
+                            } else {
+                                DRUM_ROW_COLORS[rowIdx].copy(alpha = 0.9f)
+                            }
+                            drawCircle(
+                                color = dotColor,
+                                radius = dotRadius,
+                                center = Offset(cx, cy)
+                            )
+                        }
+                    }
+
+                    // Beat dividers (every 4 steps)
+                    for (s in 0..totalSteps step 4) {
+                        if (s == 0) continue
+                        val x = s * stepW
+                        val isBar = s % stepsPerBar == 0
+                        drawLine(
+                            color = NjStudioWaveform.copy(
+                                alpha = if (isBar) 0.3f else 0.12f
+                            ),
+                            start = Offset(x, 0f),
+                            end = Offset(x, canvasH),
+                            strokeWidth = if (isBar) 1.dp.toPx() else 0.5.dp.toPx()
+                        )
+                    }
+                }
+            }
+        }
+    }
 }
 
 /** Visual trim-handle indicator on the left or right edge of a track. */

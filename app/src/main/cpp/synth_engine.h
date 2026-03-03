@@ -1,12 +1,15 @@
 #pragma once
 
-#include "audio_engine.h"
+#include "common.h"
 #include "spsc_ring_buffer.h"
+#include "step_sequencer.h"
 #include <atomic>
 #include <thread>
 #include <string>
 
 namespace nightjar {
+
+struct AtomicTransport;
 
 // Synth ring buffer: 16384 float samples = 8192 stereo frames = ~186ms at 44.1kHz.
 // Large enough to absorb render-thread scheduling jitter, small enough for
@@ -18,7 +21,7 @@ static constexpr size_t kSynthRingBufferCapacity = 16384;
 static constexpr int32_t kSynthRenderChunkFrames = 256;
 
 /**
- * FluidSynth wrapper with a dedicated render thread.
+ * FluidSynth wrapper with a dedicated render thread and integrated step sequencer.
  *
  * fluid_synth_write_float() is NOT real-time safe (may allocate internally),
  * so we render on a background thread and feed audio to the Oboe callback
@@ -26,13 +29,18 @@ static constexpr int32_t kSynthRenderChunkFrames = 256;
  * pipeline (OboeRecordingStream), but in the opposite direction:
  *   render thread -> SPSC ring buffer -> audio callback
  *
+ * The step sequencer runs inside the render thread loop. Between render chunks,
+ * it checks for step boundaries and fires MIDI noteOn events into FluidSynth.
+ * This ensures note events are rendered at the correct position in the audio
+ * stream, not delayed by the ring buffer.
+ *
  * MIDI events (noteOn/noteOff) go directly to FluidSynth, which is
  * internally thread-safe (uses its own mutex). These calls are fine from
  * any thread since they never touch the audio callback.
  */
 class SynthEngine {
 public:
-    SynthEngine();
+    explicit SynthEngine(AtomicTransport& transport);
     ~SynthEngine();
 
     // Non-copyable, non-movable
@@ -76,8 +84,24 @@ public:
     bool isRunning() const { return running_.load(std::memory_order_acquire); }
     bool isSoundFontLoaded() const { return soundFontLoaded_.load(std::memory_order_acquire); }
 
+    // ── Step sequencer control ──────────────────────────────────────────
+
+    /** Replace the drum pattern. Called from UI thread via JNI. */
+    void updateDrumPattern(int stepsPerBar, int bars, int64_t offsetFrames,
+                           float volume, bool muted,
+                           const std::vector<DrumHit>& hits,
+                           const std::vector<int64_t>& clipOffsetFrames = {});
+
+    /** Enable/disable the step sequencer. */
+    void setSequencerEnabled(bool enabled);
+
+    /** Get max end frame from the step sequencer for timeline length. */
+    int64_t getSequencerMaxEndFrame(double bpm) const;
+
 private:
     void renderThreadFunc();
+
+    AtomicTransport& transport_;
 
     void* settings_ = nullptr;   // fluid_settings_t* (avoid header dependency)
     void* synth_ = nullptr;      // fluid_synth_t*
@@ -90,6 +114,12 @@ private:
     std::atomic<bool> soundFontLoaded_{false};
     std::atomic<float> volume_{1.0f};
     std::atomic<bool> flushRequested_{false};
+
+    // Step sequencer
+    StepSequencer sequencer_;
+    std::atomic<bool> sequencerEnabled_{false};
+    int64_t renderPos_ = 0;       // render thread's timeline position
+    bool wasPlaying_ = false;     // for detecting play/pause transitions
 };
 
 }  // namespace nightjar

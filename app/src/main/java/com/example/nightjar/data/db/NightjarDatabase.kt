@@ -9,6 +9,7 @@ import com.example.nightjar.data.db.dao.IdeaDao
 import com.example.nightjar.data.db.dao.TagDao
 import com.example.nightjar.data.db.dao.TakeDao
 import com.example.nightjar.data.db.dao.TrackDao
+import com.example.nightjar.data.db.entity.DrumClipEntity
 import com.example.nightjar.data.db.entity.DrumPatternEntity
 import com.example.nightjar.data.db.entity.DrumStepEntity
 import com.example.nightjar.data.db.entity.IdeaEntity
@@ -27,14 +28,16 @@ import com.example.nightjar.data.db.entity.TrackEntity
  * - **v5** — Added `takes` table for per-track multi-take support.
  * - **v6** — Added `bpm` to ideas, `trackType` + nullable `audioFileName` to tracks,
  *            `drum_patterns` and `drum_steps` tables for drum sequencer support.
+ * - **v7** — Added `drum_clips` table for timeline clip placements of drum patterns.
  */
 @Database(
     entities = [
         IdeaEntity::class, TagEntity::class, IdeaTagCrossRef::class,
         TrackEntity::class, TakeEntity::class,
-        DrumPatternEntity::class, DrumStepEntity::class
+        DrumPatternEntity::class, DrumStepEntity::class,
+        DrumClipEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 abstract class NightjarDatabase : RoomDatabase() {
@@ -248,6 +251,31 @@ abstract class NightjarDatabase : RoomDatabase() {
             }
         }
 
+        /** v6 -> v7: Add drum_clips table for timeline clip placements. */
+        private val MIGRATION_6_7 = object : androidx.room.migration.Migration(6, 7) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS drum_clips (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        patternId INTEGER NOT NULL,
+                        offsetMs INTEGER NOT NULL DEFAULT 0,
+                        sortIndex INTEGER NOT NULL DEFAULT 0,
+                        FOREIGN KEY(patternId) REFERENCES drum_patterns(id) ON DELETE CASCADE
+                    )
+                """.trimIndent())
+
+                db.execSQL("""
+                    CREATE INDEX IF NOT EXISTS index_drum_clips_patternId ON drum_clips(patternId)
+                """.trimIndent())
+
+                // Auto-create a default clip at offset 0 for every existing pattern
+                db.execSQL("""
+                    INSERT INTO drum_clips (patternId, offsetMs, sortIndex)
+                    SELECT id, 0, 0 FROM drum_patterns
+                """.trimIndent())
+            }
+        }
+
         fun getInstance(context: Context): NightjarDatabase {
             return INSTANCE ?: synchronized(this) {
                 val db = Room.databaseBuilder(
@@ -256,7 +284,7 @@ abstract class NightjarDatabase : RoomDatabase() {
                     "nightjar.db"
                 ).addMigrations(
                     MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4,
-                    MIGRATION_4_5, MIGRATION_5_6
+                    MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7
                 ).build()
                 INSTANCE = db
                 db

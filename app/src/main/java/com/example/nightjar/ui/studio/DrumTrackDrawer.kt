@@ -1,0 +1,185 @@
+package com.example.nightjar.ui.studio
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.unit.dp
+import com.example.nightjar.data.db.entity.TrackEntity
+import com.example.nightjar.ui.components.NjKnob
+import com.example.nightjar.ui.theme.NjError
+import com.example.nightjar.ui.theme.NjMuted2
+import com.example.nightjar.ui.theme.NjStudioAccent
+import com.example.nightjar.ui.theme.NjStudioSurface2
+import com.example.nightjar.ui.theme.NjStudioTeal
+import com.example.nightjar.ui.theme.NjStudioYellow
+
+/**
+ * Inline track drawer for drum tracks. Shows volume/solo/mute controls,
+ * BPM display, and the drum pattern editor grid.
+ */
+@Composable
+fun DrumTrackDrawer(
+    track: TrackEntity,
+    isSoloed: Boolean,
+    pattern: DrumPatternUiState?,
+    bpm: Double,
+    onAction: (StudioAction) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val goldBorderColor = NjStudioAccent.copy(alpha = 0.5f)
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .drawBehind {
+                drawLine(
+                    color = goldBorderColor,
+                    start = Offset(0f, 0f),
+                    end = Offset(size.width, 0f),
+                    strokeWidth = 1.dp.toPx()
+                )
+            }
+            .background(NjStudioSurface2)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        // Top row: Volume + S/M toggles + BPM + Rename/Delete
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            NjKnob(
+                value = track.volume,
+                onValueChange = { vol ->
+                    onAction(StudioAction.SetTrackVolume(track.id, vol))
+                },
+                knobSize = 36.dp,
+                label = "${(track.volume * 100).toInt()}%"
+            )
+
+            Spacer(Modifier.width(12.dp))
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                DrawerToggleButton(
+                    label = "S",
+                    isActive = isSoloed,
+                    ledColor = NjStudioTeal,
+                    onClick = { onAction(StudioAction.ToggleSolo(track.id)) }
+                )
+                DrawerToggleButton(
+                    label = "M",
+                    isActive = track.isMuted,
+                    ledColor = NjStudioYellow,
+                    onClick = {
+                        onAction(StudioAction.SetTrackMuted(track.id, !track.isMuted))
+                    }
+                )
+            }
+
+            Spacer(Modifier.width(12.dp))
+
+            // Bar count controls
+            if (pattern != null) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    NjStudioButton(
+                        text = "-",
+                        onClick = {
+                            if (pattern.bars > 1) {
+                                onAction(StudioAction.SetPatternBars(track.id, pattern.bars - 1))
+                            }
+                        },
+                        textColor = if (pattern.bars > 1) {
+                            NjStudioAccent.copy(alpha = 0.7f)
+                        } else {
+                            NjMuted2.copy(alpha = 0.3f)
+                        }
+                    )
+                    Text(
+                        text = "${pattern.bars} bar${if (pattern.bars > 1) "s" else ""}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = NjStudioAccent.copy(alpha = 0.7f),
+                        modifier = Modifier.padding(horizontal = 4.dp)
+                    )
+                    NjStudioButton(
+                        text = "+",
+                        onClick = {
+                            if (pattern.bars < 8) {
+                                onAction(StudioAction.SetPatternBars(track.id, pattern.bars + 1))
+                            }
+                        },
+                        textColor = if (pattern.bars < 8) {
+                            NjStudioAccent.copy(alpha = 0.7f)
+                        } else {
+                            NjMuted2.copy(alpha = 0.3f)
+                        }
+                    )
+                }
+
+                Spacer(Modifier.width(8.dp))
+            }
+
+            // BPM display
+            Text(
+                text = "${bpm.toInt()} BPM",
+                style = MaterialTheme.typography.labelMedium,
+                color = NjStudioAccent.copy(alpha = 0.7f)
+            )
+
+            // Push action buttons to the right
+            Box(Modifier.weight(1f))
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                NjStudioButton(
+                    text = "Rename",
+                    onClick = {
+                        onAction(
+                            StudioAction.RequestRenameTrack(
+                                track.id,
+                                track.displayName
+                            )
+                        )
+                    },
+                    textColor = NjMuted2.copy(alpha = 0.7f)
+                )
+                NjStudioButton(
+                    text = "Delete",
+                    onClick = {
+                        onAction(StudioAction.ConfirmDeleteTrack(track.id))
+                    },
+                    textColor = NjError.copy(alpha = 0.7f)
+                )
+            }
+        }
+
+        // Pattern editor grid
+        if (pattern != null) {
+            DrumPatternEditor(
+                trackId = track.id,
+                pattern = pattern,
+                onAction = onAction
+            )
+        }
+    }
+}

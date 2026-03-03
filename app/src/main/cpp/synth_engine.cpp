@@ -1,5 +1,5 @@
 #include "synth_engine.h"
-#include "common.h"
+#include "atomic_transport.h"
 #include <fluidsynth.h>
 #include <algorithm>
 #include <chrono>
@@ -11,7 +11,8 @@ namespace nightjar {
 #define FS_SETTINGS  static_cast<fluid_settings_t*>(settings_)
 #define FS_SYNTH     static_cast<fluid_synth_t*>(synth_)
 
-SynthEngine::SynthEngine() = default;
+SynthEngine::SynthEngine(AtomicTransport& transport)
+    : transport_(transport) {}
 
 SynthEngine::~SynthEngine() {
     stop();
@@ -80,6 +81,9 @@ void SynthEngine::start() {
     }
 
     ringBuffer_.reset();
+    renderPos_ = transport_.posFrames.load(std::memory_order_relaxed);
+    wasPlaying_ = false;
+    sequencer_.reset();
     running_.store(true, std::memory_order_release);
     renderThread_ = std::thread(&SynthEngine::renderThreadFunc, this);
     LOGD("SynthEngine: render thread started");
@@ -93,6 +97,7 @@ void SynthEngine::stop() {
         renderThread_.join();
     }
     ringBuffer_.reset();
+    sequencer_.reset();
     LOGD("SynthEngine: render thread stopped");
 }
 
@@ -132,6 +137,24 @@ void SynthEngine::requestFlush() {
     flushRequested_.store(true, std::memory_order_release);
 }
 
+// ── Step sequencer control ──────────────────────────────────────────────
+
+void SynthEngine::updateDrumPattern(int stepsPerBar, int bars, int64_t offsetFrames,
+                                     float volume, bool muted,
+                                     const std::vector<DrumHit>& hits,
+                                     const std::vector<int64_t>& clipOffsetFrames) {
+    sequencer_.updatePattern(stepsPerBar, bars, offsetFrames, volume, muted,
+                             hits, clipOffsetFrames);
+}
+
+void SynthEngine::setSequencerEnabled(bool enabled) {
+    sequencerEnabled_.store(enabled, std::memory_order_release);
+}
+
+int64_t SynthEngine::getSequencerMaxEndFrame(double bpm) const {
+    return sequencer_.getMaxEndFrame(bpm);
+}
+
 // ── Render thread ──────────────────────────────────────────────────────────
 
 void SynthEngine::renderThreadFunc() {
@@ -145,14 +168,49 @@ void SynthEngine::renderThreadFunc() {
             if (synth_) {
                 fluid_synth_all_notes_off(FS_SYNTH, -1);  // -1 = all channels
             }
+            sequencer_.reset();
+            renderPos_ = transport_.posFrames.load(std::memory_order_relaxed);
             flushRequested_.store(false, std::memory_order_release);
         }
+
+        // Track play/pause transitions
+        bool playing = transport_.playing.load(std::memory_order_relaxed);
+
+        if (playing && !wasPlaying_) {
+            // Play started -- sync render position with transport
+            renderPos_ = transport_.posFrames.load(std::memory_order_relaxed);
+            sequencer_.reset();
+        }
+        if (!playing && wasPlaying_) {
+            // Play stopped -- silence any ringing notes
+            if (synth_) {
+                fluid_synth_all_notes_off(FS_SYNTH, -1);
+            }
+            sequencer_.reset();
+        }
+        wasPlaying_ = playing;
 
         // If the ring buffer is nearly full, sleep to avoid wasted CPU
         size_t buffered = ringBuffer_.availableToRead();
         if (buffered + kChunkSamples > kSynthRingBufferCapacity) {
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
             continue;
+        }
+
+        // Tick step sequencer while playing
+        if (playing && sequencerEnabled_.load(std::memory_order_relaxed)) {
+            double bpm = transport_.bpm.load(std::memory_order_relaxed);
+            const auto& events = sequencer_.tick(
+                renderPos_, kSynthRenderChunkFrames, bpm);
+            for (const auto& e : events) {
+                if (synth_) {
+                    if (e.velocity > 0) {
+                        fluid_synth_noteon(FS_SYNTH, e.channel, e.note, e.velocity);
+                    } else {
+                        fluid_synth_noteoff(FS_SYNTH, e.channel, e.note);
+                    }
+                }
+            }
         }
 
         // Render interleaved stereo: L at even indices, R at odd
@@ -169,6 +227,11 @@ void SynthEngine::renderThreadFunc() {
         }
 
         ringBuffer_.write(renderBuf, kChunkSamples);
+
+        // Advance render position only while playing
+        if (playing) {
+            renderPos_ += kSynthRenderChunkFrames;
+        }
     }
 }
 

@@ -1,6 +1,7 @@
 package com.example.nightjar.data.repository
 
 import com.example.nightjar.data.db.dao.DrumPatternDao
+import com.example.nightjar.data.db.entity.DrumClipEntity
 import com.example.nightjar.data.db.entity.DrumPatternEntity
 import com.example.nightjar.data.db.entity.DrumStepEntity
 import kotlinx.coroutines.flow.Flow
@@ -63,5 +64,53 @@ class DrumRepository(
 
     suspend fun clearAllSteps(patternId: Long) {
         drumPatternDao.clearAllSteps(patternId)
+    }
+
+    // -- Clips --
+
+    suspend fun getClips(patternId: Long): List<DrumClipEntity> =
+        drumPatternDao.getClipsForPattern(patternId)
+
+    fun observeClips(patternId: Long): Flow<List<DrumClipEntity>> =
+        drumPatternDao.observeClipsForPattern(patternId)
+
+    /**
+     * Ensure a pattern has at least one clip. Creates a default clip
+     * at offset 0 if none exist. Returns all clips.
+     */
+    suspend fun ensureClipsExist(patternId: Long): List<DrumClipEntity> {
+        val existing = drumPatternDao.getClipsForPattern(patternId)
+        if (existing.isNotEmpty()) return existing
+
+        drumPatternDao.insertClip(
+            DrumClipEntity(patternId = patternId, offsetMs = 0L, sortIndex = 0)
+        )
+        return drumPatternDao.getClipsForPattern(patternId)
+    }
+
+    /**
+     * Duplicate a clip. The new clip is placed immediately after the source
+     * clip (offset = source offset + pattern duration in ms).
+     * The caller must provide patternDurationMs for positioning.
+     */
+    suspend fun duplicateClip(clipId: Long, patternDurationMs: Long = 0L) {
+        val source = drumPatternDao.getClipById(clipId) ?: return
+        val maxSort = drumPatternDao.getMaxClipSortIndex(source.patternId) ?: 0
+        val newOffset = source.offsetMs + patternDurationMs
+        drumPatternDao.insertClip(
+            DrumClipEntity(
+                patternId = source.patternId,
+                offsetMs = newOffset,
+                sortIndex = maxSort + 1
+            )
+        )
+    }
+
+    suspend fun moveClip(clipId: Long, newOffsetMs: Long) {
+        drumPatternDao.updateClipOffset(clipId, newOffsetMs)
+    }
+
+    suspend fun deleteClip(clipId: Long) {
+        drumPatternDao.deleteClip(clipId)
     }
 }
