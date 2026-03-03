@@ -115,12 +115,14 @@ fun TrackDrawerPanel(
 
                     Spacer(Modifier.width(4.dp))
 
-                    DrawerToggleButton(
-                        label = "R",
-                        isActive = isArmed,
-                        ledColor = NjRecordCoral,
-                        onClick = { onAction(StudioAction.ToggleArm(track.id)) }
-                    )
+                    if (track.isAudio) {
+                        DrawerToggleButton(
+                            label = "R",
+                            isActive = isArmed,
+                            ledColor = NjRecordCoral,
+                            onClick = { onAction(StudioAction.ToggleArm(track.id)) }
+                        )
+                    }
                     DrawerToggleButton(
                         label = "S",
                         isActive = isSoloed,
@@ -135,12 +137,14 @@ fun TrackDrawerPanel(
                             onAction(StudioAction.SetTrackMuted(track.id, !track.isMuted))
                         }
                     )
-                    DrawerToggleButton(
-                        label = "T",
-                        isActive = takesExpanded,
-                        ledColor = NjStudioAccent,
-                        onClick = { onAction(StudioAction.ToggleTakesView(track.id)) }
-                    )
+                    if (track.isAudio) {
+                        DrawerToggleButton(
+                            label = "T",
+                            isActive = takesExpanded,
+                            ledColor = NjStudioAccent,
+                            onClick = { onAction(StudioAction.ToggleTakesView(track.id)) }
+                        )
+                    }
                 }
 
                 // Row 2: Rename + Delete (text buttons, right-aligned)
@@ -196,12 +200,14 @@ fun TrackDrawerPanel(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    DrawerToggleButton(
-                        label = "R",
-                        isActive = isArmed,
-                        ledColor = NjRecordCoral,
-                        onClick = { onAction(StudioAction.ToggleArm(track.id)) }
-                    )
+                    if (track.isAudio) {
+                        DrawerToggleButton(
+                            label = "R",
+                            isActive = isArmed,
+                            ledColor = NjRecordCoral,
+                            onClick = { onAction(StudioAction.ToggleArm(track.id)) }
+                        )
+                    }
                     DrawerToggleButton(
                         label = "S",
                         isActive = isSoloed,
@@ -216,12 +222,14 @@ fun TrackDrawerPanel(
                             onAction(StudioAction.SetTrackMuted(track.id, !track.isMuted))
                         }
                     )
-                    DrawerToggleButton(
-                        label = "T",
-                        isActive = takesExpanded,
-                        ledColor = NjStudioAccent,
-                        onClick = { onAction(StudioAction.ToggleTakesView(track.id)) }
-                    )
+                    if (track.isAudio) {
+                        DrawerToggleButton(
+                            label = "T",
+                            isActive = takesExpanded,
+                            ledColor = NjStudioAccent,
+                            onClick = { onAction(StudioAction.ToggleTakesView(track.id)) }
+                        )
+                    }
                 }
 
                 // Spacer pushes action buttons to the right

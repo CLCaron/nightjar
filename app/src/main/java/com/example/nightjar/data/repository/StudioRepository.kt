@@ -35,7 +35,7 @@ class StudioRepository(
         // Fix up tracks with unknown duration (from v3→v4 migration)
         var needsRefresh = false
         for (track in existing) {
-            if (track.durationMs == 0L) {
+            if (track.durationMs == 0L && track.audioFileName != null) {
                 val file = storage.getAudioFile(track.audioFileName)
                 val duration = resolveFileDurationMs(file)
                 if (duration > 0L) {
@@ -72,11 +72,25 @@ class StudioRepository(
     suspend fun deleteTrackAndAudio(trackId: Long) {
         val track = trackDao.getTrackById(trackId) ?: return
         trackDao.deleteTrackById(trackId)
-        storage.deleteAudioFile(track.audioFileName)
+        track.audioFileName?.let { storage.deleteAudioFile(it) }
     }
 
     suspend fun renameTrack(trackId: Long, name: String) {
         trackDao.updateDisplayName(trackId, name)
+    }
+
+    /** Create a new drum track for the given idea. Returns the track ID. */
+    suspend fun addDrumTrack(ideaId: Long): Long {
+        val nextIndex = trackDao.getTrackCount(ideaId)
+        val track = TrackEntity(
+            ideaId = ideaId,
+            trackType = "drum",
+            audioFileName = null,
+            displayName = "Drums ${nextIndex + 1}",
+            sortIndex = nextIndex,
+            durationMs = 0L
+        )
+        return trackDao.insertTrack(track)
     }
 
     // ── Timeline edits ────────────────────────────────────────────────────
@@ -115,7 +129,7 @@ class StudioRepository(
 
     suspend fun getTrackAudioFile(trackId: Long): File? {
         val track = trackDao.getTrackById(trackId) ?: return null
-        return storage.getAudioFile(track.audioFileName)
+        return track.audioFileName?.let { storage.getAudioFile(it) }
     }
 
     // ── Take lifecycle ────────────────────────────────────────────────────
@@ -129,11 +143,12 @@ class StudioRepository(
         if (existing.isNotEmpty()) return existing
 
         val track = trackDao.getTrackById(trackId) ?: return emptyList()
-        if (track.audioFileName.isBlank()) return emptyList()
+        if (track.audioFileName.isNullOrBlank()) return emptyList()
 
         val take = TakeEntity(
             trackId = trackId,
             audioFileName = track.audioFileName,
+
             displayName = "Take 1",
             sortIndex = 0,
             durationMs = track.durationMs,

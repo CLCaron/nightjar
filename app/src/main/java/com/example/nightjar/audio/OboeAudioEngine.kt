@@ -146,6 +146,52 @@ class OboeAudioEngine @Inject constructor() {
     /** Returns the number of times the playback loop has reset to loopStart. */
     fun getLoopResetCount(): Long = nativeGetLoopResetCount()
 
+    // ── Synth API ────────────────────────────────────────────────────────
+
+    /**
+     * Load a SoundFont file by absolute path and start the synth render thread.
+     * Must be called once after [initialize] before any note events.
+     */
+    fun loadSoundFont(path: String): Boolean {
+        val ok = nativeLoadSoundFont(path)
+        Log.d(TAG, "loadSoundFont($path) -> $ok")
+        return ok
+    }
+
+    fun synthNoteOn(channel: Int, note: Int, velocity: Int) =
+        nativeSynthNoteOn(channel, note, velocity)
+
+    fun synthNoteOff(channel: Int, note: Int) =
+        nativeSynthNoteOff(channel, note)
+
+    fun setSynthVolume(volume: Float) =
+        nativeSetSynthVolume(volume)
+
+    // ── Drum Sequencer ─────────────────────────────────────────────────────
+
+    /**
+     * Replace the drum pattern in the C++ step sequencer.
+     * Parallel arrays represent active steps: stepIndices[i], drumNotes[i], velocities[i].
+     * Optional clipOffsetsMs specifies timeline positions for multiple clip placements.
+     */
+    fun updateDrumPattern(
+        stepsPerBar: Int,
+        bars: Int,
+        offsetMs: Long,
+        volume: Float,
+        muted: Boolean,
+        stepIndices: IntArray,
+        drumNotes: IntArray,
+        velocities: FloatArray,
+        clipOffsetsMs: LongArray = LongArray(0)
+    ) = nativeUpdateDrumPattern(stepsPerBar, bars, offsetMs, volume, muted,
+        stepIndices, drumNotes, velocities, clipOffsetsMs)
+
+    fun setBpm(bpm: Double) = nativeSetBpm(bpm)
+
+    fun setDrumSequencerEnabled(enabled: Boolean) =
+        nativeSetDrumSequencerEnabled(enabled)
+
     // ── Hardware latency measurement ──────────────────────────────────────
 
     /**
@@ -205,6 +251,22 @@ class OboeAudioEngine @Inject constructor() {
 
     // Loop reset tracking
     private external fun nativeGetLoopResetCount(): Long
+
+    // Synth
+    private external fun nativeLoadSoundFont(path: String): Boolean
+    private external fun nativeSynthNoteOn(channel: Int, note: Int, velocity: Int)
+    private external fun nativeSynthNoteOff(channel: Int, note: Int)
+    private external fun nativeSetSynthVolume(volume: Float)
+
+    // Drum sequencer
+    private external fun nativeUpdateDrumPattern(
+        stepsPerBar: Int, bars: Int, offsetMs: Long,
+        volume: Float, muted: Boolean,
+        stepIndices: IntArray, drumNotes: IntArray, velocities: FloatArray,
+        clipOffsetsMs: LongArray
+    )
+    private external fun nativeSetBpm(bpm: Double)
+    private external fun nativeSetDrumSequencerEnabled(enabled: Boolean)
 
     // Hardware latency
     private external fun nativeGetOutputLatencyMs(): Long

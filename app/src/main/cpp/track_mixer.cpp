@@ -165,11 +165,8 @@ void TrackMixer::renderFrames(float* output, int32_t numFrames, int64_t position
         }
     }
 
-    // Soft-clip via tanh to prevent harsh digital clipping
-    int32_t totalSamples = numFrames * kOutputChannelCount;
-    for (int32_t i = 0; i < totalSamples; ++i) {
-        output[i] = std::tanh(output[i]);
-    }
+    // Note: soft-clip (tanh) is applied in OboePlaybackStream::onAudioReady()
+    // AFTER all audio sources (tracks + synth) have been summed together.
 }
 
 void TrackMixer::commitToActive() {

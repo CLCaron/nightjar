@@ -201,7 +201,8 @@ suspend fun extractCompositeWaveform(
 
     for (track in activeTracks) {
         ensureActive()
-        val file = getAudioFile(track.audioFileName)
+        val fileName = track.audioFileName ?: continue
+        val file = getAudioFile(fileName)
         val rawAmps = extractWaveform(file, bars)
         if (rawAmps.isEmpty()) continue
 

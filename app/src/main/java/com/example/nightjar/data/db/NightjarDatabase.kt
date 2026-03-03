@@ -4,10 +4,14 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import com.example.nightjar.data.db.dao.DrumPatternDao
 import com.example.nightjar.data.db.dao.IdeaDao
 import com.example.nightjar.data.db.dao.TagDao
 import com.example.nightjar.data.db.dao.TakeDao
 import com.example.nightjar.data.db.dao.TrackDao
+import com.example.nightjar.data.db.entity.DrumClipEntity
+import com.example.nightjar.data.db.entity.DrumPatternEntity
+import com.example.nightjar.data.db.entity.DrumStepEntity
 import com.example.nightjar.data.db.entity.IdeaEntity
 import com.example.nightjar.data.db.entity.TagEntity
 import com.example.nightjar.data.db.entity.TakeEntity
@@ -22,10 +26,18 @@ import com.example.nightjar.data.db.entity.TrackEntity
  * - **v3** — Added `tracks` table for multi-track Studio projects.
  * - **v4** — Removed `audioFileName` from `ideas`; IdeaEntity is now a pure metadata container.
  * - **v5** — Added `takes` table for per-track multi-take support.
+ * - **v6** — Added `bpm` to ideas, `trackType` + nullable `audioFileName` to tracks,
+ *            `drum_patterns` and `drum_steps` tables for drum sequencer support.
+ * - **v7** — Added `drum_clips` table for timeline clip placements of drum patterns.
  */
 @Database(
-    entities = [IdeaEntity::class, TagEntity::class, IdeaTagCrossRef::class, TrackEntity::class, TakeEntity::class],
-    version = 5,
+    entities = [
+        IdeaEntity::class, TagEntity::class, IdeaTagCrossRef::class,
+        TrackEntity::class, TakeEntity::class,
+        DrumPatternEntity::class, DrumStepEntity::class,
+        DrumClipEntity::class
+    ],
+    version = 7,
     exportSchema = false
 )
 abstract class NightjarDatabase : RoomDatabase() {
@@ -34,6 +46,7 @@ abstract class NightjarDatabase : RoomDatabase() {
     abstract fun tagDao(): TagDao
     abstract fun trackDao(): TrackDao
     abstract fun takeDao(): TakeDao
+    abstract fun drumPatternDao(): DrumPatternDao
 
     companion object {
         @Volatile private var INSTANCE: NightjarDatabase? = null
@@ -163,13 +176,116 @@ abstract class NightjarDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v5 -> v6: Drum sequencer support.
+         *
+         * - ideas: add `bpm` column (project-level tempo, default 120.0)
+         * - tracks: add `trackType` column, make `audioFileName` nullable
+         *   (drum tracks have no audio file). Table recreation required since
+         *   SQLite < 3.35 can't change column nullability via ALTER TABLE.
+         * - New tables: `drum_patterns` and `drum_steps`
+         */
+        private val MIGRATION_5_6 = object : androidx.room.migration.Migration(5, 6) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                // 1. Add bpm to ideas (simple ADD COLUMN)
+                db.execSQL("ALTER TABLE ideas ADD COLUMN bpm REAL NOT NULL DEFAULT 120.0")
+
+                // 2. Recreate tracks with trackType + nullable audioFileName
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS tracks_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        ideaId INTEGER NOT NULL,
+                        trackType TEXT NOT NULL DEFAULT 'audio',
+                        audioFileName TEXT,
+                        displayName TEXT NOT NULL,
+                        sortIndex INTEGER NOT NULL,
+                        offsetMs INTEGER NOT NULL DEFAULT 0,
+                        trimStartMs INTEGER NOT NULL DEFAULT 0,
+                        trimEndMs INTEGER NOT NULL DEFAULT 0,
+                        durationMs INTEGER NOT NULL,
+                        isMuted INTEGER NOT NULL DEFAULT 0,
+                        volume REAL NOT NULL DEFAULT 1.0,
+                        createdAtEpochMs INTEGER NOT NULL,
+                        FOREIGN KEY(ideaId) REFERENCES ideas(id) ON DELETE CASCADE
+                    )
+                """.trimIndent())
+
+                db.execSQL("""
+                    INSERT INTO tracks_new (id, ideaId, trackType, audioFileName, displayName,
+                        sortIndex, offsetMs, trimStartMs, trimEndMs, durationMs, isMuted,
+                        volume, createdAtEpochMs)
+                    SELECT id, ideaId, 'audio', audioFileName, displayName,
+                        sortIndex, offsetMs, trimStartMs, trimEndMs, durationMs, isMuted,
+                        volume, createdAtEpochMs
+                    FROM tracks
+                """.trimIndent())
+
+                db.execSQL("DROP TABLE tracks")
+                db.execSQL("ALTER TABLE tracks_new RENAME TO tracks")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_tracks_ideaId ON tracks(ideaId)")
+
+                // 3. Create drum_patterns table
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS drum_patterns (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        trackId INTEGER NOT NULL,
+                        stepsPerBar INTEGER NOT NULL DEFAULT 16,
+                        bars INTEGER NOT NULL DEFAULT 1,
+                        FOREIGN KEY(trackId) REFERENCES tracks(id) ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_drum_patterns_trackId ON drum_patterns(trackId)")
+
+                // 4. Create drum_steps table
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS drum_steps (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        patternId INTEGER NOT NULL,
+                        stepIndex INTEGER NOT NULL,
+                        drumNote INTEGER NOT NULL,
+                        velocity REAL NOT NULL DEFAULT 0.8,
+                        FOREIGN KEY(patternId) REFERENCES drum_patterns(id) ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_drum_steps_patternId ON drum_steps(patternId)")
+            }
+        }
+
+        /** v6 -> v7: Add drum_clips table for timeline clip placements. */
+        private val MIGRATION_6_7 = object : androidx.room.migration.Migration(6, 7) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS drum_clips (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        patternId INTEGER NOT NULL,
+                        offsetMs INTEGER NOT NULL DEFAULT 0,
+                        sortIndex INTEGER NOT NULL DEFAULT 0,
+                        FOREIGN KEY(patternId) REFERENCES drum_patterns(id) ON DELETE CASCADE
+                    )
+                """.trimIndent())
+
+                db.execSQL("""
+                    CREATE INDEX IF NOT EXISTS index_drum_clips_patternId ON drum_clips(patternId)
+                """.trimIndent())
+
+                // Auto-create a default clip at offset 0 for every existing pattern
+                db.execSQL("""
+                    INSERT INTO drum_clips (patternId, offsetMs, sortIndex)
+                    SELECT id, 0, 0 FROM drum_patterns
+                """.trimIndent())
+            }
+        }
+
         fun getInstance(context: Context): NightjarDatabase {
             return INSTANCE ?: synchronized(this) {
                 val db = Room.databaseBuilder(
                     context.applicationContext,
                     NightjarDatabase::class.java,
                     "nightjar.db"
-                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build()
+                ).addMigrations(
+                    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4,
+                    MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7
+                ).build()
                 INSTANCE = db
                 db
             }

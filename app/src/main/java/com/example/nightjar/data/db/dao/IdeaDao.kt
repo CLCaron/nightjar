@@ -29,6 +29,9 @@ interface IdeaDao {
     @Query("UPDATE ideas SET isFavorite = :favorite WHERE id = :id")
     suspend fun updateFavorite(id: Long, favorite: Boolean)
 
+    @Query("UPDATE ideas SET bpm = :bpm WHERE id = :id")
+    suspend fun updateBpm(id: Long, bpm: Double)
+
     @Query("DELETE FROM ideas WHERE id = :id")
     suspend fun deleteIdeaById(id: Long)
 

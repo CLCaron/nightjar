@@ -1,19 +1,15 @@
 #pragma once
 
+#include "common.h"
 #include <atomic>
 #include <memory>
-#include <android/log.h>
-
-#define LOG_TAG "NightjarAudio"
-#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
-#define LOGW(...) __android_log_print(ANDROID_LOG_WARN,  LOG_TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 namespace nightjar {
 
 class OboeRecordingStream;
 class OboePlaybackStream;
 class TrackMixer;
+class SynthEngine;
 struct AtomicTransport;
 
 /**
@@ -72,14 +68,35 @@ public:
     // ── Loop reset tracking ──────────────────────────────────────────────
     int64_t getLoopResetCount() const;
 
+    // ── Synth API ─────────────────────────────────────────────────────
+    bool loadSoundFont(const char* path);
+    void synthNoteOn(int channel, int note, int velocity);
+    void synthNoteOff(int channel, int note);
+    void setSynthVolume(float volume);
+
+    // ── Drum sequencer API ──────────────────────────────────────────
+    void updateDrumPattern(int stepsPerBar, int bars, int64_t offsetMs,
+                           float volume, bool muted,
+                           const int* stepIndices, const int* drumNotes,
+                           const float* velocities, int hitCount,
+                           const int64_t* clipOffsetsMs = nullptr,
+                           int clipCount = 0);
+    void setBpm(double bpm);
+    void setDrumSequencerEnabled(bool enabled);
+
     // ── Hardware latency measurement ──────────────────────────────────
     int64_t getOutputLatencyMs() const;
     int64_t getInputLatencyMs() const;
 
 private:
+    /** Recompute totalFrames from max(mixer tracks, drum patterns). */
+    void recomputeTotalFrames();
+
     std::atomic<bool> initialized_{false};
+    std::atomic<int64_t> drumEndFrames_{0};
     std::unique_ptr<OboeRecordingStream> recordingStream_;
     std::unique_ptr<TrackMixer> mixer_;
+    std::unique_ptr<SynthEngine> synthEngine_;
     std::unique_ptr<AtomicTransport> transport_;
     std::unique_ptr<OboePlaybackStream> playbackStream_;
 };
