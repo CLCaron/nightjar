@@ -373,6 +373,14 @@ class StudioViewModel @Inject constructor(
                 // Set project BPM in the native engine
                 audioEngine.setBpm(idea.bpm)
 
+                // Load takes for all audio tracks so the engine can load them correctly
+                val audioTrackIds = tracks.filter { it.isAudio }.map { it.id }
+                if (audioTrackIds.isNotEmpty()) {
+                    val allTakes = studioRepo.getTakesForTracks(audioTrackIds)
+                    val grouped = allTakes.groupBy { it.trackId }
+                    _state.update { it.copy(trackTakes = grouped) }
+                }
+
                 loadTracksIntoEngine(tracks)
 
                 // Load drum patterns for any drum tracks
@@ -384,6 +392,10 @@ class StudioViewModel @Inject constructor(
             }
         }
     }
+
+    /** Compute the engine track ID for a take within a track. */
+    private fun engineIdForTake(trackId: Long, takeSortIndex: Int): Int =
+        (trackId * 1000 + takeSortIndex).toInt()
 
     /**
      * Load tracks into the native engine. If a track has takes in [trackTakes],
@@ -406,8 +418,7 @@ class StudioViewModel @Inject constructor(
                 for (take in takes) {
                     val effectivelyMuted = take.isMuted || track.isMuted
                     val file = getAudioFile(take.audioFileName)
-                    // Use synthetic trackId: trackId * 1000 + sortIndex
-                    val engineId = (track.id * 1000 + take.sortIndex).toInt()
+                    val engineId = engineIdForTake(track.id, take.sortIndex)
                     audioEngine.addTrack(
                         trackId = engineId,
                         filePath = file.absolutePath,
@@ -1052,15 +1063,23 @@ class StudioViewModel @Inject constructor(
         val st = _state.value
         val anySoloed = st.soloedTrackIds.isNotEmpty()
         for (track in st.tracks) {
-            val effectivelyMuted = track.isMuted ||
+            val trackMuted = track.isMuted ||
                 (anySoloed && track.id !in st.soloedTrackIds)
             if (track.isAudio) {
-                audioEngine.setTrackMuted(track.id.toInt(), effectivelyMuted)
+                val takes = st.trackTakes[track.id]
+                if (takes != null && takes.isNotEmpty()) {
+                    for (take in takes) {
+                        val engineId = engineIdForTake(track.id, take.sortIndex)
+                        audioEngine.setTrackMuted(engineId, trackMuted || take.isMuted)
+                    }
+                } else {
+                    audioEngine.setTrackMuted(track.id.toInt(), trackMuted)
+                }
             } else if (track.isDrum) {
                 // Re-push pattern with updated mute state
                 val pattern = st.drumPatterns[track.id] ?: continue
                 pushDrumPatternToEngine(
-                    track.copy(isMuted = effectivelyMuted),
+                    track.copy(isMuted = trackMuted),
                     pattern.stepsPerBar,
                     pattern.bars,
                     pattern.steps,
@@ -1085,7 +1104,15 @@ class StudioViewModel @Inject constructor(
             }
         } else {
             // Update native engine immediately for instant feedback
-            audioEngine.setTrackVolume(trackId.toInt(), clamped)
+            val takes = _state.value.trackTakes[trackId]
+            if (takes != null && takes.isNotEmpty()) {
+                for (take in takes) {
+                    val engineId = engineIdForTake(trackId, take.sortIndex)
+                    audioEngine.setTrackVolume(engineId, take.volume * clamped)
+                }
+            } else {
+                audioEngine.setTrackVolume(trackId.toInt(), clamped)
+            }
         }
         viewModelScope.launch {
             try {
