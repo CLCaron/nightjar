@@ -15,6 +15,8 @@ import androidx.room.PrimaryKey
  * @property isFavorite    Pinned to the top of the library when sorting by favorites.
  * @property bpm           Project-level tempo in beats per minute (default 120.0).
  *                         Used by drum sequencer, metronome, snap-to-grid, and MIDI tracks.
+ * @property timeSignatureNumerator Beats per measure (top number of time signature, default 4).
+ * @property timeSignatureDenominator Beat unit (bottom number of time signature, default 4).
  * @property createdAtEpochMs Unix timestamp of when the idea was first recorded.
  */
 @Entity(tableName = "ideas")
@@ -24,5 +26,7 @@ data class IdeaEntity(
     val notes: String = "",
     val isFavorite: Boolean = false,
     val bpm: Double = 120.0,
+    val timeSignatureNumerator: Int = 4,
+    val timeSignatureDenominator: Int = 4,
     val createdAtEpochMs: Long = System.currentTimeMillis()
 )

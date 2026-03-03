@@ -40,11 +40,14 @@ public:
     /**
      * Replace the entire pattern. Called from UI thread (JNI).
      * Mutex-protected, writes to inactive buffer, then swaps.
+     *
+     * @param beatsPerBar  Beats per measure from time signature numerator (default 4).
      */
     void updatePattern(int stepsPerBar, int bars, int64_t offsetFrames,
                        float volume, bool muted,
                        const std::vector<DrumHit>& hits,
-                       const std::vector<int64_t>& clipOffsetFrames = {});
+                       const std::vector<int64_t>& clipOffsetFrames = {},
+                       int beatsPerBar = 4);
 
     /**
      * Advance the sequencer and return note events for this chunk.
@@ -71,6 +74,7 @@ private:
     struct Pattern {
         int stepsPerBar = 16;
         int bars = 1;
+        int beatsPerBar = 4;  // from time signature numerator
         int64_t offsetFrames = 0;
         float volume = 1.0f;
         bool muted = false;

@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.nightjar.audio.AudioLatencyEstimator
+import com.example.nightjar.audio.MusicalTimeConverter
 import com.example.nightjar.audio.OboeAudioEngine
 import com.example.nightjar.audio.SoundFontManager
 import com.example.nightjar.audio.WavSplitter
@@ -313,6 +314,14 @@ class StudioViewModel @Inject constructor(
             }
             StudioAction.ExecuteDeleteTake -> executeDeleteTake()
 
+            // Time signature / Snap
+            is StudioAction.SetTimeSignature -> setTimeSignature(
+                action.numerator, action.denominator
+            )
+            StudioAction.ToggleSnap -> {
+                _state.update { it.copy(isSnapEnabled = !it.isSnapEnabled) }
+            }
+
             // Drum sequencer
             is StudioAction.ToggleDrumStep -> toggleDrumStep(
                 action.trackId, action.stepIndex, action.drumNote
@@ -324,6 +333,12 @@ class StudioViewModel @Inject constructor(
             is StudioAction.DuplicateClip -> duplicateClip(action.trackId, action.clipId)
             is StudioAction.MoveClip -> moveClip(action.trackId, action.clipId, action.newOffsetMs)
             is StudioAction.DeleteClip -> deleteClip(action.trackId, action.clipId)
+
+            // Drum clip drag-to-reposition
+            is StudioAction.StartDragClip -> startDragClip(action.trackId, action.clipId)
+            is StudioAction.UpdateDragClip -> updateDragClip(action.previewOffsetMs)
+            is StudioAction.FinishDragClip -> finishDragClip(action.trackId, action.clipId, action.newOffsetMs)
+            StudioAction.CancelDragClip -> cancelDragClip()
         }
     }
 
@@ -349,7 +364,9 @@ class StudioViewModel @Inject constructor(
                         tracks = tracks,
                         isLoading = false,
                         errorMessage = null,
-                        bpm = idea.bpm
+                        bpm = idea.bpm,
+                        timeSignatureNumerator = idea.timeSignatureNumerator,
+                        timeSignatureDenominator = idea.timeSignatureDenominator
                     )
                 }
 
@@ -855,7 +872,8 @@ class StudioViewModel @Inject constructor(
     private fun dragTake(takeId: Long, newOffsetMs: Long) {
         viewModelScope.launch {
             try {
-                studioRepo.moveTake(takeId, newOffsetMs.coerceAtLeast(0L))
+                val snapped = snapIfEnabled(newOffsetMs).coerceAtLeast(0L)
+                studioRepo.moveTake(takeId, snapped)
                 reloadAllTakes()
                 reloadAndPrepare()
             } catch (e: Exception) {
@@ -897,6 +915,15 @@ class StudioViewModel @Inject constructor(
         }
     }
 
+    // ── Snap helper ─────────────────────────────────────────────────────
+
+    /** Snap a ms value to the nearest beat if snap is enabled. */
+    private fun snapIfEnabled(ms: Long): Long {
+        val st = _state.value
+        if (!st.isSnapEnabled) return ms
+        return MusicalTimeConverter.snapToBeat(ms, st.bpm, st.timeSignatureDenominator)
+    }
+
     // ── Drag-to-reposition ────────────────────────────────────────────────
 
     private fun startDragTrack(trackId: Long) {
@@ -915,15 +942,17 @@ class StudioViewModel @Inject constructor(
     private fun updateDragTrack(previewOffsetMs: Long) {
         _state.update { st ->
             st.dragState?.let { drag ->
-                st.copy(dragState = drag.copy(previewOffsetMs = previewOffsetMs.coerceAtLeast(0L)))
+                val snapped = snapIfEnabled(previewOffsetMs).coerceAtLeast(0L)
+                st.copy(dragState = drag.copy(previewOffsetMs = snapped))
             } ?: st
         }
     }
 
     private fun finishDragTrack(trackId: Long, newOffsetMs: Long) {
         _state.update { it.copy(dragState = null) }
+        val snapped = snapIfEnabled(newOffsetMs).coerceAtLeast(0L)
         viewModelScope.launch {
-            studioRepo.moveTrack(trackId, newOffsetMs.coerceAtLeast(0L))
+            studioRepo.moveTrack(trackId, snapped)
             reloadAndPrepare()
         }
     }
@@ -960,10 +989,13 @@ class StudioViewModel @Inject constructor(
                 val clampedStart = previewTrimStartMs.coerceIn(0L, maxTrimStart.coerceAtLeast(0L))
                 val clampedEnd = previewTrimEndMs.coerceIn(0L, maxTrimEnd.coerceAtLeast(0L))
 
+                val snappedStart = snapIfEnabled(clampedStart)
+                val snappedEnd = snapIfEnabled(clampedEnd)
+
                 st.copy(
                     trimState = trim.copy(
-                        previewTrimStartMs = clampedStart,
-                        previewTrimEndMs = clampedEnd
+                        previewTrimStartMs = snappedStart,
+                        previewTrimEndMs = snappedEnd
                     )
                 )
             } ?: st
@@ -973,13 +1005,15 @@ class StudioViewModel @Inject constructor(
     private fun finishTrim(trackId: Long, trimStartMs: Long, trimEndMs: Long) {
         val track = _state.value.tracks.firstOrNull { it.id == trackId }
         _state.update { it.copy(trimState = null) }
+        val snappedStart = snapIfEnabled(trimStartMs)
+        val snappedEnd = snapIfEnabled(trimEndMs)
         viewModelScope.launch {
-            if (track != null && trimStartMs != track.trimStartMs) {
-                val offsetDelta = trimStartMs - track.trimStartMs
+            if (track != null && snappedStart != track.trimStartMs) {
+                val offsetDelta = snappedStart - track.trimStartMs
                 val newOffsetMs = (track.offsetMs + offsetDelta).coerceAtLeast(0L)
                 studioRepo.moveTrack(trackId, newOffsetMs)
             }
-            studioRepo.trimTrack(trackId, trimStartMs, trimEndMs)
+            studioRepo.trimTrack(trackId, snappedStart, snappedEnd)
             reloadAndPrepare()
         }
     }
@@ -1107,8 +1141,8 @@ class StudioViewModel @Inject constructor(
 
     private fun setLoopRegion(startMs: Long, endMs: Long) {
         val total = _state.value.totalDurationMs
-        val cStart = startMs.coerceIn(0L, total)
-        val cEnd = endMs.coerceIn(0L, total)
+        val cStart = snapIfEnabled(startMs).coerceIn(0L, total)
+        val cEnd = snapIfEnabled(endMs).coerceIn(0L, total)
         if (cEnd - cStart < MIN_LOOP_DURATION_MS) return
         _state.update { it.copy(loopStartMs = cStart, loopEndMs = cEnd, isLoopEnabled = true) }
         audioEngine.setLoopRegion(cStart, cEnd)
@@ -1136,7 +1170,8 @@ class StudioViewModel @Inject constructor(
     private fun updateLoopRegionStart(startMs: Long) {
         val current = _state.value
         val end = current.loopEndMs ?: return
-        val clamped = startMs.coerceIn(0L, (end - MIN_LOOP_DURATION_MS).coerceAtLeast(0L))
+        val snapped = snapIfEnabled(startMs)
+        val clamped = snapped.coerceIn(0L, (end - MIN_LOOP_DURATION_MS).coerceAtLeast(0L))
         _state.update { it.copy(loopStartMs = clamped) }
         if (current.isLoopEnabled) {
             audioEngine.setLoopRegion(clamped, end)
@@ -1147,7 +1182,8 @@ class StudioViewModel @Inject constructor(
         val current = _state.value
         val start = current.loopStartMs ?: return
         val total = current.totalDurationMs
-        val clamped = endMs.coerceIn(start + MIN_LOOP_DURATION_MS, total)
+        val snapped = snapIfEnabled(endMs)
+        val clamped = snapped.coerceIn(start + MIN_LOOP_DURATION_MS, total)
         _state.update { it.copy(loopEndMs = clamped) }
         if (current.isLoopEnabled) {
             audioEngine.setLoopRegion(start, clamped)
@@ -1301,7 +1337,8 @@ class StudioViewModel @Inject constructor(
                 clipOffsetsMs.toLongArray()
             } else {
                 LongArray(0)
-            }
+            },
+            beatsPerBar = _state.value.timeSignatureNumerator
         )
     }
 
@@ -1313,6 +1350,33 @@ class StudioViewModel @Inject constructor(
                 drumRepo.toggleStep(patternState.patternId, stepIndex, drumNote)
             } catch (e: Exception) {
                 _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to toggle step."))
+            }
+        }
+    }
+
+    /** Update project time signature on the idea and push to drum sequencer. */
+    private fun setTimeSignature(numerator: Int, denominator: Int) {
+        _state.update {
+            it.copy(
+                timeSignatureNumerator = numerator,
+                timeSignatureDenominator = denominator
+            )
+        }
+        val ideaId = currentIdeaId ?: return
+        viewModelScope.launch {
+            try {
+                ideaRepo.updateTimeSignature(ideaId, numerator, denominator)
+                // Re-push all drum patterns with new beatsPerBar
+                val st = _state.value
+                for ((trackId, pattern) in st.drumPatterns) {
+                    val track = st.tracks.find { it.id == trackId } ?: continue
+                    pushDrumPatternToEngine(
+                        track, pattern.stepsPerBar, pattern.bars,
+                        pattern.steps, pattern.clips.map { it.offsetMs }
+                    )
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to persist time signature: ${e.message}")
             }
         }
     }
@@ -1363,10 +1427,11 @@ class StudioViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val patternState = _state.value.drumPatterns[trackId]
-                // Compute pattern duration: bars * 4 beats * (60_000 / bpm)
-                val bpm = _state.value.bpm
+                val st = _state.value
                 val bars = patternState?.bars ?: 1
-                val patternDurationMs = ((bars * 4.0 * 60_000.0) / bpm).toLong()
+                val patternDurationMs = com.example.nightjar.audio.MusicalTimeConverter
+                    .msPerMeasure(st.bpm, st.timeSignatureNumerator, st.timeSignatureDenominator)
+                    .toLong() * bars
                 drumRepo.duplicateClip(clipId, patternDurationMs)
                 reloadClipsForTrack(trackId)
             } catch (e: Exception) {
@@ -1378,7 +1443,8 @@ class StudioViewModel @Inject constructor(
     private fun moveClip(trackId: Long, clipId: Long, newOffsetMs: Long) {
         viewModelScope.launch {
             try {
-                drumRepo.moveClip(clipId, newOffsetMs.coerceAtLeast(0L))
+                val snapped = snapIfEnabled(newOffsetMs).coerceAtLeast(0L)
+                drumRepo.moveClip(clipId, snapped)
                 reloadClipsForTrack(trackId)
             } catch (e: Exception) {
                 _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to move clip."))
@@ -1395,6 +1461,34 @@ class StudioViewModel @Inject constructor(
                 _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to delete clip."))
             }
         }
+    }
+
+    // ── Drum clip drag-to-reposition ────────────────────────────────────
+
+    private fun startDragClip(trackId: Long, clipId: Long) {
+        val pattern = _state.value.drumPatterns[trackId] ?: return
+        val clip = pattern.clips.find { it.clipId == clipId } ?: return
+        _state.update {
+            it.copy(clipDragState = ClipDragState(trackId, clipId, clip.offsetMs, clip.offsetMs))
+        }
+    }
+
+    private fun updateDragClip(previewOffsetMs: Long) {
+        _state.update { st ->
+            st.clipDragState?.let { drag ->
+                val snapped = snapIfEnabled(previewOffsetMs).coerceAtLeast(0L)
+                st.copy(clipDragState = drag.copy(previewOffsetMs = snapped))
+            } ?: st
+        }
+    }
+
+    private fun finishDragClip(trackId: Long, clipId: Long, newOffsetMs: Long) {
+        _state.update { it.copy(clipDragState = null) }
+        moveClip(trackId, clipId, newOffsetMs)
+    }
+
+    private fun cancelDragClip() {
+        _state.update { it.copy(clipDragState = null) }
     }
 
     /** Reload clips for a drum track and re-push pattern to engine. */

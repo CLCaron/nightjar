@@ -253,7 +253,7 @@ Java_com_example_nightjar_audio_OboeAudioEngine_nativeUpdateDrumPattern(
         jint stepsPerBar, jint bars, jlong offsetMs,
         jfloat volume, jboolean muted,
         jintArray stepIndicesArr, jintArray drumNotesArr, jfloatArray velocitiesArr,
-        jlongArray clipOffsetsMsArr) {
+        jlongArray clipOffsetsMsArr, jint beatsPerBar) {
     if (!sEngine) return;
 
     jint hitCount = env->GetArrayLength(stepIndicesArr);
@@ -277,7 +277,8 @@ Java_com_example_nightjar_audio_OboeAudioEngine_nativeUpdateDrumPattern(
         static_cast<const float*>(velocities),
         static_cast<int>(hitCount),
         clipOffsetsMs != nullptr ? reinterpret_cast<const int64_t*>(clipOffsetsMs) : nullptr,
-        static_cast<int>(clipCount));
+        static_cast<int>(clipCount),
+        static_cast<int>(beatsPerBar));
 
     env->ReleaseIntArrayElements(stepIndicesArr, stepIndices, JNI_ABORT);
     env->ReleaseIntArrayElements(drumNotesArr, drumNotes, JNI_ABORT);

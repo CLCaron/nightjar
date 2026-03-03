@@ -11,6 +11,14 @@ data class DrumClipUiState(
     val offsetMs: Long
 )
 
+/** Transient state while the user is long-press-dragging a drum clip to reposition it. */
+data class ClipDragState(
+    val trackId: Long,
+    val clipId: Long,
+    val originalOffsetMs: Long,
+    val previewOffsetMs: Long
+)
+
 /** Snapshot of a drum pattern for UI rendering, keyed by track ID. */
 data class DrumPatternUiState(
     val patternId: Long = 0L,
@@ -61,7 +69,11 @@ data class StudioUiState(
     val confirmingDeleteTakeTrackId: Long? = null,
     val expandedTakeDrawerIds: Set<Long> = emptySet(),
     val bpm: Double = 120.0,
-    val drumPatterns: Map<Long, DrumPatternUiState> = emptyMap()
+    val timeSignatureNumerator: Int = 4,
+    val timeSignatureDenominator: Int = 4,
+    val isSnapEnabled: Boolean = true,
+    val drumPatterns: Map<Long, DrumPatternUiState> = emptyMap(),
+    val clipDragState: ClipDragState? = null
 ) {
     val hasLoopRegion: Boolean get() = loopStartMs != null && loopEndMs != null
 
@@ -105,7 +117,11 @@ data class StudioUiState(
                 confirmingDeleteTakeTrackId == other.confirmingDeleteTakeTrackId &&
                 expandedTakeDrawerIds == other.expandedTakeDrawerIds &&
                 bpm == other.bpm &&
-                drumPatterns == other.drumPatterns
+                timeSignatureNumerator == other.timeSignatureNumerator &&
+                timeSignatureDenominator == other.timeSignatureDenominator &&
+                isSnapEnabled == other.isSnapEnabled &&
+                drumPatterns == other.drumPatterns &&
+                clipDragState == other.clipDragState
     }
 
     override fun hashCode(): Int {
@@ -146,7 +162,11 @@ data class StudioUiState(
         result = 31 * result + (confirmingDeleteTakeTrackId?.hashCode() ?: 0)
         result = 31 * result + expandedTakeDrawerIds.hashCode()
         result = 31 * result + bpm.hashCode()
+        result = 31 * result + timeSignatureNumerator.hashCode()
+        result = 31 * result + timeSignatureDenominator.hashCode()
+        result = 31 * result + isSnapEnabled.hashCode()
         result = 31 * result + drumPatterns.hashCode()
+        result = 31 * result + (clipDragState?.hashCode() ?: 0)
         return result
     }
 }
@@ -230,6 +250,10 @@ sealed interface StudioAction {
     data object DismissDeleteTake : StudioAction
     data object ExecuteDeleteTake : StudioAction
 
+    // Time signature / Snap
+    data class SetTimeSignature(val numerator: Int, val denominator: Int) : StudioAction
+    data object ToggleSnap : StudioAction
+
     // Drum sequencer
     data class ToggleDrumStep(
         val trackId: Long,
@@ -243,6 +267,12 @@ sealed interface StudioAction {
     data class DuplicateClip(val trackId: Long, val clipId: Long) : StudioAction
     data class MoveClip(val trackId: Long, val clipId: Long, val newOffsetMs: Long) : StudioAction
     data class DeleteClip(val trackId: Long, val clipId: Long) : StudioAction
+
+    // Drum clip drag-to-reposition
+    data class StartDragClip(val trackId: Long, val clipId: Long) : StudioAction
+    data class UpdateDragClip(val previewOffsetMs: Long) : StudioAction
+    data class FinishDragClip(val trackId: Long, val clipId: Long, val newOffsetMs: Long) : StudioAction
+    data object CancelDragClip : StudioAction
 }
 
 /** One-shot side effects emitted by [StudioViewModel]. */

@@ -1,6 +1,7 @@
 package com.example.nightjar.ui.studio
 
 import com.example.nightjar.audio.AudioLatencyEstimator
+import com.example.nightjar.audio.MusicalTimeConverter
 import com.example.nightjar.ui.components.NjSectionTitle
 import android.Manifest
 import android.content.pm.PackageManager
@@ -286,6 +287,18 @@ fun StudioScreen(
                 }
             }
 
+            // Project controls: time sig, BPM, snap, position
+            if (!state.isLoading && state.errorMessage == null) {
+                ProjectControlsBar(
+                    bpm = state.bpm,
+                    timeSignatureNumerator = state.timeSignatureNumerator,
+                    timeSignatureDenominator = state.timeSignatureDenominator,
+                    isSnapEnabled = state.isSnapEnabled,
+                    globalPositionMs = state.globalPositionMs,
+                    onAction = vm::onAction
+                )
+            }
+
             if (state.tracks.isEmpty() && !state.isRecording) {
                 TimelinePlaceholder("No tracks yet.")
             } else {
@@ -315,7 +328,11 @@ fun StudioScreen(
                     expandedTakeTrackIds = state.expandedTakeTrackIds,
                     expandedTakeDrawerIds = state.expandedTakeDrawerIds,
                     drumPatterns = state.drumPatterns,
+                    clipDragState = state.clipDragState,
                     bpm = state.bpm,
+                    timeSignatureNumerator = state.timeSignatureNumerator,
+                    timeSignatureDenominator = state.timeSignatureDenominator,
+                    isSnapEnabled = state.isSnapEnabled,
                     getAudioFile = vm::getAudioFile,
                     onAction = vm::onAction
                 )
@@ -641,4 +658,97 @@ private fun RenameDialog(
             }
         }
     )
+}
+
+/** Common time signature presets for cycling. */
+private val TIME_SIGNATURE_PRESETS = listOf(
+    4 to 4,
+    3 to 4,
+    6 to 8,
+    2 to 4
+)
+
+/**
+ * Compact project controls bar: time signature, BPM, snap toggle, position readout.
+ * Sits between the title and the timeline.
+ */
+@Composable
+private fun ProjectControlsBar(
+    bpm: Double,
+    timeSignatureNumerator: Int,
+    timeSignatureDenominator: Int,
+    isSnapEnabled: Boolean,
+    globalPositionMs: Long,
+    onAction: (StudioAction) -> Unit
+) {
+    val position = remember(globalPositionMs, bpm, timeSignatureNumerator, timeSignatureDenominator) {
+        MusicalTimeConverter.msToPosition(
+            globalPositionMs, bpm, timeSignatureNumerator, timeSignatureDenominator
+        )
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                NjStudioBg.copy(alpha = 0.6f),
+                RoundedCornerShape(6.dp)
+            )
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Time signature picker -- cycle through presets on tap
+        val currentSig = timeSignatureNumerator to timeSignatureDenominator
+        NjStudioButton(
+            text = "$timeSignatureNumerator/$timeSignatureDenominator",
+            onClick = {
+                val idx = TIME_SIGNATURE_PRESETS.indexOf(currentSig)
+                val next = TIME_SIGNATURE_PRESETS[(idx + 1) % TIME_SIGNATURE_PRESETS.size]
+                onAction(StudioAction.SetTimeSignature(next.first, next.second))
+            },
+            textColor = NjStudioAccent.copy(alpha = 0.8f)
+        )
+
+        // BPM with +/- buttons
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            NjStudioButton(
+                text = "-",
+                onClick = { onAction(StudioAction.SetBpm(bpm - 1.0)) },
+                textColor = NjStudioAccent.copy(alpha = 0.7f)
+            )
+            Text(
+                text = "${bpm.toInt()} BPM",
+                style = MaterialTheme.typography.labelMedium,
+                color = NjStudioAccent.copy(alpha = 0.8f),
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
+            NjStudioButton(
+                text = "+",
+                onClick = { onAction(StudioAction.SetBpm(bpm + 1.0)) },
+                textColor = NjStudioAccent.copy(alpha = 0.7f)
+            )
+        }
+
+        // Snap toggle
+        NjStudioButton(
+            text = "Snap",
+            onClick = { onAction(StudioAction.ToggleSnap) },
+            isActive = isSnapEnabled,
+            ledColor = NjStudioAccent,
+        )
+
+        // Push position to the right
+        Spacer(Modifier.weight(1f))
+
+        // Position readout
+        Text(
+            text = position.format(),
+            style = MaterialTheme.typography.labelMedium,
+            color = NjStudioWaveform.copy(alpha = 0.7f)
+        )
+    }
 }

@@ -32,6 +32,13 @@ interface IdeaDao {
     @Query("UPDATE ideas SET bpm = :bpm WHERE id = :id")
     suspend fun updateBpm(id: Long, bpm: Double)
 
+    @Query("""
+        UPDATE ideas
+        SET timeSignatureNumerator = :numerator, timeSignatureDenominator = :denominator
+        WHERE id = :id
+    """)
+    suspend fun updateTimeSignature(id: Long, numerator: Int, denominator: Int)
+
     @Query("DELETE FROM ideas WHERE id = :id")
     suspend fun deleteIdeaById(id: Long)
 

@@ -29,6 +29,7 @@ import com.example.nightjar.data.db.entity.TrackEntity
  * - **v6** — Added `bpm` to ideas, `trackType` + nullable `audioFileName` to tracks,
  *            `drum_patterns` and `drum_steps` tables for drum sequencer support.
  * - **v7** — Added `drum_clips` table for timeline clip placements of drum patterns.
+ * - **v8** — Added `timeSignatureNumerator` and `timeSignatureDenominator` to ideas.
  */
 @Database(
     entities = [
@@ -37,7 +38,7 @@ import com.example.nightjar.data.db.entity.TrackEntity
         DrumPatternEntity::class, DrumStepEntity::class,
         DrumClipEntity::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = false
 )
 abstract class NightjarDatabase : RoomDatabase() {
@@ -276,6 +277,18 @@ abstract class NightjarDatabase : RoomDatabase() {
             }
         }
 
+        /** v7 -> v8: Add time signature columns to ideas. */
+        private val MIGRATION_7_8 = object : androidx.room.migration.Migration(7, 8) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE ideas ADD COLUMN timeSignatureNumerator INTEGER NOT NULL DEFAULT 4"
+                )
+                db.execSQL(
+                    "ALTER TABLE ideas ADD COLUMN timeSignatureDenominator INTEGER NOT NULL DEFAULT 4"
+                )
+            }
+        }
+
         fun getInstance(context: Context): NightjarDatabase {
             return INSTANCE ?: synchronized(this) {
                 val db = Room.databaseBuilder(
@@ -284,7 +297,8 @@ abstract class NightjarDatabase : RoomDatabase() {
                     "nightjar.db"
                 ).addMigrations(
                     MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4,
-                    MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7
+                    MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
+                    MIGRATION_7_8
                 ).build()
                 INSTANCE = db
                 db

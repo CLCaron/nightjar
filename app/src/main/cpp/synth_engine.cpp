@@ -142,9 +142,10 @@ void SynthEngine::requestFlush() {
 void SynthEngine::updateDrumPattern(int stepsPerBar, int bars, int64_t offsetFrames,
                                      float volume, bool muted,
                                      const std::vector<DrumHit>& hits,
-                                     const std::vector<int64_t>& clipOffsetFrames) {
+                                     const std::vector<int64_t>& clipOffsetFrames,
+                                     int beatsPerBar) {
     sequencer_.updatePattern(stepsPerBar, bars, offsetFrames, volume, muted,
-                             hits, clipOffsetFrames);
+                             hits, clipOffsetFrames, beatsPerBar);
 }
 
 void SynthEngine::setSequencerEnabled(bool enabled) {

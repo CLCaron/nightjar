@@ -262,7 +262,8 @@ void AudioEngine::updateDrumPattern(int stepsPerBar, int bars, int64_t offsetMs,
                                      float volume, bool muted,
                                      const int* stepIndices, const int* drumNotes,
                                      const float* velocities, int hitCount,
-                                     const int64_t* clipOffsetsMs, int clipCount) {
+                                     const int64_t* clipOffsetsMs, int clipCount,
+                                     int beatsPerBar) {
     if (!synthEngine_) return;
 
     std::vector<DrumHit> hits;
@@ -285,7 +286,8 @@ void AudioEngine::updateDrumPattern(int stepsPerBar, int bars, int64_t offsetMs,
     }
 
     synthEngine_->updateDrumPattern(
-        stepsPerBar, bars, msToFrames(offsetMs), volume, muted, hits, clipOffsetFrames);
+        stepsPerBar, bars, msToFrames(offsetMs), volume, muted, hits, clipOffsetFrames,
+        beatsPerBar);
 
     // Recompute total frames to include drum pattern end
     if (transport_) {

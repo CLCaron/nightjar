@@ -183,9 +183,10 @@ class OboeAudioEngine @Inject constructor() {
         stepIndices: IntArray,
         drumNotes: IntArray,
         velocities: FloatArray,
-        clipOffsetsMs: LongArray = LongArray(0)
+        clipOffsetsMs: LongArray = LongArray(0),
+        beatsPerBar: Int = 4
     ) = nativeUpdateDrumPattern(stepsPerBar, bars, offsetMs, volume, muted,
-        stepIndices, drumNotes, velocities, clipOffsetsMs)
+        stepIndices, drumNotes, velocities, clipOffsetsMs, beatsPerBar)
 
     fun setBpm(bpm: Double) = nativeSetBpm(bpm)
 
@@ -263,7 +264,7 @@ class OboeAudioEngine @Inject constructor() {
         stepsPerBar: Int, bars: Int, offsetMs: Long,
         volume: Float, muted: Boolean,
         stepIndices: IntArray, drumNotes: IntArray, velocities: FloatArray,
-        clipOffsetsMs: LongArray
+        clipOffsetsMs: LongArray, beatsPerBar: Int
     )
     private external fun nativeSetBpm(bpm: Double)
     private external fun nativeSetDrumSequencerEnabled(enabled: Boolean)

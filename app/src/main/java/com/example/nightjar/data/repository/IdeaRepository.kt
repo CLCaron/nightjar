@@ -93,6 +93,9 @@ class IdeaRepository(
     suspend fun updateBpm(id: Long, bpm: Double) =
         ideaDao.updateBpm(id, bpm)
 
+    suspend fun updateTimeSignature(id: Long, numerator: Int, denominator: Int) =
+        ideaDao.updateTimeSignature(id, numerator, denominator)
+
     suspend fun addTagToIdea(ideaId: Long, rawName: String) {
         val name = rawName.trim()
         if (name.isBlank()) return

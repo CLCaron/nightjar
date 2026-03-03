@@ -37,7 +37,8 @@ fun DrumTrackDrawer(
     pattern: DrumPatternUiState?,
     bpm: Double,
     onAction: (StudioAction) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    beatsPerBar: Int = 4
 ) {
     val goldBorderColor = NjStudioAccent.copy(alpha = 0.5f)
 
@@ -137,13 +138,6 @@ fun DrumTrackDrawer(
                 Spacer(Modifier.width(8.dp))
             }
 
-            // BPM display
-            Text(
-                text = "${bpm.toInt()} BPM",
-                style = MaterialTheme.typography.labelMedium,
-                color = NjStudioAccent.copy(alpha = 0.7f)
-            )
-
             // Push action buttons to the right
             Box(Modifier.weight(1f))
 
@@ -178,7 +172,8 @@ fun DrumTrackDrawer(
             DrumPatternEditor(
                 trackId = track.id,
                 pattern = pattern,
-                onAction = onAction
+                onAction = onAction,
+                beatsPerBar = beatsPerBar
             )
         }
     }

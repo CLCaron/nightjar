@@ -12,13 +12,15 @@ StepSequencer::StepSequencer() {
 void StepSequencer::updatePattern(int stepsPerBar, int bars, int64_t offsetFrames,
                                    float volume, bool muted,
                                    const std::vector<DrumHit>& hits,
-                                   const std::vector<int64_t>& clipOffsetFrames) {
+                                   const std::vector<int64_t>& clipOffsetFrames,
+                                   int beatsPerBar) {
     std::lock_guard<std::mutex> lock(editMutex_);
     Pattern* active = activePattern_.load(std::memory_order_acquire);
     Pattern* inactive = (active == &patternA_) ? &patternB_ : &patternA_;
 
     inactive->stepsPerBar = stepsPerBar;
     inactive->bars = bars;
+    inactive->beatsPerBar = beatsPerBar > 0 ? beatsPerBar : 4;
     inactive->offsetFrames = offsetFrames;
     inactive->volume = volume;
     inactive->muted = muted;
@@ -52,8 +54,8 @@ const std::vector<NoteEvent>& StepSequencer::tick(
     if (totalSteps <= 0) return pendingEvents_;
 
     // Calculate frame positions for steps.
-    // stepsPerBeat = stepsPerBar / 4 (4/4 time signature)
-    double stepsPerBeat = pat->stepsPerBar / 4.0;
+    // stepsPerBeat = stepsPerBar / beatsPerBar (accounts for time signature)
+    double stepsPerBeat = pat->stepsPerBar / static_cast<double>(pat->beatsPerBar);
     double framesPerStep = (static_cast<double>(kSampleRate) * 60.0) / (bpm * stepsPerBeat);
     double totalPatternFrames = framesPerStep * totalSteps;
 
@@ -130,7 +132,7 @@ int64_t StepSequencer::getMaxEndFrame(double bpm) const {
     int totalSteps = pat->totalSteps();
     if (totalSteps <= 0) return 0;
 
-    double stepsPerBeat = pat->stepsPerBar / 4.0;
+    double stepsPerBeat = pat->stepsPerBar / static_cast<double>(pat->beatsPerBar);
     double framesPerStep = (static_cast<double>(kSampleRate) * 60.0) / (bpm * stepsPerBeat);
     auto totalPatternFrames = static_cast<int64_t>(framesPerStep * totalSteps);
 

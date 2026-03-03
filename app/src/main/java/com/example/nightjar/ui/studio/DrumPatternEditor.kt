@@ -76,9 +76,11 @@ fun DrumPatternEditor(
     trackId: Long,
     pattern: DrumPatternUiState,
     onAction: (StudioAction) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    beatsPerBar: Int = 4
 ) {
     val totalSteps = pattern.totalSteps
+    val stepsPerBeat = if (beatsPerBar > 0) pattern.stepsPerBar / beatsPerBar else 4
     val activeSteps = remember(pattern.steps) {
         pattern.steps.map { (it.stepIndex to it.drumNote) }.toSet()
     }
@@ -113,7 +115,7 @@ fun DrumPatternEditor(
             modifier = Modifier.horizontalScroll(scrollState)
         ) {
             for (step in 0 until totalSteps) {
-                val isBeatStart = step % 4 == 0
+                val isBeatStart = stepsPerBeat > 0 && step % stepsPerBeat == 0
                 val isBarStart = step % pattern.stepsPerBar == 0
 
                 Column(

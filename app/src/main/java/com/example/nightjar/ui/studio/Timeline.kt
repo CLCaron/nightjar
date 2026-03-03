@@ -69,6 +69,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.nightjar.audio.MusicalTimeConverter
 import com.example.nightjar.data.db.entity.TakeEntity
 import com.example.nightjar.data.db.entity.TrackEntity
 import com.example.nightjar.ui.components.NjWaveform
@@ -126,7 +127,11 @@ fun TimelinePanel(
     expandedTakeTrackIds: Set<Long>,
     expandedTakeDrawerIds: Set<Long>,
     drumPatterns: Map<Long, DrumPatternUiState> = emptyMap(),
+    clipDragState: ClipDragState? = null,
     bpm: Double = 120.0,
+    timeSignatureNumerator: Int = 4,
+    timeSignatureDenominator: Int = 4,
+    isSnapEnabled: Boolean = true,
     getAudioFile: (String) -> File,
     onAction: (StudioAction) -> Unit,
     modifier: Modifier = Modifier
@@ -190,7 +195,10 @@ fun TimelinePanel(
                     TimeRuler(
                         totalDurationMs = totalDurationMs,
                         msPerDp = msPerDp,
-                        timelineWidth = timelineWidthDp
+                        timelineWidth = timelineWidthDp,
+                        bpm = bpm,
+                        timeSignatureNumerator = timeSignatureNumerator,
+                        timeSignatureDenominator = timeSignatureDenominator
                     )
 
                     // Loop overlay + gesture layer in the ruler
@@ -250,6 +258,18 @@ fun TimelinePanel(
                         .horizontalScroll(scrollState)
                 ) {
                     Box(Modifier.width(timelineWidthDp)) {
+                        // Beat grid lines (behind track content)
+                        if (isSnapEnabled) {
+                            BeatGridOverlay(
+                                totalDurationMs = totalDurationMs,
+                                msPerDp = msPerDp,
+                                bpm = bpm,
+                                timeSignatureNumerator = timeSignatureNumerator,
+                                timeSignatureDenominator = timeSignatureDenominator,
+                                timelineWidth = timelineWidthDp,
+                                laneHeight = TRACK_LANE_HEIGHT
+                            )
+                        }
                         if (track.isDrum) {
                             val drumPattern = drumPatterns[track.id]
                             DrumTrackLane(
@@ -258,10 +278,13 @@ fun TimelinePanel(
                                 msPerDp = msPerDp,
                                 bpm = bpm,
                                 pattern = drumPattern,
+                                clipDragState = clipDragState,
                                 timelineWidth = timelineWidthDp,
                                 laneHeight = TRACK_LANE_HEIGHT,
                                 effectivelyMuted = effectivelyMuted,
-                                onAction = onAction
+                                onAction = onAction,
+                                timeSignatureNumerator = timeSignatureNumerator,
+                                timeSignatureDenominator = timeSignatureDenominator
                             )
                         } else {
                             TimelineTrackLane(
@@ -311,7 +334,8 @@ fun TimelinePanel(
                         isSoloed = isSoloed,
                         pattern = drumPattern,
                         bpm = bpm,
-                        onAction = onAction
+                        onAction = onAction,
+                        beatsPerBar = timeSignatureNumerator
                     )
                 } else {
                     TrackDrawerPanel(
@@ -396,10 +420,14 @@ fun TimelinePanel(
 private fun TimeRuler(
     totalDurationMs: Long,
     msPerDp: Float,
-    timelineWidth: Dp
+    timelineWidth: Dp,
+    bpm: Double = 120.0,
+    timeSignatureNumerator: Int = 4,
+    timeSignatureDenominator: Int = 4
 ) {
     val textMeasurer = rememberTextMeasurer()
     val rulerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+    val subBeatColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.18f)
     val labelStyle = TextStyle(
         color = rulerColor,
         fontSize = 10.sp
@@ -412,42 +440,86 @@ private fun TimeRuler(
     ) {
         val totalMs = totalDurationMs.coerceAtLeast(1L)
 
-        fun msToX(ms: Long): Float = (ms / msPerDp) * density
+        fun msToX(ms: Double): Float = ((ms / msPerDp) * density).toFloat()
 
-        val tickIntervalMs = 1000L
-        val labelIntervalMs = 5000L
+        val beatMs = MusicalTimeConverter.msPerBeat(bpm, timeSignatureDenominator)
+        val measureMs = MusicalTimeConverter.msPerMeasure(
+            bpm, timeSignatureNumerator, timeSignatureDenominator
+        )
 
-        var ms = 0L
+        if (beatMs <= 0.0 || measureMs <= 0.0) return@Canvas
+
+        // Calculate pixel spacing for beats to decide density
+        val beatPx = msToX(beatMs)
+        val showBeatTicks = beatPx >= 4f
+        val showSubBeatTicks = beatPx >= 20f
+
+        // Draw measure and beat ticks
+        var ms = 0.0
+        var measureNumber = 1
         while (ms <= totalMs) {
             val x = msToX(ms)
             if (x > size.width) break
 
-            val isLabel = ms % labelIntervalMs == 0L
-            val tickHeight = if (isLabel) 12.dp.toPx() else 6.dp.toPx()
-
+            // Measure tick + label
             drawLine(
                 color = rulerColor,
-                start = Offset(x, size.height - tickHeight),
+                start = Offset(x, size.height - 12.dp.toPx()),
                 end = Offset(x, size.height),
                 strokeWidth = 1.dp.toPx()
             )
 
-            if (isLabel) {
-                val seconds = ms / 1000
-                val min = seconds / 60
-                val sec = seconds % 60
-                val label = "%d:%02d".format(min, sec)
-                val textResult = textMeasurer.measure(label, labelStyle)
-                drawText(
-                    textLayoutResult = textResult,
-                    topLeft = Offset(
-                        x - textResult.size.width / 2f,
-                        size.height - tickHeight - textResult.size.height - 2.dp.toPx()
-                    )
+            val label = measureNumber.toString()
+            val textResult = textMeasurer.measure(label, labelStyle)
+            drawText(
+                textLayoutResult = textResult,
+                topLeft = Offset(
+                    x - textResult.size.width / 2f,
+                    size.height - 12.dp.toPx() - textResult.size.height - 2.dp.toPx()
                 )
+            )
+
+            // Beat ticks within this measure
+            if (showBeatTicks) {
+                for (beat in 1 until timeSignatureNumerator) {
+                    val beatX = msToX(ms + beat * beatMs)
+                    if (beatX > size.width) break
+
+                    drawLine(
+                        color = rulerColor,
+                        start = Offset(beatX, size.height - 6.dp.toPx()),
+                        end = Offset(beatX, size.height),
+                        strokeWidth = 0.5.dp.toPx()
+                    )
+
+                    // Sub-beat ticks (halfway between beats)
+                    if (showSubBeatTicks && beat < timeSignatureNumerator) {
+                        val subBeatX = msToX(ms + (beat - 0.5) * beatMs)
+                        drawLine(
+                            color = subBeatColor,
+                            start = Offset(subBeatX, size.height - 3.dp.toPx()),
+                            end = Offset(subBeatX, size.height),
+                            strokeWidth = 0.5.dp.toPx()
+                        )
+                    }
+                }
+
+                // Sub-beat between the last beat of prev measure and first beat
+                if (showSubBeatTicks) {
+                    val lastSubX = msToX(ms + (timeSignatureNumerator - 0.5) * beatMs)
+                    if (lastSubX <= size.width) {
+                        drawLine(
+                            color = subBeatColor,
+                            start = Offset(lastSubX, size.height - 3.dp.toPx()),
+                            end = Offset(lastSubX, size.height),
+                            strokeWidth = 0.5.dp.toPx()
+                        )
+                    }
+                }
             }
 
-            ms += tickIntervalMs
+            ms += measureMs
+            measureNumber++
         }
     }
 }
@@ -679,6 +751,7 @@ private fun TimelineTrackLane(
  * Compact drum track lane in the timeline. Shows colored clip blocks with
  * small step indicators. Each clip is a separate block positioned at its
  * offset. Width is computed from pattern length and BPM.
+ * Long-press a clip to drag-to-reposition it on the timeline.
  */
 @Composable
 private fun DrumTrackLane(
@@ -687,26 +760,27 @@ private fun DrumTrackLane(
     msPerDp: Float,
     bpm: Double,
     pattern: DrumPatternUiState?,
+    clipDragState: ClipDragState? = null,
     timelineWidth: Dp,
     laneHeight: Dp,
     effectivelyMuted: Boolean,
-    onAction: (StudioAction) -> Unit = {}
+    onAction: (StudioAction) -> Unit = {},
+    timeSignatureNumerator: Int = 4,
+    timeSignatureDenominator: Int = 4
 ) {
+    val density = LocalDensity.current
     val stepsPerBar = pattern?.stepsPerBar ?: 16
     val bars = pattern?.bars ?: 1
     val totalSteps = stepsPerBar * bars
+    val beatsPerBar = timeSignatureNumerator
+    val stepsPerBeat = if (beatsPerBar > 0) stepsPerBar / beatsPerBar else 4
 
-    // Compute pattern duration in ms from BPM
-    // 1 bar = 4 beats, duration = (bars * 4 * 60_000) / bpm
-    val patternDurationMs = ((bars * 4.0 * 60_000.0) / bpm).toLong()
+    // Compute pattern duration using MusicalTimeConverter
+    val patternDurationMs = (com.example.nightjar.audio.MusicalTimeConverter
+        .msPerMeasure(bpm, timeSignatureNumerator, timeSignatureDenominator) * bars).toLong()
     val widthDp = (patternDurationMs / msPerDp).dp.coerceAtLeast(40.dp)
 
     val bgAlpha = if (effectivelyMuted) 0.25f else 0.5f
-    val stepColor = if (effectivelyMuted) {
-        trackColor.copy(alpha = 0.15f)
-    } else {
-        trackColor.copy(alpha = 0.6f)
-    }
 
     val steps = pattern?.steps ?: emptyList()
 
@@ -731,13 +805,31 @@ private fun DrumTrackLane(
         listOf(DrumClipUiState(clipId = -1, offsetMs = track.offsetMs))
     }
 
+    // Faster long-press for clip drag -- 200ms instead of the default 400ms
+    val baseViewConfig = LocalViewConfiguration.current
+    val fastViewConfig = remember(baseViewConfig) {
+        object : ViewConfiguration by baseViewConfig {
+            override val longPressTimeoutMillis: Long get() = FAST_LONG_PRESS_MS
+        }
+    }
+
+    CompositionLocalProvider(LocalViewConfiguration provides fastViewConfig) {
     Box(
         modifier = Modifier
             .width(timelineWidth)
             .height(laneHeight)
     ) {
         clipOffsets.forEach { clip ->
-            val offsetDp = (clip.offsetMs / msPerDp).dp
+            val isDragging = clipDragState?.trackId == track.id &&
+                    clipDragState.clipId == clip.clipId
+            val effectiveOffsetMs = if (isDragging) {
+                clipDragState!!.previewOffsetMs
+            } else {
+                clip.offsetMs
+            }
+            val offsetDp = (effectiveOffsetMs / msPerDp).dp
+
+            var dragAccumulatedPx by remember { mutableFloatStateOf(0f) }
 
             Box(
                 modifier = Modifier
@@ -745,7 +837,43 @@ private fun DrumTrackLane(
                     .width(widthDp)
                     .fillMaxHeight()
                     .clip(RoundedCornerShape(6.dp))
-                    .background(NjStudioLane.copy(alpha = bgAlpha))
+                    .background(NjStudioLane.copy(alpha = if (isDragging) 0.8f else bgAlpha))
+                    .then(
+                        if (isDragging) Modifier
+                            .graphicsLayer { shadowElevation = 8f }
+                            .alpha(0.85f)
+                        else Modifier
+                    )
+                    .pointerInput(track.id, clip.clipId, clip.offsetMs, msPerDp) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            val longPress = awaitLongPressOrCancellation(down.id)
+                            if (longPress != null) {
+                                dragAccumulatedPx = 0f
+                                onAction(StudioAction.StartDragClip(track.id, clip.clipId))
+                                val completed = drag(longPress.id) { change ->
+                                    val delta = change.positionChange()
+                                    change.consume()
+                                    dragAccumulatedPx += delta.x
+                                    val deltaDp = dragAccumulatedPx / density.density
+                                    val newOffsetMs = (clip.offsetMs + (deltaDp * msPerDp).toLong())
+                                        .coerceAtLeast(0L)
+                                    onAction(StudioAction.UpdateDragClip(newOffsetMs))
+                                }
+                                if (completed) {
+                                    val deltaDp = dragAccumulatedPx / density.density
+                                    val newOffsetMs = (clip.offsetMs + (deltaDp * msPerDp).toLong())
+                                        .coerceAtLeast(0L)
+                                    onAction(
+                                        StudioAction.FinishDragClip(track.id, clip.clipId, newOffsetMs)
+                                    )
+                                } else {
+                                    onAction(StudioAction.CancelDragClip)
+                                }
+                                dragAccumulatedPx = 0f
+                            }
+                        }
+                    }
                     .padding(vertical = 4.dp, horizontal = 4.dp)
             ) {
                 // Mini step grid -- per-instrument colored dots
@@ -776,8 +904,9 @@ private fun DrumTrackLane(
                         }
                     }
 
-                    // Beat dividers (every 4 steps)
-                    for (s in 0..totalSteps step 4) {
+                    // Beat dividers (every stepsPerBeat steps)
+                    val dividerStep = stepsPerBeat.coerceAtLeast(1)
+                    for (s in 0..totalSteps step dividerStep) {
                         if (s == 0) continue
                         val x = s * stepW
                         val isBar = s % stepsPerBar == 0
@@ -792,6 +921,61 @@ private fun DrumTrackLane(
                     }
                 }
             }
+        }
+    }
+    } // CompositionLocalProvider
+}
+
+/**
+ * Subtle vertical grid lines at beat boundaries, drawn behind track content.
+ * Only visible when snap-to-grid is enabled.
+ */
+@Composable
+private fun BeatGridOverlay(
+    totalDurationMs: Long,
+    msPerDp: Float,
+    bpm: Double,
+    timeSignatureNumerator: Int,
+    timeSignatureDenominator: Int,
+    timelineWidth: Dp,
+    laneHeight: Dp
+) {
+    val gridColor = Color.White.copy(alpha = 0.04f)
+    val measureGridColor = Color.White.copy(alpha = 0.08f)
+
+    Canvas(
+        modifier = Modifier
+            .width(timelineWidth)
+            .height(laneHeight)
+    ) {
+        val beatMs = MusicalTimeConverter.msPerBeat(bpm, timeSignatureDenominator)
+        val measureMs = MusicalTimeConverter.msPerMeasure(
+            bpm, timeSignatureNumerator, timeSignatureDenominator
+        )
+        if (beatMs <= 0.0) return@Canvas
+
+        fun msToX(ms: Double): Float = ((ms / msPerDp) * density).toFloat()
+
+        val beatPx = msToX(beatMs)
+        if (beatPx < 4f) return@Canvas // Too dense, skip
+
+        var ms = 0.0
+        while (ms <= totalDurationMs) {
+            val x = msToX(ms)
+            if (x > size.width) break
+
+            val isMeasure = measureMs > 0 && (ms % measureMs).let {
+                it < 1.0 || (measureMs - it) < 1.0
+            }
+
+            drawLine(
+                color = if (isMeasure) measureGridColor else gridColor,
+                start = Offset(x, 0f),
+                end = Offset(x, size.height),
+                strokeWidth = 0.5.dp.toPx()
+            )
+
+            ms += beatMs
         }
     }
 }

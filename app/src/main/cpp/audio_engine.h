@@ -80,7 +80,8 @@ public:
                            const int* stepIndices, const int* drumNotes,
                            const float* velocities, int hitCount,
                            const int64_t* clipOffsetsMs = nullptr,
-                           int clipCount = 0);
+                           int clipCount = 0,
+                           int beatsPerBar = 4);
     void setBpm(double bpm);
     void setDrumSequencerEnabled(bool enabled);
 
