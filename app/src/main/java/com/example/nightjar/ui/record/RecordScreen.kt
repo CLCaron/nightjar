@@ -1,19 +1,26 @@
 package com.example.nightjar.ui.record
 
+import com.example.nightjar.ui.components.NjCard
 import com.example.nightjar.ui.components.NjLiveWaveform
-import com.example.nightjar.ui.components.NjStarfield
+import com.example.nightjar.ui.components.PressedBodyColor
+import com.example.nightjar.ui.components.RaisedBodyColor
+import com.example.nightjar.ui.components.NjRecessedPanel
+import com.example.nightjar.ui.components.NjButton
 import com.example.nightjar.ui.components.NjWaveform
 import com.example.nightjar.ui.components.collectIsPressedWithMinDuration
-import com.example.nightjar.ui.studio.NjStudioButton
-import com.example.nightjar.ui.theme.NjAccent
+import com.example.nightjar.ui.theme.IbmPlexMono
 import com.example.nightjar.ui.theme.NjBg
+import com.example.nightjar.ui.theme.NjPanelInset
+import com.example.nightjar.ui.theme.NjMuted
+import com.example.nightjar.ui.theme.NjMuted2
 import com.example.nightjar.ui.theme.NjRecordCoral
-import com.example.nightjar.ui.theme.NjSurface2
+import com.example.nightjar.ui.theme.NjTrackColors
 import android.Manifest
 import android.content.pm.PackageManager
 import android.view.HapticFeedbackConstants
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -22,6 +29,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
@@ -35,8 +43,16 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -47,38 +63,45 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.nightjar.ui.theme.NjStudioAccent
+import kotlin.math.cos
+import kotlin.math.sin
 import kotlinx.coroutines.flow.collectLatest
 
 /**
  * Record screen -- the app's landing page.
  *
  * Centered around a hardware-style circular record button with a coral
- * LED indicator. Idle shows a coral circle; recording sinks the button
- * in, morphs the indicator to a rounded-square stop icon, and pulses
- * a coral ring. After stopping, the user sees a waveform preview with
- * options to open Overview, open Studio, or start a new recording.
- * All secondary actions use hardware-style push buttons (NjStudioButton).
+ * LED dot. The button body blends with the background and sinks in on
+ * press. After stopping, the user sees a waveform preview in a recessed
+ * panel with options to open Overview, open Studio, or start a new
+ * recording. All secondary actions use NjButton.
  */
 @Composable
 fun RecordScreen(
@@ -139,31 +162,47 @@ fun RecordScreen(
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
     ) { padding ->
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp, vertical = 18.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            NjStarfield(
-                modifier = Modifier.fillMaxSize(),
-                isRecording = state.isRecording
-            )
+            Box {
+                Text(
+                    text = "Nightjar",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+                )
+                Text(
+                    text = "Nightjar",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = Color.White.copy(alpha = 0.25f),
+                    modifier = Modifier.offset(x = 1.1.dp, y = 1.3.dp)
+                )
+            }
 
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .navigationBarsPadding()
-                    .padding(horizontal = 20.dp, vertical = 18.dp),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-            Text(
-                text = "Nightjar",
-                style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
-            )
+            // Subtle groove below title
+            Spacer(Modifier.height(10.dp))
+            Canvas(Modifier.fillMaxWidth(0.5f).height(1.dp)) {
+                drawLine(
+                    brush = Brush.horizontalGradient(
+                        colors = listOf(
+                            Color.Transparent,
+                            NjMuted.copy(alpha = 0.18f),
+                            Color.Transparent
+                        )
+                    ),
+                    start = Offset(0f, size.height / 2),
+                    end = Offset(size.width, size.height / 2),
+                    strokeWidth = size.height
+                )
+            }
 
-            Spacer(Modifier.height(28.dp))
+            Spacer(Modifier.height(24.dp))
 
             if (!hasMicPermission) {
                 Text(
@@ -174,10 +213,10 @@ fun RecordScreen(
 
                 Spacer(Modifier.height(14.dp))
 
-                NjStudioButton(
+                NjButton(
                     text = "Enable microphone",
                     onClick = { requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
-                    isActive = true,
+                    isActive = false,
                     ledColor = NjRecordCoral,
                     modifier = Modifier.heightIn(min = 48.dp)
                 )
@@ -193,122 +232,100 @@ fun RecordScreen(
                 Spacer(Modifier.height(14.dp))
 
                 val postRecording = state.postRecording
-                if (state.isRecording) {
-                    Text(
-                        text = "Recording\u2026",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f)
-                    )
-
-                    if (state.liveAmplitudes.isNotEmpty()) {
-                        Spacer(Modifier.height(16.dp))
-
-                        NjLiveWaveform(
-                            amplitudes = state.liveAmplitudes,
-                            modifier = Modifier
-                                .fillMaxWidth(0.7f)
-                                .padding(horizontal = 8.dp),
-                            height = 48.dp
-                        )
-                    }
-                } else if (!state.isRecording && postRecording == null &&
+                val isSaving = !state.isRecording && postRecording == null &&
                     state.liveAmplitudes.isNotEmpty()
-                ) {
-                    // Transitional state: recording just stopped, DB save in progress.
-                    // Show frozen live waveform as a visual bridge.
-                    Text(
-                        text = "Saving\u2026",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f)
-                    )
+                val isBusy = state.isRecording || isSaving
+                val waveformColor = NjTrackColors[0].copy(alpha = 0.65f)
 
-                    Spacer(Modifier.height(16.dp))
+                // LCD status text -- always visible, content changes per state
+                val lcdText = when {
+                    state.isRecording -> "RECORDING"
+                    isSaving -> "SAVING"
+                    postRecording != null -> "SAVED"
+                    else -> "RECORD"
+                }
+                StatusLcd(lcdText)
 
-                    NjLiveWaveform(
-                        amplitudes = state.liveAmplitudes,
-                        modifier = Modifier
-                            .fillMaxWidth(0.7f)
-                            .padding(horizontal = 8.dp),
-                        height = 48.dp
-                    )
-                } else if (postRecording != null) {
-                    Text(
-                        text = "Captured audio",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f)
-                    )
+                Spacer(Modifier.height(16.dp))
 
-                    Spacer(Modifier.height(16.dp))
-
-                    NjWaveform(
-                        audioFile = postRecording.audioFile,
-                        modifier = Modifier
-                            .fillMaxWidth(0.7f)
-                            .padding(horizontal = 8.dp),
-                        height = 48.dp
-                    )
-
-                    Spacer(Modifier.height(20.dp))
-
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        NjStudioButton(
-                            text = "Done",
+                // Waveform panel -- always present, content changes per state
+                when {
+                    postRecording != null -> {
+                        TransformingWaveformPanel(
+                            audioFile = postRecording.audioFile,
+                            barColor = waveformColor,
                             onClick = { vm.onAction(RecordAction.GoToOverview) },
-                            isActive = true,
-                            ledColor = NjAccent
-                        )
-                        NjStudioButton(
-                            text = "Open in Studio",
-                            onClick = { vm.onAction(RecordAction.GoToStudio) }
+                            modifier = Modifier.fillMaxWidth(0.85f)
                         )
                     }
-                } else {
-                    Text(
-                        text = "Record",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f)
-                    )
-
-                    Spacer(Modifier.height(20.dp))
-
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        NjStudioButton(
-                            text = "Write",
-                            onClick = { vm.onAction(RecordAction.CreateWriteIdea) }
-                        )
-                        NjStudioButton(
-                            text = "Studio",
-                            onClick = { vm.onAction(RecordAction.CreateStudioIdea) }
-                        )
+                    state.liveAmplitudes.isNotEmpty() -> {
+                        NjRecessedPanel(
+                            modifier = Modifier.fillMaxWidth(0.85f)
+                        ) {
+                            NjLiveWaveform(
+                                amplitudes = state.liveAmplitudes,
+                                modifier = Modifier.fillMaxWidth(),
+                                height = 48.dp,
+                                barColor = waveformColor
+                            )
+                        }
+                    }
+                    else -> {
+                        // Empty powered-off panel
+                        NjRecessedPanel(
+                            modifier = Modifier.fillMaxWidth(0.85f)
+                        ) {
+                            Spacer(Modifier.height(48.dp).fillMaxWidth())
+                        }
                     }
                 }
 
-                Spacer(Modifier.height(26.dp))
+                Spacer(Modifier.height(16.dp))
 
-                NjStudioButton(
-                    text = "Open Library",
+                // Write stays sunk after recording (waveform button handles
+                // navigation to Overview)
+                val writeSunk = isBusy || postRecording != null
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    RecordScreenButton(
+                        icon = Icons.Filled.Edit,
+                        label = "Write",
+                        onClick = { vm.onAction(RecordAction.CreateWriteIdea) },
+                        enabled = !writeSunk,
+                        modifier = Modifier.weight(1f)
+                    )
+                    RecordScreenButton(
+                        icon = Icons.Filled.Tune,
+                        label = "Studio",
+                        onClick = {
+                            if (postRecording != null) vm.onAction(RecordAction.GoToStudio)
+                            else vm.onAction(RecordAction.CreateStudioIdea)
+                        },
+                        enabled = !isBusy,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+                RecordScreenButton(
+                    icon = Icons.AutoMirrored.Filled.List,
+                    label = "Library",
                     onClick = onOpenLibrary,
-                    modifier = Modifier.heightIn(min = 48.dp)
+                    enabled = !isBusy
                 )
-            }
             }
         }
     }
 }
 
 /**
- * Hardware-style circular record button with beveled edges.
+ * Hardware-style circular record button with beveled edges and knurled ring.
  *
- * Idle: dark body with raised bevel and a coral filled circle indicator.
- * A coral ring breathes slowly (5s cycle). Recording: body sinks in
- * (bevel inverts), indicator morphs to a coral rounded-square stop icon,
- * ring pulses faster (900ms), and a coral radial glow appears behind
- * the button. Haptic feedback on press (CONTEXT_CLICK) and release
- * (CLOCK_TICK).
+ * The body color is very close to the background so it "disappears" into
+ * the surface when pressed -- like pressing a flush-mount button. A coral
+ * LED dot is painted at the center (always circular, no shape morphing).
+ * Subtle coral ring breathes slowly when idle, pulses when recording.
+ * When recording stops, the ring drains counterclockwise before returning
+ * to idle breathing. A faint radial glow appears behind the button during
+ * recording.
  */
 @Composable
 private fun HardwareRecordButton(
@@ -321,7 +338,9 @@ private fun HardwareRecordButton(
     val view = LocalView.current
 
     val visuallyPressed = isRecording || fingerDown
-    val bodyColor = if (visuallyPressed) Color(0xFF12101A) else NjSurface2
+
+    // Body blends with background when pressed -- sinks into the panel
+    val bodyColor = if (visuallyPressed) NjBg else Color(0xFF151220)
 
     // Haptics on raw press/release events
     LaunchedEffect(interactionSource) {
@@ -335,32 +354,24 @@ private fun HardwareRecordButton(
         }
     }
 
-    // Body + indicator scale down when pressed -- physical sink-in feel
+    // Body scale down when pressed -- physical sink-in feel
     val pressScale by animateFloatAsState(
         targetValue = if (visuallyPressed) 0.93f else 1.0f,
         animationSpec = tween(durationMillis = 80),
         label = "pressScale"
     )
 
-    // Inner shape corner radius: 50% (circle) to 26% (rounded square)
-    val cornerFraction by animateFloatAsState(
-        targetValue = if (isRecording) 0.26f else 0.50f,
-        animationSpec = tween(durationMillis = 250, delayMillis = 150),
-        label = "cornerFraction"
-    )
+    // Ring drain animation -- counterclockwise sweep from 360 to 0 when recording stops
+    var isDraining by remember { mutableStateOf(false) }
+    val drainSweep = remember { Animatable(360f) }
+    var drainAlpha by remember { mutableFloatStateOf(0.3f) }
 
-    // Inner shape size: shrinks when recording (stop icon)
-    val innerSizeFraction by animateFloatAsState(
-        targetValue = if (isRecording) 0.38f else 0.72f,
-        animationSpec = tween(durationMillis = 250, delayMillis = 150),
-        label = "innerSize"
-    )
-
-    // Ring breathing -- slow when idle, faster pulse when recording
+    // Ring breathing -- slow when idle, faster pulse when recording.
+    // During drain, the infinite transition still runs but we ignore its alpha.
     val ringTransition = rememberInfiniteTransition(label = "ring")
-    val ringAlpha by ringTransition.animateFloat(
-        initialValue = if (isRecording) 0.15f else 0.10f,
-        targetValue = if (isRecording) 0.5f else 0.22f,
+    val breathingAlpha by ringTransition.animateFloat(
+        initialValue = if (isRecording) 0.15f else 0.08f,
+        targetValue = if (isRecording) 0.45f else 0.18f,
         animationSpec = infiniteRepeatable(
             animation = tween(
                 durationMillis = if (isRecording) 900 else 5_000,
@@ -368,8 +379,27 @@ private fun HardwareRecordButton(
             ),
             repeatMode = RepeatMode.Reverse
         ),
-        label = "ringAlpha"
+        label = "breathingAlpha"
     )
+
+    // Detect recording stop -> trigger drain
+    val currentBreathingAlpha by rememberUpdatedState(breathingAlpha)
+    LaunchedEffect(isRecording) {
+        if (!isRecording) {
+            // Capture the breathing alpha at the moment recording stopped
+            drainAlpha = currentBreathingAlpha.coerceIn(0.15f, 0.45f)
+            isDraining = true
+            drainSweep.snapTo(360f)
+            drainSweep.animateTo(
+                targetValue = 0f,
+                animationSpec = tween(durationMillis = 400, easing = LinearEasing)
+            )
+            isDraining = false
+        }
+    }
+
+    // Effective ring alpha: use drain alpha during drain, breathing otherwise
+    val ringAlpha = if (isDraining) drainAlpha else breathingAlpha
 
     Box(
         modifier = modifier
@@ -387,14 +417,15 @@ private fun HardwareRecordButton(
             val outerRadius = size.minDimension / 2f
             val bevelStroke = 1.5f.dp.toPx()
             val ringStroke = 2.dp.toPx()
-            val bodyRadius = outerRadius * 0.82f * pressScale
+            val bodyRadius = outerRadius * 0.86f * pressScale
+            val ringRadius = outerRadius - ringStroke / 2f
 
-            // Recording glow -- coral radial gradient behind body
+            // Recording glow -- subtle coral radial gradient behind body
             if (isRecording) {
                 drawCircle(
                     brush = Brush.radialGradient(
                         colors = listOf(
-                            NjRecordCoral.copy(alpha = 0.15f),
+                            NjRecordCoral.copy(alpha = 0.12f),
                             Color.Transparent
                         ),
                         center = center,
@@ -405,19 +436,63 @@ private fun HardwareRecordButton(
                 )
             }
 
-            // Opaque backing -- blocks starfield behind the button
+            // Opaque backing circle
             drawCircle(
                 color = NjBg,
                 radius = outerRadius,
                 center = center
             )
 
-            // Breathing coral ring
-            drawCircle(
-                color = NjRecordCoral.copy(alpha = ringAlpha),
-                radius = outerRadius - ringStroke / 2f,
-                style = Stroke(width = ringStroke)
-            )
+            // Coral ring -- full circle when breathing, arc when draining
+            if (isDraining) {
+                val ringDiameter = ringRadius * 2f
+                drawArc(
+                    color = NjRecordCoral.copy(alpha = ringAlpha),
+                    startAngle = -90f,
+                    sweepAngle = -drainSweep.value,
+                    useCenter = false,
+                    topLeft = Offset(
+                        center.x - ringRadius,
+                        center.y - ringRadius
+                    ),
+                    size = androidx.compose.ui.geometry.Size(
+                        ringDiameter, ringDiameter
+                    ),
+                    style = Stroke(width = ringStroke)
+                )
+            } else {
+                drawCircle(
+                    color = NjRecordCoral.copy(alpha = ringAlpha),
+                    radius = ringRadius,
+                    style = Stroke(width = ringStroke)
+                )
+            }
+
+            // Knurled edge -- subtle radial ridges between ring and body
+            val knurlCount = 72
+            val knurlInner = bodyRadius + 1.dp.toPx()
+            val knurlOuter = outerRadius - ringStroke - 1.dp.toPx()
+            val knurlStroke = 1.dp.toPx()
+            val knurlColor = NjMuted2.copy(alpha = 0.25f)
+
+            for (i in 0 until knurlCount) {
+                val angle = (360f / knurlCount) * i
+                val rad = Math.toRadians(angle.toDouble())
+                val sinA = sin(rad).toFloat()
+                val cosA = cos(rad).toFloat()
+                drawLine(
+                    color = knurlColor,
+                    start = Offset(
+                        center.x + knurlInner * sinA,
+                        center.y - knurlInner * cosA
+                    ),
+                    end = Offset(
+                        center.x + knurlOuter * sinA,
+                        center.y - knurlOuter * cosA
+                    ),
+                    strokeWidth = knurlStroke
+                )
+            }
 
             // Body circle
             drawCircle(
@@ -447,7 +522,7 @@ private fun HardwareRecordButton(
             val bevelLeft = center.x - bevelRadius
             val bevelTop = center.y - bevelRadius
             val bevelDiameter = bevelRadius * 2f
-            val bevelSize = Size(bevelDiameter, bevelDiameter)
+            val bevelSize = androidx.compose.ui.geometry.Size(bevelDiameter, bevelDiameter)
 
             if (visuallyPressed) {
                 // Pressed: dark top-left, subtle light bottom-right
@@ -491,20 +566,288 @@ private fun HardwareRecordButton(
                 )
             }
 
-            // Coral indicator: circle when idle, rounded-square stop icon when recording
-            // Scales with pressScale so it sinks with the body
-            val innerSize = size.minDimension * innerSizeFraction * pressScale
-            val cr = innerSize * cornerFraction
-            val topLeft = Offset(
-                (size.width - innerSize) / 2f,
-                (size.height - innerSize) / 2f
-            )
-            drawRoundRect(
+            // Coral LED dot -- always circular, constant size
+            val dotRadius = outerRadius * 0.35f * pressScale * 0.5f
+            drawCircle(
                 color = NjRecordCoral,
-                topLeft = topLeft,
-                size = Size(innerSize, innerSize),
-                cornerRadius = CornerRadius(cr, cr)
+                radius = dotRadius,
+                center = center
             )
         }
+    }
+}
+
+/** LCD-style status readout -- monospace text inside a small recessed panel. */
+@Composable
+private fun StatusLcd(
+    text: String,
+    modifier: Modifier = Modifier
+) {
+    NjRecessedPanel(
+        modifier = modifier.fillMaxWidth(0.5f),
+        backgroundColor = Color(0xFF080610)
+    ) {
+        Box(
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = text,
+                style = TextStyle(
+                    fontFamily = IbmPlexMono,
+                    fontSize = 12.sp,
+                    letterSpacing = 1.5.sp
+                ),
+                color = NjStudioAccent.copy(alpha = 0.7f)
+            )
+        }
+    }
+}
+
+/** Full-width button with a leading icon for the Record screen vertical stack. */
+@Composable
+private fun RecordScreenButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
+) {
+    NjCard(
+        onClick = onClick,
+        modifier = modifier,
+        enabled = enabled,
+        horizontalArrangement = Arrangement.Center
+    ) {
+        if (enabled) {
+            Box {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = Color.White.copy(alpha = 0.10f),
+                    modifier = Modifier.size(18.dp).offset(x = 0.4.dp, y = 0.6.dp)
+                )
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = NjMuted.copy(alpha = 0.65f),
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        } else {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = NjMuted.copy(alpha = 0.65f),
+                modifier = Modifier.size(18.dp)
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        if (enabled) {
+            Box {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Color.White.copy(alpha = 0.10f),
+                    modifier = Modifier.offset(x = 0.4.dp, y = 0.6.dp)
+                )
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
+                )
+            }
+        } else {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
+            )
+        }
+    }
+}
+
+/**
+ * Waveform panel that transforms from recessed display into a raised tappable card.
+ *
+ * On first appearance, starts recessed (like a VU meter readout). After a brief
+ * delay (~600ms for ring drain + beat), animates to a raised card style over 350ms.
+ * Once raised, tapping navigates to Overview. Haptic pulse on transformation complete.
+ */
+@Composable
+private fun TransformingWaveformPanel(
+    audioFile: java.io.File,
+    barColor: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val view = LocalView.current
+    val shape = RoundedCornerShape(6.dp)
+
+    // Animation progress: 0 = recessed, 1 = raised
+    val progress = remember { Animatable(0f) }
+    var isTransformed by remember { mutableStateOf(false) }
+
+    // Press detection for raised state
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFingerDown by interactionSource.collectIsPressedWithMinDuration()
+
+    // Haptic on press/release when transformed
+    LaunchedEffect(interactionSource) {
+        interactionSource.interactions.collect { interaction ->
+            if (isTransformed) {
+                when (interaction) {
+                    is PressInteraction.Press ->
+                        view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                    is PressInteraction.Release ->
+                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        // Wait for ring drain (400ms) + brief beat (200ms)
+        kotlinx.coroutines.delay(600L)
+        progress.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(durationMillis = 350)
+        )
+        isTransformed = true
+        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+    }
+
+    val p = progress.value
+    val isPressedIn = isFingerDown && isTransformed
+
+    // Interpolate background: recessed dark -> raised muted surface,
+    // or pressed body when finger is down on the raised card
+    val bgColor = if (isPressedIn) {
+        PressedBodyColor
+    } else {
+        lerp(NjPanelInset, RaisedBodyColor, p)
+    }
+
+    // Slight scale lift during transformation
+    val scaleY = 0.97f + 0.03f * p
+
+    Box(
+        modifier = modifier
+            .graphicsLayer { this.scaleY = scaleY }
+            .clip(shape)
+            .background(bgColor)
+            .drawWithContent {
+                drawContent()
+
+                val sw = 1.dp.toPx()
+                val inv = 1f - p // recessed fade-out
+
+                if (isPressedIn) {
+                    // Pressed bevels: dark top + left, light bottom + right
+                    drawLine(
+                        Color.Black.copy(alpha = 0.45f),
+                        Offset(0f, sw / 2),
+                        Offset(size.width, sw / 2),
+                        sw * 1.5f
+                    )
+                    drawLine(
+                        Color.Black.copy(alpha = 0.25f),
+                        Offset(sw / 2, 0f),
+                        Offset(sw / 2, size.height),
+                        sw
+                    )
+                    drawLine(
+                        Color.White.copy(alpha = 0.06f),
+                        Offset(0f, size.height - sw / 2),
+                        Offset(size.width, size.height - sw / 2),
+                        sw
+                    )
+                    drawLine(
+                        Color.White.copy(alpha = 0.04f),
+                        Offset(size.width - sw / 2, 0f),
+                        Offset(size.width - sw / 2, size.height),
+                        sw
+                    )
+                } else {
+                    // Recessed bevels (fade out as p increases)
+                    if (inv > 0.01f) {
+                        // Dark top + left
+                        drawLine(
+                            Color.Black.copy(alpha = 0.45f * inv),
+                            Offset(0f, sw / 2),
+                            Offset(size.width, sw / 2),
+                            sw * 1.5f
+                        )
+                        drawLine(
+                            Color.Black.copy(alpha = 0.25f * inv),
+                            Offset(sw / 2, 0f),
+                            Offset(sw / 2, size.height),
+                            sw
+                        )
+                        // Light bottom + right
+                        drawLine(
+                            Color.White.copy(alpha = 0.05f * inv),
+                            Offset(0f, size.height - sw / 2),
+                            Offset(size.width, size.height - sw / 2),
+                            sw
+                        )
+                        drawLine(
+                            Color.White.copy(alpha = 0.03f * inv),
+                            Offset(size.width - sw / 2, 0f),
+                            Offset(size.width - sw / 2, size.height),
+                            sw
+                        )
+                    }
+
+                    // Raised bevels (fade in as p increases)
+                    if (p > 0.01f) {
+                        // Light top + left
+                        drawLine(
+                            Color.White.copy(alpha = 0.09f * p),
+                            Offset(0f, sw / 2),
+                            Offset(size.width, sw / 2),
+                            sw
+                        )
+                        drawLine(
+                            Color.White.copy(alpha = 0.05f * p),
+                            Offset(sw / 2, 0f),
+                            Offset(sw / 2, size.height),
+                            sw
+                        )
+                        // Dark bottom + right
+                        drawLine(
+                            Color.Black.copy(alpha = 0.35f * p),
+                            Offset(0f, size.height - sw / 2),
+                            Offset(size.width, size.height - sw / 2),
+                            sw
+                        )
+                        drawLine(
+                            Color.Black.copy(alpha = 0.18f * p),
+                            Offset(size.width - sw / 2, 0f),
+                            Offset(size.width - sw / 2, size.height),
+                            sw
+                        )
+                    }
+                }
+            }
+            .then(
+                if (isTransformed) {
+                    Modifier.clickable(
+                        interactionSource = interactionSource,
+                        indication = null,
+                        onClick = onClick
+                    )
+                } else {
+                    Modifier
+                }
+            )
+            .padding(12.dp)
+    ) {
+        NjWaveform(
+            audioFile = audioFile,
+            modifier = Modifier.fillMaxWidth(),
+            height = 48.dp,
+            barColor = barColor
+        )
     }
 }

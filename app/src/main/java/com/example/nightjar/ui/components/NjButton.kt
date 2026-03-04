@@ -1,4 +1,4 @@
-package com.example.nightjar.ui.studio
+package com.example.nightjar.ui.components
 
 import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.background
@@ -29,25 +29,23 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
-import com.example.nightjar.ui.components.collectIsPressedWithMinDuration
 import com.example.nightjar.ui.theme.NjMuted2
 import com.example.nightjar.ui.theme.NjStudioAccent
 
-// Pressed-in body — slightly darker than NjStudioSurface2 (0xFF1C1824).
-private val PressedBodyColor = Color(0xFF12101A)
+// Pressed-in body -- slightly darker than NjSurface2 (0xFF1C1824).
+internal val PressedBodyColor = Color(0xFF12101A)
 
-// Raised body — semi-transparent muted surface.
-private val RaisedBodyColor = NjMuted2.copy(alpha = 0.12f)
+// Raised body -- semi-transparent muted surface.
+internal val RaisedBodyColor = NjMuted2.copy(alpha = 0.12f)
 
 /**
- * Hardware-style button for Studio actions.
+ * Hardware-style button used across the entire app.
  *
  * Two visual modes controlled by [ledColor]:
  *
- * **Toggle (ledColor set):** Matches the Solo/Mute [DrawerToggleButton] DNA.
- * When [isActive], shows a dark recessed body with the text "lighting up"
- * via a soft LED glow — frosted plastic aesthetic. When inactive, a standard
- * raised muted surface.
+ * **Toggle (ledColor set):** When [isActive], shows a dark recessed body
+ * with the text "lighting up" via a soft LED glow -- frosted plastic
+ * aesthetic. When inactive, a standard raised muted surface.
  *
  * **Momentary (ledColor null):** Rectangular push button with tactile press
  * feedback. [isActive] tints the body with [activeAccent]. Used for Clear,
@@ -59,10 +57,10 @@ private val RaisedBodyColor = NjMuted2.copy(alpha = 0.12f)
  * @param activeGlow  When true (default), shows full LED glow when pressed in.
  *                    Set false for action buttons (e.g. Clear) that use toggle
  *                    visuals for the rocker effect but aren't status indicators.
- * @param shape       Corner shape — override for pill-pair grouping.
+ * @param shape       Corner shape -- override for pill-pair grouping.
  */
 @Composable
-fun NjStudioButton(
+fun NjButton(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -81,7 +79,7 @@ fun NjStudioButton(
     }
 }
 
-/** Toggle mode — two-state pressed-in/raised visual with LED glow. */
+/** Toggle mode -- two-state pressed-in/raised visual with LED glow. */
 @Composable
 private fun ToggleModeButton(
     text: String,
@@ -101,7 +99,7 @@ private fun ToggleModeButton(
     val bgColor = if (visuallyPressed) PressedBodyColor else RaisedBodyColor
     val fgColor = if (isActive) ledColor else ledColor.copy(alpha = 0.5f)
 
-    // Haptics — fire on raw press/release events.
+    // Haptics -- fire on raw press/release events.
     LaunchedEffect(interactionSource) {
         interactionSource.interactions.collect { interaction ->
             when (interaction) {
@@ -215,7 +213,7 @@ private fun ToggleModeButton(
                     }
             )
         } else {
-            // Per-letter glow via text shadow — backlit lettering effect.
+            // Per-letter glow via text shadow -- backlit lettering effect.
             val glowShadow = when {
                 isActive && activeGlow -> Shadow(
                     color = ledColor.copy(alpha = 0.8f),
@@ -240,7 +238,7 @@ private fun ToggleModeButton(
     }
 }
 
-/** Momentary mode — tactile push button with press feedback. */
+/** Momentary mode -- tactile push button with press feedback. */
 @Composable
 private fun MomentaryModeButton(
     text: String,

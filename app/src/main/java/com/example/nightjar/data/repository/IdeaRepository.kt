@@ -132,6 +132,14 @@ class IdeaRepository(
         return first.audioFileName?.let { storage.getAudioFile(it) }
     }
 
+    /** Returns all audio tracks for the given idea, sorted by sort index. */
+    suspend fun getAudioTracksForIdea(ideaId: Long): List<TrackEntity> =
+        trackDao.getTracksForIdea(ideaId).filter { it.isAudio }
+
+    /** Returns the audio file for the given file name. */
+    fun getAudioFile(fileName: String): File =
+        storage.getAudioFile(fileName)
+
     // ── Library ──────────────────────────────────────────────────────────
 
     suspend fun getAllUsedTags(): List<TagEntity> =
