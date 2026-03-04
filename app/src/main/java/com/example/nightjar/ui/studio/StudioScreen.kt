@@ -3,6 +3,7 @@ package com.example.nightjar.ui.studio
 import com.example.nightjar.audio.AudioLatencyEstimator
 import com.example.nightjar.audio.MusicalTimeConverter
 import com.example.nightjar.ui.components.NjSectionTitle
+import com.example.nightjar.ui.components.NjButton
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -68,9 +69,9 @@ import com.example.nightjar.ui.theme.NjStudioGreen
 import com.example.nightjar.ui.theme.NjStudioOutline
 import com.example.nightjar.ui.theme.NjStudioWaveform
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.FiberManualRecord
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.FiberManualRecord
-import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Repeat
 import kotlinx.coroutines.flow.collectLatest
 
@@ -222,7 +223,7 @@ fun StudioScreen(
                                 modifier = Modifier.height(IntrinsicSize.Min),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                NjStudioButton(
+                                NjButton(
                                     text = "Loop",
                                     icon = Icons.Outlined.Repeat,
                                     onClick = { vm.onAction(StudioAction.ToggleLoop) },
@@ -237,7 +238,7 @@ fun StudioScreen(
                                         .background(NjStudioOutline)
                                 )
 
-                                NjStudioButton(
+                                NjButton(
                                     text = "Clear",
                                     icon = Icons.Outlined.Close,
                                     onClick = {
@@ -253,9 +254,9 @@ fun StudioScreen(
                         }
 
                         // Record button — coral LED, always enabled
-                        NjStudioButton(
+                        NjButton(
                             text = "Rec",
-                            icon = Icons.Outlined.FiberManualRecord,
+                            icon = Icons.Filled.FiberManualRecord,
                             onClick = {
                                 if (state.isRecording) {
                                     vm.onAction(StudioAction.StopRecording)
@@ -269,9 +270,9 @@ fun StudioScreen(
 
                         // Play / Pause
                         if (state.tracks.isNotEmpty() && !state.isRecording) {
-                            NjStudioButton(
+                            NjButton(
                                 text = if (state.isPlaying) "Pause" else "Play",
-                                icon = Icons.Outlined.PlayArrow,
+                                icon = Icons.Filled.PlayArrow,
                                 onClick = {
                                     if (state.isPlaying) {
                                         vm.onAction(StudioAction.Pause)
@@ -700,7 +701,7 @@ private fun ProjectControlsBar(
     ) {
         // Time signature picker -- cycle through presets on tap
         val currentSig = timeSignatureNumerator to timeSignatureDenominator
-        NjStudioButton(
+        NjButton(
             text = "$timeSignatureNumerator/$timeSignatureDenominator",
             onClick = {
                 val idx = TIME_SIGNATURE_PRESETS.indexOf(currentSig)
@@ -715,7 +716,7 @@ private fun ProjectControlsBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(2.dp)
         ) {
-            NjStudioButton(
+            NjButton(
                 text = "-",
                 onClick = { onAction(StudioAction.SetBpm(bpm - 1.0)) },
                 textColor = NjStudioAccent.copy(alpha = 0.7f)
@@ -726,7 +727,7 @@ private fun ProjectControlsBar(
                 color = NjStudioAccent.copy(alpha = 0.8f),
                 modifier = Modifier.padding(horizontal = 4.dp)
             )
-            NjStudioButton(
+            NjButton(
                 text = "+",
                 onClick = { onAction(StudioAction.SetBpm(bpm + 1.0)) },
                 textColor = NjStudioAccent.copy(alpha = 0.7f)
@@ -734,7 +735,7 @@ private fun ProjectControlsBar(
         }
 
         // Snap toggle
-        NjStudioButton(
+        NjButton(
             text = "Snap",
             onClick = { onAction(StudioAction.ToggleSnap) },
             isActive = isSnapEnabled,

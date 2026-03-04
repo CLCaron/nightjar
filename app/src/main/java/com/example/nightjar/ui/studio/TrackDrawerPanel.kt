@@ -1,5 +1,6 @@
 package com.example.nightjar.ui.studio
 
+import com.example.nightjar.ui.components.NjButton
 import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -153,7 +154,7 @@ fun TrackDrawerPanel(
                     horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    NjStudioButton(
+                    NjButton(
                         text = "Rename",
                         onClick = {
                             onAction(
@@ -166,7 +167,7 @@ fun TrackDrawerPanel(
                         textColor = NjMuted2.copy(alpha = 0.7f)
                     )
                     Spacer(Modifier.width(8.dp))
-                    NjStudioButton(
+                    NjButton(
                         text = "Delete",
                         onClick = {
                             onAction(StudioAction.ConfirmDeleteTrack(track.id))
@@ -240,7 +241,7 @@ fun TrackDrawerPanel(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    NjStudioButton(
+                    NjButton(
                         text = "Rename",
                         onClick = {
                             onAction(
@@ -252,7 +253,7 @@ fun TrackDrawerPanel(
                         },
                         textColor = NjMuted2.copy(alpha = 0.7f)
                     )
-                    NjStudioButton(
+                    NjButton(
                         text = "Delete",
                         onClick = {
                             onAction(StudioAction.ConfirmDeleteTrack(track.id))

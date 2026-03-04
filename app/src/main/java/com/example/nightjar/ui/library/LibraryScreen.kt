@@ -1,10 +1,5 @@
 package com.example.nightjar.ui.library
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.LocalIndication
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import com.example.nightjar.ui.components.collectIsPressedWithMinDuration
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,15 +7,19 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -30,56 +29,51 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.nightjar.data.db.entity.IdeaEntity
-import com.example.nightjar.ui.components.NjSelectableChip
-import com.example.nightjar.ui.components.njBevel
-import com.example.nightjar.ui.components.NjStarburst
+import com.example.nightjar.ui.components.NjCard
+import com.example.nightjar.ui.components.NjLedDot
+import com.example.nightjar.ui.components.NjButton
 import com.example.nightjar.ui.components.NjTopBar
-import com.example.nightjar.ui.library.LibraryViewModel
-import com.example.nightjar.ui.library.SortMode
-import java.text.DateFormat
-import java.util.Date
+import com.example.nightjar.ui.theme.NjAccent
+import com.example.nightjar.ui.theme.NjStudioAccent
+import com.example.nightjar.ui.theme.NjStudioGreen
 import kotlinx.coroutines.flow.collectLatest
 
-/** A single idea card in the library list — shows title, favorite star, duration, and creation date. */
+/** A single idea card in the library list with hardware-style press feel. */
 @Composable
 private fun IdeaRow(
     idea: IdeaEntity,
     durationMs: Long?,
-    onClick: () -> Unit
+    isPreviewing: Boolean,
+    onClick: () -> Unit,
+    onPlayClick: () -> Unit
 ) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedWithMinDuration()
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 6.dp)
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f))
-            .njBevel(isPressed)
-            .clickable(interactionSource = interactionSource, indication = LocalIndication.current, onClick = onClick)
-            .padding(12.dp)
+    NjCard(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
     ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = idea.title,
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.weight(1f),
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.92f)
-                )
-                if (idea.isFavorite) {
-                    NjStarburst(filled = true, size = 16.dp)
-                }
-            }
+        // LED dot for favorites
+        if (idea.isFavorite) {
+            NjLedDot(isLit = true, litColor = NjAccent)
+            Spacer(Modifier.width(10.dp))
+        }
 
-            Spacer(Modifier.padding(top = 4.dp))
+        // Title + metadata
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = idea.title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.92f)
+            )
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
-                        .format(Date(idea.createdAtEpochMs)),
+                    java.text.DateFormat.getDateTimeInstance(
+                        java.text.DateFormat.MEDIUM,
+                        java.text.DateFormat.SHORT
+                    ).format(java.util.Date(idea.createdAtEpochMs)),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
                 )
@@ -91,10 +85,23 @@ private fun IdeaRow(
                     )
                 }
             }
+        }
+
+        // Play preview button
+        if (durationMs != null && durationMs > 0L) {
+            Spacer(Modifier.width(8.dp))
+            NjButton(
+                text = "",
+                icon = Icons.Default.PlayArrow,
+                isActive = isPreviewing,
+                ledColor = NjStudioGreen,
+                onClick = onPlayClick
+            )
+        }
     }
 }
 
-/** Formats milliseconds as `m:ss` (e.g. 72300 → "1:12"). */
+/** Formats milliseconds as `m:ss` (e.g. 72300 -> "1:12"). */
 private fun formatDuration(ms: Long): String {
     val totalSeconds = (ms + 500) / 1000
     val minutes = totalSeconds / 60
@@ -103,11 +110,11 @@ private fun formatDuration(ms: Long): String {
 }
 
 /**
- * Library screen — browse saved ideas with sorting and tag-based filtering.
+ * Library screen -- browse saved ideas with sorting and tag-based filtering.
  *
- * Displays a horizontal tag chip bar for filtering, sort mode selectors,
- * and a scrollable list of idea cards. Tapping a card navigates to the
- * Overview.
+ * Displays a horizontal chip bar (NjButton toggles) for filtering
+ * and sorting, and a scrollable list of hardware-style idea cards (NjCard).
+ * Each card has a play button for lightweight audio preview via MediaPlayer.
  */
 @Composable
 fun LibraryScreen(
@@ -129,6 +136,11 @@ fun LibraryScreen(
                 }
             }
         }
+    }
+
+    // Stop preview when navigating away
+    DisposableEffect(Unit) {
+        onDispose { vm.onAction(LibraryAction.StopPreview) }
     }
 
     Scaffold(
@@ -161,17 +173,19 @@ fun LibraryScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     item {
-                        NjSelectableChip(
+                        NjButton(
                             text = "All",
-                            selected = state.selectedTagNormalized == null,
+                            isActive = state.selectedTagNormalized == null,
+                            ledColor = NjStudioAccent,
                             onClick = { vm.onAction(LibraryAction.ClearTagFilter) }
                         )
                     }
 
                     items(state.usedTags, key = { it.id }) { tag ->
-                        NjSelectableChip(
+                        NjButton(
                             text = tag.name,
-                            selected = state.selectedTagNormalized == tag.nameNormalized,
+                            isActive = state.selectedTagNormalized == tag.nameNormalized,
+                            ledColor = NjStudioAccent,
                             onClick = { vm.onAction(LibraryAction.SelectTag(tag.nameNormalized)) }
                         )
                     }
@@ -188,23 +202,26 @@ fun LibraryScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 item {
-                    NjSelectableChip(
+                    NjButton(
                         text = "Newest",
-                        selected = state.sortMode == SortMode.NEWEST,
+                        isActive = state.sortMode == SortMode.NEWEST,
+                        ledColor = NjStudioAccent,
                         onClick = { vm.onAction(LibraryAction.SetSortMode(SortMode.NEWEST)) }
                     )
                 }
                 item {
-                    NjSelectableChip(
+                    NjButton(
                         text = "Oldest",
-                        selected = state.sortMode == SortMode.OLDEST,
+                        isActive = state.sortMode == SortMode.OLDEST,
+                        ledColor = NjStudioAccent,
                         onClick = { vm.onAction(LibraryAction.SetSortMode(SortMode.OLDEST)) }
                     )
                 }
                 item {
-                    NjSelectableChip(
+                    NjButton(
                         text = "Favs",
-                        selected = state.sortMode == SortMode.FAVORITES_FIRST,
+                        isActive = state.sortMode == SortMode.FAVORITES_FIRST,
+                        ledColor = NjStudioAccent,
                         onClick = { vm.onAction(LibraryAction.SetSortMode(SortMode.FAVORITES_FIRST)) }
                     )
                 }
@@ -228,7 +245,9 @@ fun LibraryScreen(
                         IdeaRow(
                             idea = idea,
                             durationMs = state.durations[idea.id],
-                            onClick = { onOpenOverview(idea.id) }
+                            isPreviewing = state.previewingIdeaId == idea.id,
+                            onClick = { onOpenOverview(idea.id) },
+                            onPlayClick = { vm.onAction(LibraryAction.PlayPreview(idea.id)) }
                         )
                     }
                 }

@@ -1,5 +1,6 @@
 package com.example.nightjar.ui.studio
 
+import com.example.nightjar.ui.components.NjButton
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -1443,7 +1444,7 @@ private fun TakeMiniDrawer(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.End
     ) {
-        NjStudioButton(
+        NjButton(
             text = "Rename",
             onClick = {
                 onAction(
@@ -1457,7 +1458,7 @@ private fun TakeMiniDrawer(
             textColor = NjMuted2.copy(alpha = 0.7f)
         )
         Spacer(Modifier.width(8.dp))
-        NjStudioButton(
+        NjButton(
             text = "Delete",
             onClick = {
                 onAction(StudioAction.RequestDeleteTake(take.id, take.trackId))

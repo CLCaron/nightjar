@@ -4,7 +4,7 @@ Ideas don't wait. They show up in the middle of the night, in the shower, betwee
 
 Sing it. Say it. Write it down. Build it up. However the idea comes, Nightjar catches it -- and gives you a place to develop it before you ever open a DAW.
 
-Named after a nocturnal songbird, this app is designed around late-night creativity but there for you any time of day. The warm plum-tinted palette and hardware-inspired controls create a calm, inviting space -- like a pocket recorder you'd pull out in a dim room.
+Named after a nocturnal songbird, this app is designed around late-night creativity but there for you any time of day. The warm indigo-tinted palette and hardware-inspired controls create a calm, inviting space -- like a pocket recorder you'd pull out in a dim room.
 
 ---
 
@@ -41,13 +41,13 @@ A lightweight multi-track workspace. Not a replacement for professional tools, b
 - **Snap-to-grid** -- track drag, trim, loop region, take drag, and drum clip drag all snap to beat boundaries in real time when enabled. Toggle snap on/off from the project controls bar. Visual beat grid lines on track lanes.
 - **Drum sequencer** -- step-based drum patterns powered by FluidSynth (SoundFont synthesis). Tap cells in the pattern editor grid to place hits across 10 GM drum instruments. Adjust bar count (1-8), set project BPM. Patterns play as one-shot clips on the timeline -- long-press to drag, duplicate, and delete clips to arrange. Mini-grid visualization on the timeline with per-instrument colored dots. Beat boundaries adapt to time signature.
 - **Per-track controls** -- volume knob, arm (R), solo (S), mute (M), takes (T), rename, delete via inline track drawer. Drum tracks get a specialized drawer with pattern editor and bar count controls. Responsive layout adapts to narrow screens (e.g. Galaxy Fold cover display).
-- **Hardware-style controls** -- beveled toggle buttons with LED glow, rotary knob with haptic detents, consistent across all screens
+- **Hardware-style controls** -- unified NjButton and NjCard components with beveled edges, LED glow, haptic feedback, and press-to-sink animation. Rotary volume knob with haptic detents. Embossed text on buttons and titles. Consistent across all screens.
 
 ---
 
 ## Organize it
 
-The **Library** is where ideas live long-term. Sort by newest, oldest, or favorites. Filter by tag. Tap any idea to open its Overview.
+The **Library** is where ideas live long-term. Sort by newest, oldest, or favorites. Filter by tag. Preview audio directly from the list with a tap on the play button. Tap any card to open its Overview.
 
 ---
 
@@ -82,7 +82,10 @@ Nightjar is in active development, working toward a v1.0 Play Store release.
 - Measure/beat timeline with time signature support (4/4, 3/4, 6/8, 2/4) and snap-to-grid
 - Project controls bar (BPM, time signature, snap toggle, position readout)
 - Take mini-drawer with rename and delete (long-press take header to open)
-- Library with tag filtering and sort options
+- Unified hardware-style UI components (NjButton, NjCard, NjRecessedPanel, NjLedDot) across all screens
+- Unified indigo color palette (base and Studio tokens merged)
+- Record screen with knurled record button, LCD status readout, transforming waveform panel, embossed text
+- Library with tag filtering, sort options, and audio preview playback
 - Overview with playback, waveform visualization, auto-saving notes, tags, sharing, and delete
 
 **What's next:**

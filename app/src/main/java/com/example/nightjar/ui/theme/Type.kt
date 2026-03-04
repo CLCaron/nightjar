@@ -9,6 +9,16 @@ import androidx.compose.ui.unit.sp
 import com.example.nightjar.R
 
 /**
+ * IBM Plex Mono -- monospaced typeface for LCD-style status readouts.
+ *
+ * Used for the Record screen status display to evoke a hardware LCD panel.
+ * Single weight bundled as a static TTF.
+ */
+val IbmPlexMono = FontFamily(
+    Font(R.font.ibm_plex_mono, FontWeight.Normal)
+)
+
+/**
  * Space Grotesk — retro-geometric, soft mechanical warmth.
  *
  * Quirky curves and rounded terminals keep it approachable while the

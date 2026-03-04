@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /** Filled button with the app's primary color. The default call-to-action style. */
+@Deprecated("Use NjButton instead for unified hardware aesthetic")
 @Composable
 fun NjPrimaryButton(
     text: String,
@@ -44,6 +45,7 @@ fun NjPrimaryButton(
 }
 
 /** Beveled button for secondary actions (e.g. "Open Library", "Share"). */
+@Deprecated("Use NjButton instead for unified hardware aesthetic")
 @Composable
 fun NjSecondaryButton(
     text: String,
@@ -63,6 +65,7 @@ fun NjSecondaryButton(
 }
 
 /** Error-colored button for destructive actions (e.g. "Delete"). */
+@Deprecated("Use NjButton instead for unified hardware aesthetic")
 @Composable
 fun NjDestructiveButton(
     text: String,
