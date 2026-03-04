@@ -27,7 +27,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.example.nightjar.data.db.entity.IdeaEntity
 import com.example.nightjar.ui.components.NjCard
 import com.example.nightjar.ui.components.NjLedDot
