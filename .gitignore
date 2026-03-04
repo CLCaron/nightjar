@@ -30,3 +30,7 @@ app/.cxx/
 # Claude Code
 CLAUDE.md
 .claude/
+
+# Project docs (local only)
+CLEANUP_TODO.md
+CODEBASE_OVERVIEW.md
