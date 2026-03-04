@@ -63,10 +63,10 @@ import com.example.nightjar.ui.components.NjScrubber
 import com.example.nightjar.ui.components.NjTopBar
 import com.example.nightjar.ui.theme.NjMuted2
 import com.example.nightjar.ui.theme.NjStudioAccent
-import com.example.nightjar.ui.theme.NjStudioBg
+import com.example.nightjar.ui.theme.NjBg
 import com.example.nightjar.ui.theme.NjRecordCoral
 import com.example.nightjar.ui.theme.NjStudioGreen
-import com.example.nightjar.ui.theme.NjStudioOutline
+import com.example.nightjar.ui.theme.NjOutline
 import com.example.nightjar.ui.theme.NjStudioWaveform
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FiberManualRecord
@@ -153,7 +153,7 @@ fun StudioScreen(
     }
 
     Scaffold(
-        containerColor = NjStudioBg,
+        containerColor = NjBg,
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         floatingActionButton = {
             if (!state.isLoading && state.errorMessage == null && !state.isRecording) {
@@ -235,7 +235,7 @@ fun StudioScreen(
                                     Modifier
                                         .width(1.dp)
                                         .fillMaxHeight()
-                                        .background(NjStudioOutline)
+                                        .background(NjOutline)
                                 )
 
                                 NjButton(
@@ -692,7 +692,7 @@ private fun ProjectControlsBar(
         modifier = Modifier
             .fillMaxWidth()
             .background(
-                NjStudioBg.copy(alpha = 0.6f),
+                NjBg.copy(alpha = 0.6f),
                 RoundedCornerShape(6.dp)
             )
             .padding(horizontal = 8.dp, vertical = 4.dp),

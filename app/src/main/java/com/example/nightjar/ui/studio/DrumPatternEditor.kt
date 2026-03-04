@@ -27,8 +27,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.border
 import com.example.nightjar.ui.theme.NjMuted2
 import com.example.nightjar.ui.theme.NjStudioLane
-import com.example.nightjar.ui.theme.NjStudioOutline
-import com.example.nightjar.ui.theme.NjStudioSurface2
 
 /** GM drum instruments shown in the pattern editor, ordered top to bottom. */
 val GM_DRUM_ROWS = listOf(

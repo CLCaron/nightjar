@@ -766,22 +766,6 @@ class StudioViewModel @Inject constructor(
         return if (bytesPerMs > 0) dataSize / bytesPerMs else 0L
     }
 
-    // ── Legacy overdub (FAB path) ──────────────────────────────────────────
-
-    @Suppress("unused")
-    private fun startOverdubRecording() {
-        // Legacy path: kept for FAB "+" -> Audio Recording flow
-        // Now delegates to the same recording logic
-        isFirstTrackRecording = _state.value.tracks.isEmpty()
-        recordingArmedTrackId = _state.value.armedTrackId
-        startRecordingAfterPermission()
-    }
-
-    @Suppress("unused")
-    private fun stopOverdubRecording() {
-        stopRecording()
-    }
-
     // ── Takes ──────────────────────────────────────────────────────────────
 
     private fun toggleTakesView(trackId: Long) {
