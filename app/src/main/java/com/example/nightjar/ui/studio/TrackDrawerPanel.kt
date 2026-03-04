@@ -43,10 +43,10 @@ import com.example.nightjar.ui.theme.NjStudioAccent
 import com.example.nightjar.ui.theme.NjStudioTeal
 import com.example.nightjar.ui.theme.NjError
 import com.example.nightjar.ui.theme.NjMuted2
-import com.example.nightjar.ui.theme.NjStudioSurface2
+import com.example.nightjar.ui.theme.NjSurface2
 import com.example.nightjar.ui.theme.NjStudioYellow
 
-// Pressed-in body -- slightly darker than NjStudioSurface2 (0xFF1C1824).
+// Pressed-in body -- slightly darker than NjSurface2 (0xFF1C1824).
 private val PressedBodyColor = Color(0xFF12101A)
 
 // Raised body -- semi-transparent muted surface.
@@ -86,7 +86,7 @@ fun TrackDrawerPanel(
                     strokeWidth = 1.dp.toPx()
                 )
             }
-            .background(NjStudioSurface2)
+            .background(NjSurface2)
             .padding(horizontal = 12.dp)
     ) {
         val isNarrow = maxWidth < NARROW_BREAKPOINT

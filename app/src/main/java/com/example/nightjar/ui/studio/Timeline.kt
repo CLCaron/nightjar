@@ -79,7 +79,7 @@ import com.example.nightjar.ui.theme.NjError
 import com.example.nightjar.ui.theme.NjMuted2
 import com.example.nightjar.ui.theme.NjStudioAccent
 import com.example.nightjar.ui.theme.NjStudioLane
-import com.example.nightjar.ui.theme.NjStudioSurface2
+import com.example.nightjar.ui.theme.NjSurface2
 import com.example.nightjar.ui.theme.NjStudioWaveform
 import com.example.nightjar.ui.theme.NjTrackColors
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -735,14 +735,8 @@ private fun TimelineTrackLane(
             }
 
             // Visual-only trim handles at each edge
-            TrimHandle(
-                edge = TrimEdge.LEFT,
-                modifier = Modifier.align(Alignment.CenterStart)
-            )
-            TrimHandle(
-                edge = TrimEdge.RIGHT,
-                modifier = Modifier.align(Alignment.CenterEnd)
-            )
+            TrimHandle(modifier = Modifier.align(Alignment.CenterStart))
+            TrimHandle(modifier = Modifier.align(Alignment.CenterEnd))
         }
     }
     } // CompositionLocalProvider
@@ -982,9 +976,8 @@ private fun BeatGridOverlay(
 }
 
 /** Visual trim-handle indicator on the left or right edge of a track. */
-@Suppress("UNUSED_PARAMETER")
 @Composable
-private fun TrimHandle(edge: TrimEdge, modifier: Modifier = Modifier) {
+private fun TrimHandle(modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
             .width(TRIM_HANDLE_WIDTH)
@@ -1329,7 +1322,7 @@ private fun TakeRow(
             modifier = Modifier
                 .width(HEADER_WIDTH)
                 .height(TAKE_ROW_HEIGHT)
-                .background(NjStudioSurface2.copy(alpha = 0.5f))
+                .background(NjSurface2.copy(alpha = 0.5f))
                 .combinedClickable(
                     onClick = {
                         onAction(
@@ -1439,7 +1432,7 @@ private fun TakeMiniDrawer(
                     strokeWidth = 0.5.dp.toPx()
                 )
             }
-            .background(NjStudioSurface2.copy(alpha = 0.7f))
+            .background(NjSurface2.copy(alpha = 0.7f))
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.End

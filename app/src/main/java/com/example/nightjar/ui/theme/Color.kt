@@ -30,16 +30,8 @@ val NjPanelInset = Color(0xFF0A0810)       // deeper than NjBg -- recessed displ
 val NjRecordCoral = Color(0xFFC46050)      // warm muted coral — record button LED
 val NjError = Color(0xFFD4727A)          // muted rose
 
-// ── Studio tokens — base colors now unified, aliases kept for compatibility ──
-@Deprecated("Use NjBg directly -- base tokens now match Studio values", ReplaceWith("NjBg"))
-val NjStudioBg = NjBg
-@Deprecated("Use NjSurface directly -- base tokens now match Studio values", ReplaceWith("NjSurface"))
-val NjStudioSurface = NjSurface
-@Deprecated("Use NjSurface2 directly -- base tokens now match Studio values", ReplaceWith("NjSurface2"))
-val NjStudioSurface2 = NjSurface2
+// ── Studio tokens ──
 val NjStudioLane = Color(0xFF1A161E)        // track lane background
-@Deprecated("Use NjOutline directly -- base tokens now match Studio values", ReplaceWith("NjOutline"))
-val NjStudioOutline = NjOutline
 val NjStudioAccent = Color(0xFFBE7B4A)      // warm amber-orange — playhead, Loop LED
 val NjStudioGreen = Color(0xFF7DA87A)       // muted sage green -- Play LED
 val NjStudioTeal = Color(0xFF5EA8A3)        // dusty teal -- Solo LED
