@@ -8,6 +8,7 @@ import com.example.nightjar.ui.components.NjRecessedPanel
 import com.example.nightjar.ui.components.NjButton
 import com.example.nightjar.ui.components.NjWaveform
 import com.example.nightjar.ui.components.collectIsPressedWithMinDuration
+import com.example.nightjar.ui.components.rememberMechanicalToggleState
 import com.example.nightjar.ui.theme.IbmPlexMono
 import com.example.nightjar.ui.theme.NjBg
 import com.example.nightjar.ui.theme.NjPanelInset
@@ -24,7 +25,6 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -333,18 +333,19 @@ private fun HardwareRecordButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val fingerDown by interactionSource.collectIsPressedWithMinDuration()
+    val toggleState = rememberMechanicalToggleState(isRecording)
+    val depth by toggleState.depth
     val view = LocalView.current
 
-    val visuallyPressed = isRecording || fingerDown
+    // Depth-based scale: 1.0 raised, 0.965 latched, 0.93 deep press
+    val pressScale = 1.0f - (depth * 0.07f)
 
-    // Body blends with background when pressed -- sinks into the panel
-    val bodyColor = if (visuallyPressed) NjBg else Color(0xFF151220)
+    // Body blends toward background as depth increases
+    val bodyColor = lerp(Color(0xFF151220), NjBg, depth * 2f)
 
     // Haptics on raw press/release events
-    LaunchedEffect(interactionSource) {
-        interactionSource.interactions.collect { interaction ->
+    LaunchedEffect(toggleState.interactionSource) {
+        toggleState.interactionSource.interactions.collect { interaction ->
             when (interaction) {
                 is PressInteraction.Press ->
                     view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
@@ -353,13 +354,6 @@ private fun HardwareRecordButton(
             }
         }
     }
-
-    // Body scale down when pressed -- physical sink-in feel
-    val pressScale by animateFloatAsState(
-        targetValue = if (visuallyPressed) 0.93f else 1.0f,
-        animationSpec = tween(durationMillis = 80),
-        label = "pressScale"
-    )
 
     // Ring drain animation -- counterclockwise sweep from 360 to 0 when recording stops
     var isDraining by remember { mutableStateOf(false) }
@@ -405,7 +399,7 @@ private fun HardwareRecordButton(
         modifier = modifier
             .size(92.dp)
             .clickable(
-                interactionSource = interactionSource,
+                interactionSource = toggleState.interactionSource,
                 indication = null,
                 role = Role.Button,
                 onClick = onClick
@@ -502,12 +496,13 @@ private fun HardwareRecordButton(
             )
 
             // Inner shadow when pressed -- dark edge gradient for depth
-            if (visuallyPressed) {
+            if (depth > 0.25f) {
+                val shadowAlpha = (depth * 2f).coerceAtMost(1f) * 0.25f
                 drawCircle(
                     brush = Brush.radialGradient(
                         colorStops = arrayOf(
                             0.75f to Color.Transparent,
-                            1.0f to Color.Black.copy(alpha = 0.25f)
+                            1.0f to Color.Black.copy(alpha = shadowAlpha)
                         ),
                         center = center,
                         radius = bodyRadius
@@ -524,7 +519,7 @@ private fun HardwareRecordButton(
             val bevelDiameter = bevelRadius * 2f
             val bevelSize = androidx.compose.ui.geometry.Size(bevelDiameter, bevelDiameter)
 
-            if (visuallyPressed) {
+            if (depth > 0.25f) {
                 // Pressed: dark top-left, subtle light bottom-right
                 drawArc(
                     color = Color.Black.copy(alpha = 0.45f),

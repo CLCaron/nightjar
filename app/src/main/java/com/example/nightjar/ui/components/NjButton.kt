@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
@@ -79,7 +80,7 @@ fun NjButton(
     }
 }
 
-/** Toggle mode -- two-state pressed-in/raised visual with LED glow. */
+/** Toggle mode -- three-state mechanical latching visual with LED glow. */
 @Composable
 private fun ToggleModeButton(
     text: String,
@@ -91,17 +92,21 @@ private fun ToggleModeButton(
     activeGlow: Boolean,
     shape: Shape
 ) {
-    val interactionSource = remember { MutableInteractionSource() }
+    val toggleState = rememberMechanicalToggleState(isActive)
+    val depth by toggleState.depth
     val view = LocalView.current
-    val fingerDown by interactionSource.collectIsPressedWithMinDuration()
 
-    val visuallyPressed = isActive || fingerDown
-    val bgColor = if (visuallyPressed) PressedBodyColor else RaisedBodyColor
-    val fgColor = if (isActive) ledColor else ledColor.copy(alpha = 0.5f)
+    // Depth-based body color: 0.0 raised -> 0.5 latched -> 1.0 deep press
+    val bgColor = when {
+        depth > 0.5f -> lerp(PressedBodyColor, DeepPressColor, (depth - 0.5f) * 2f)
+        else -> lerp(RaisedBodyColor, PressedBodyColor, depth * 2f)
+    }
+    val visuallyActive = toggleState.isVisuallyActive
+    val fgColor = if (visuallyActive) ledColor else ledColor.copy(alpha = 0.5f)
 
     // Haptics -- fire on raw press/release events.
-    LaunchedEffect(interactionSource) {
-        interactionSource.interactions.collect { interaction ->
+    LaunchedEffect(toggleState.interactionSource) {
+        toggleState.interactionSource.interactions.collect { interaction ->
             when (interaction) {
                 is PressInteraction.Press ->
                     view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
@@ -120,7 +125,7 @@ private fun ToggleModeButton(
 
                 val sw = 1.dp.toPx()
 
-                if (visuallyPressed) {
+                if (depth > 0.25f) {
                     // Pressed in: dark top + left (inner shadow),
                     // subtle light bottom + right (rim catch)
                     drawLine(
@@ -176,7 +181,7 @@ private fun ToggleModeButton(
                 }
             }
             .clickable(
-                interactionSource = interactionSource,
+                interactionSource = toggleState.interactionSource,
                 indication = null,
                 onClick = onClick
             )
@@ -188,7 +193,7 @@ private fun ToggleModeButton(
     ) {
         if (icon != null) {
             // Neon glow: radial gradient behind the icon
-            val glowColor = if (isActive && activeGlow) ledColor else Color.Transparent
+            val glowColor = if (visuallyActive && activeGlow) ledColor else Color.Transparent
             Icon(
                 imageVector = icon,
                 contentDescription = text.ifEmpty { null },
@@ -215,12 +220,12 @@ private fun ToggleModeButton(
         } else {
             // Per-letter glow via text shadow -- backlit lettering effect.
             val glowShadow = when {
-                isActive && activeGlow -> Shadow(
+                visuallyActive && activeGlow -> Shadow(
                     color = ledColor.copy(alpha = 0.8f),
                     offset = Offset.Zero,
                     blurRadius = 8f
                 )
-                !isActive -> Shadow(
+                !visuallyActive -> Shadow(
                     color = Color.White.copy(alpha = 0.35f),
                     offset = Offset.Zero,
                     blurRadius = 6f
