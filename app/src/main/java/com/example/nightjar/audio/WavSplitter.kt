@@ -21,6 +21,13 @@ object WavSplitter {
     private const val TAG = "WavSplitter"
     private const val WAV_HEADER_SIZE = 44
 
+    // Byte offsets within the standard 44-byte WAV header
+    private const val WAV_FORMAT_OFFSET = 20
+    private const val WAV_NUM_CHANNELS_OFFSET = 22
+    private const val WAV_SAMPLE_RATE_OFFSET = 24
+    private const val WAV_BLOCK_ALIGN_OFFSET = 32
+    private const val WAV_BITS_PER_SAMPLE_OFFSET = 34
+
     /**
      * Split a PCM WAV file at the given millisecond boundaries.
      *
@@ -149,16 +156,16 @@ object WavSplitter {
                     return null
                 }
 
-                val audioFormat = buf.getShort(20).toInt() and 0xFFFF
+                val audioFormat = buf.getShort(WAV_FORMAT_OFFSET).toInt() and 0xFFFF
                 if (audioFormat != 1) {
                     Log.e(TAG, "Unsupported audio format: $audioFormat (only PCM supported)")
                     return null
                 }
 
-                val numChannels = buf.getShort(22).toInt() and 0xFFFF
-                val sampleRate = buf.getInt(24)
-                val bitsPerSample = buf.getShort(34).toInt() and 0xFFFF
-                val blockAlign = buf.getShort(32).toInt() and 0xFFFF
+                val numChannels = buf.getShort(WAV_NUM_CHANNELS_OFFSET).toInt() and 0xFFFF
+                val sampleRate = buf.getInt(WAV_SAMPLE_RATE_OFFSET)
+                val bitsPerSample = buf.getShort(WAV_BITS_PER_SAMPLE_OFFSET).toInt() and 0xFFFF
+                val blockAlign = buf.getShort(WAV_BLOCK_ALIGN_OFFSET).toInt() and 0xFFFF
 
                 return WavHeader(sampleRate, numChannels, bitsPerSample, blockAlign)
             }

@@ -14,6 +14,9 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
+private const val CODEC_TIMEOUT_US = 5_000L
+private const val INT16_MAX_F = 32768f
+
 /**
  * Decodes an audio file to PCM and returns a normalized amplitude list
  * suitable for waveform rendering.  Runs entirely on [Dispatchers.IO].
@@ -77,7 +80,7 @@ private suspend fun decodeToBars(
 
             // Feed input buffers.
             if (!inputDone) {
-                val inIdx = codec.dequeueInputBuffer(5_000)
+                val inIdx = codec.dequeueInputBuffer(CODEC_TIMEOUT_US)
                 if (inIdx >= 0) {
                     val buf = codec.getInputBuffer(inIdx)!!
                     val read = extractor.readSampleData(buf, 0)
@@ -95,7 +98,7 @@ private suspend fun decodeToBars(
             }
 
             // Drain output buffers.
-            val outIdx = codec.dequeueOutputBuffer(info, 5_000)
+            val outIdx = codec.dequeueOutputBuffer(info, CODEC_TIMEOUT_US)
             if (outIdx >= 0) {
                 val outBuf = codec.getOutputBuffer(outIdx)
                 if (outBuf != null && info.size > 0) {
@@ -135,7 +138,7 @@ private fun collectPeaks(
             val sample = abs(buffer.short.toInt())
             peak = max(peak, sample)
         }
-        peaks.add(peak / 32768f)
+        peaks.add(peak / INT16_MAX_F)
     }
 }
 

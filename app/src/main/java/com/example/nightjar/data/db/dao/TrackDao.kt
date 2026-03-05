@@ -4,7 +4,6 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
 import com.example.nightjar.data.db.entity.TrackEntity
-import kotlinx.coroutines.flow.Flow
 
 /** Data access object for [TrackEntity] — multi-track timeline operations. */
 @Dao
@@ -22,9 +21,6 @@ interface TrackDao {
     @Query("UPDATE tracks SET trimStartMs = :startMs, trimEndMs = :endMs WHERE id = :id")
     suspend fun updateTrim(id: Long, startMs: Long, endMs: Long)
 
-    @Query("UPDATE tracks SET sortIndex = :index WHERE id = :id")
-    suspend fun updateSortIndex(id: Long, index: Int)
-
     @Query("UPDATE tracks SET isMuted = :muted WHERE id = :id")
     suspend fun updateMuted(id: Long, muted: Boolean)
 
@@ -36,9 +32,6 @@ interface TrackDao {
 
     @Query("DELETE FROM tracks WHERE id = :id")
     suspend fun deleteTrackById(id: Long)
-
-    @Query("SELECT * FROM tracks WHERE ideaId = :ideaId ORDER BY sortIndex ASC")
-    fun observeTracksForIdea(ideaId: Long): Flow<List<TrackEntity>>
 
     @Query("SELECT * FROM tracks WHERE ideaId = :ideaId ORDER BY sortIndex ASC")
     suspend fun getTracksForIdea(ideaId: Long): List<TrackEntity>
