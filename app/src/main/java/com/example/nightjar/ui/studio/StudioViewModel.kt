@@ -947,7 +947,7 @@ class StudioViewModel @Inject constructor(
         _state.update { it.copy(dragState = null) }
         val snapped = snapIfEnabled(newOffsetMs).coerceAtLeast(0L)
         viewModelScope.launch {
-            studioRepo.moveTrack(trackId, snapped)
+            studioRepo.moveTrackWithTakes(trackId, snapped)
             reloadAndPrepare()
         }
     }
