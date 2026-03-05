@@ -30,3 +30,6 @@ app/.cxx/
 # Claude Code
 CLAUDE.md
 .claude/
+
+# Project docs (local only)
+TASKS.md

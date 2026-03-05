@@ -42,4 +42,7 @@ interface TakeDao {
 
     @Query("SELECT * FROM takes WHERE trackId IN (:trackIds) ORDER BY trackId, sortIndex ASC")
     suspend fun getTakesForTracks(trackIds: List<Long>): List<TakeEntity>
+
+    @Query("UPDATE takes SET offsetMs = offsetMs + :deltaMs WHERE trackId = :trackId")
+    suspend fun shiftOffsets(trackId: Long, deltaMs: Long)
 }

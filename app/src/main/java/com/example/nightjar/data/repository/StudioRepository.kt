@@ -99,6 +99,15 @@ class StudioRepository(
         trackDao.updateOffset(trackId, newOffsetMs)
     }
 
+    suspend fun moveTrackWithTakes(trackId: Long, newOffsetMs: Long) {
+        val track = trackDao.getTrackById(trackId) ?: return
+        val deltaMs = newOffsetMs - track.offsetMs
+        trackDao.updateOffset(trackId, newOffsetMs)
+        if (deltaMs != 0L) {
+            takeDao.shiftOffsets(trackId, deltaMs)
+        }
+    }
+
     suspend fun trimTrack(trackId: Long, trimStartMs: Long, trimEndMs: Long) {
         trackDao.updateTrim(trackId, trimStartMs, trimEndMs)
     }
