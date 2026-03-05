@@ -114,7 +114,7 @@ private fun formatDuration(ms: Long): String {
  *
  * Displays a horizontal chip bar (NjButton toggles) for filtering
  * and sorting, and a scrollable list of hardware-style idea cards (NjCard).
- * Each card has a play button for lightweight audio preview via MediaPlayer.
+ * Each card has a play button for lightweight audio preview via OboeAudioEngine.
  */
 @Composable
 fun LibraryScreen(

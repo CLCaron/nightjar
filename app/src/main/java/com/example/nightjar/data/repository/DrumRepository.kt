@@ -34,12 +34,6 @@ class DrumRepository(
             ?: DrumPatternEntity(id = id, trackId = trackId)
     }
 
-    suspend fun getPattern(trackId: Long): DrumPatternEntity? =
-        drumPatternDao.getPatternForTrack(trackId)
-
-    fun observePattern(trackId: Long): Flow<DrumPatternEntity?> =
-        drumPatternDao.observePatternForTrack(trackId)
-
     suspend fun updatePatternGrid(patternId: Long, stepsPerBar: Int, bars: Int) {
         drumPatternDao.updatePatternGrid(patternId, stepsPerBar, bars)
     }
@@ -62,17 +56,10 @@ class DrumRepository(
         velocity: Float = 0.8f
     ): Boolean = drumPatternDao.toggleStep(patternId, stepIndex, drumNote, velocity)
 
-    suspend fun clearAllSteps(patternId: Long) {
-        drumPatternDao.clearAllSteps(patternId)
-    }
-
     // -- Clips --
 
     suspend fun getClips(patternId: Long): List<DrumClipEntity> =
         drumPatternDao.getClipsForPattern(patternId)
-
-    fun observeClips(patternId: Long): Flow<List<DrumClipEntity>> =
-        drumPatternDao.observeClipsForPattern(patternId)
 
     /**
      * Ensure a pattern has at least one clip. Creates a default clip

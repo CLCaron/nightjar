@@ -6,7 +6,6 @@ import com.example.nightjar.data.db.dao.TrackDao
 import com.example.nightjar.data.db.entity.TakeEntity
 import com.example.nightjar.data.db.entity.TrackEntity
 import com.example.nightjar.data.storage.RecordingStorage
-import kotlinx.coroutines.flow.Flow
 import java.io.File
 
 /**
@@ -112,12 +111,6 @@ class StudioRepository(
         trackDao.updateTrim(trackId, trimStartMs, trimEndMs)
     }
 
-    suspend fun reorderTracks(ideaId: Long, orderedTrackIds: List<Long>) {
-        orderedTrackIds.forEachIndexed { index, trackId ->
-            trackDao.updateSortIndex(trackId, index)
-        }
-    }
-
     // ── Mix controls ──────────────────────────────────────────────────────
 
     suspend fun setTrackMuted(trackId: Long, muted: Boolean) {
@@ -130,16 +123,8 @@ class StudioRepository(
 
     // ── Reads ────────────────────────────────────────────────────────────
 
-    fun observeTracks(ideaId: Long): Flow<List<TrackEntity>> =
-        trackDao.observeTracksForIdea(ideaId)
-
     suspend fun getTracks(ideaId: Long): List<TrackEntity> =
         trackDao.getTracksForIdea(ideaId)
-
-    suspend fun getTrackAudioFile(trackId: Long): File? {
-        val track = trackDao.getTrackById(trackId) ?: return null
-        return track.audioFileName?.let { storage.getAudioFile(it) }
-    }
 
     // ── Take lifecycle ────────────────────────────────────────────────────
 

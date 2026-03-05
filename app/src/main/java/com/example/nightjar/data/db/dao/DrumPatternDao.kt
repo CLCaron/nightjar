@@ -21,9 +21,6 @@ interface DrumPatternDao {
     @Query("SELECT * FROM drum_patterns WHERE trackId = :trackId")
     suspend fun getPatternForTrack(trackId: Long): DrumPatternEntity?
 
-    @Query("SELECT * FROM drum_patterns WHERE trackId = :trackId")
-    fun observePatternForTrack(trackId: Long): Flow<DrumPatternEntity?>
-
     @Query("UPDATE drum_patterns SET stepsPerBar = :stepsPerBar, bars = :bars WHERE id = :id")
     suspend fun updatePatternGrid(id: Long, stepsPerBar: Int, bars: Int)
 
@@ -53,9 +50,6 @@ interface DrumPatternDao {
     )
     suspend fun stepExists(patternId: Long, stepIndex: Int, drumNote: Int): Int
 
-    @Query("DELETE FROM drum_steps WHERE patternId = :patternId")
-    suspend fun clearAllSteps(patternId: Long)
-
     /**
      * Toggle a step: insert if absent, delete if present.
      * Returns true if the step is now active (was inserted).
@@ -79,9 +73,6 @@ interface DrumPatternDao {
 
     @Query("SELECT * FROM drum_clips WHERE patternId = :patternId ORDER BY sortIndex, offsetMs")
     suspend fun getClipsForPattern(patternId: Long): List<DrumClipEntity>
-
-    @Query("SELECT * FROM drum_clips WHERE patternId = :patternId ORDER BY sortIndex, offsetMs")
-    fun observeClipsForPattern(patternId: Long): Flow<List<DrumClipEntity>>
 
     @Query("SELECT * FROM drum_clips WHERE id = :clipId")
     suspend fun getClipById(clipId: Long): DrumClipEntity?
