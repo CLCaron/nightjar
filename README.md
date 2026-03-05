@@ -41,7 +41,7 @@ A lightweight multi-track workspace. Not a replacement for professional tools, b
 - **Snap-to-grid** -- track drag, trim, loop region, take drag, and drum clip drag all snap to beat boundaries in real time when enabled. Toggle snap on/off from the project controls bar. Visual beat grid lines on track lanes.
 - **Drum sequencer** -- step-based drum patterns powered by FluidSynth (SoundFont synthesis). Tap cells in the pattern editor grid to place hits across 10 GM drum instruments. Adjust bar count (1-8), set project BPM. Patterns play as one-shot clips on the timeline -- long-press to drag, duplicate, and delete clips to arrange. Mini-grid visualization on the timeline with per-instrument colored dots. Beat boundaries adapt to time signature.
 - **Per-track controls** -- volume knob, arm (R), solo (S), mute (M), takes (T), rename, delete via inline track drawer. Drum tracks get a specialized drawer with pattern editor and bar count controls. Responsive layout adapts to narrow screens (e.g. Galaxy Fold cover display).
-- **Hardware-style controls** -- unified NjButton and NjCard components with beveled edges, LED glow, haptic feedback, and press-to-sink animation. Rotary volume knob with haptic detents. Embossed text on buttons and titles. Consistent across all screens.
+- **Hardware-style controls** -- unified NjButton and NjCard components with beveled edges, LED glow, haptic feedback, and three-state mechanical latching feel (deep press, latched, raised). Rotary volume knob with haptic detents. Embossed text on buttons and titles. Consistent across all screens.
 
 ---
 

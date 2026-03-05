@@ -4,7 +4,6 @@ import com.example.nightjar.ui.components.NjButton
 import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,7 +23,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -33,11 +31,15 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import com.example.nightjar.data.db.entity.TrackEntity
+import com.example.nightjar.ui.components.DeepPressColor
 import com.example.nightjar.ui.components.NjKnob
-import com.example.nightjar.ui.components.collectIsPressedWithMinDuration
+import com.example.nightjar.ui.components.PressedBodyColor
+import com.example.nightjar.ui.components.RaisedBodyColor
+import com.example.nightjar.ui.components.rememberMechanicalToggleState
 import com.example.nightjar.ui.theme.NjRecordCoral
 import com.example.nightjar.ui.theme.NjStudioAccent
 import com.example.nightjar.ui.theme.NjStudioTeal
@@ -45,12 +47,6 @@ import com.example.nightjar.ui.theme.NjError
 import com.example.nightjar.ui.theme.NjMuted2
 import com.example.nightjar.ui.theme.NjSurface2
 import com.example.nightjar.ui.theme.NjStudioYellow
-
-// Pressed-in body -- slightly darker than NjSurface2 (0xFF1C1824).
-private val PressedBodyColor = Color(0xFF12101A)
-
-// Raised body -- semi-transparent muted surface.
-private val RaisedBodyColor = NjMuted2.copy(alpha = 0.12f)
 
 // Width threshold below which the drawer wraps to two rows.
 private val NARROW_BREAKPOINT = 320.dp
@@ -267,10 +263,10 @@ fun TrackDrawerPanel(
 }
 
 /**
- * Hardware-style toggle button with a "clicked in" visual when active.
+ * Hardware-style toggle button with a three-state mechanical latching feel.
  *
- * Two states: raised (inactive) and pressed-in (active or finger down).
- * Haptic click on press and release. LED glow when active.
+ * Three visual states via depth: raised (0.0), latched (0.5), deep press (1.0).
+ * Haptic click on press and release. LED glow when visually active.
  */
 @Composable
 fun DrawerToggleButton(
@@ -279,17 +275,20 @@ fun DrawerToggleButton(
     ledColor: Color,
     onClick: () -> Unit
 ) {
-    val interactionSource = remember { MutableInteractionSource() }
+    val toggleState = rememberMechanicalToggleState(isActive)
+    val depth by toggleState.depth
     val view = LocalView.current
-    val fingerDown by interactionSource.collectIsPressedWithMinDuration()
 
-    val visuallyPressed = isActive || fingerDown
-    val bgColor = if (visuallyPressed) PressedBodyColor else RaisedBodyColor
-    val textColor = if (isActive) ledColor else NjMuted2
+    val bgColor = when {
+        depth > 0.5f -> lerp(PressedBodyColor, DeepPressColor, (depth - 0.5f) * 2f)
+        else -> lerp(RaisedBodyColor, PressedBodyColor, depth * 2f)
+    }
+    val visuallyActive = toggleState.isVisuallyActive
+    val textColor = if (visuallyActive) ledColor else NjMuted2
 
     // Haptics -- fire on raw press/release events.
-    LaunchedEffect(interactionSource) {
-        interactionSource.interactions.collect { interaction ->
+    LaunchedEffect(toggleState.interactionSource) {
+        toggleState.interactionSource.interactions.collect { interaction ->
             when (interaction) {
                 is PressInteraction.Press ->
                     view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
@@ -302,7 +301,7 @@ fun DrawerToggleButton(
     Box(
         modifier = Modifier
             .size(36.dp)
-            .offset(y = if (visuallyPressed) 1.dp else 0.dp)
+            .offset(y = (depth * 2f).dp)
             .clip(RoundedCornerShape(4.dp))
             .background(bgColor)
             .drawWithContent {
@@ -310,7 +309,7 @@ fun DrawerToggleButton(
 
                 val sw = 1.dp.toPx()
 
-                if (visuallyPressed) {
+                if (depth > 0.25f) {
                     drawLine(
                         Color.Black.copy(alpha = 0.45f),
                         Offset(0f, sw / 2),
@@ -363,13 +362,13 @@ fun DrawerToggleButton(
                 }
             }
             .clickable(
-                interactionSource = interactionSource,
+                interactionSource = toggleState.interactionSource,
                 indication = null,
                 onClick = onClick
             ),
         contentAlignment = Alignment.Center
     ) {
-        val glowShadow = if (isActive) {
+        val glowShadow = if (visuallyActive) {
             Shadow(
                 color = ledColor.copy(alpha = 0.8f),
                 offset = Offset.Zero,
