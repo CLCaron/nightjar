@@ -1,5 +1,6 @@
 package com.example.nightjar.ui.studio
 
+import com.example.nightjar.ui.components.NjButton
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -22,7 +23,7 @@ import com.example.nightjar.ui.components.NjKnob
 import com.example.nightjar.ui.theme.NjError
 import com.example.nightjar.ui.theme.NjMuted2
 import com.example.nightjar.ui.theme.NjStudioAccent
-import com.example.nightjar.ui.theme.NjStudioSurface2
+import com.example.nightjar.ui.theme.NjSurface2
 import com.example.nightjar.ui.theme.NjStudioTeal
 import com.example.nightjar.ui.theme.NjStudioYellow
 
@@ -53,7 +54,7 @@ fun DrumTrackDrawer(
                     strokeWidth = 1.dp.toPx()
                 )
             }
-            .background(NjStudioSurface2)
+            .background(NjSurface2)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -101,7 +102,7 @@ fun DrumTrackDrawer(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    NjStudioButton(
+                    NjButton(
                         text = "-",
                         onClick = {
                             if (pattern.bars > 1) {
@@ -120,7 +121,7 @@ fun DrumTrackDrawer(
                         color = NjStudioAccent.copy(alpha = 0.7f),
                         modifier = Modifier.padding(horizontal = 4.dp)
                     )
-                    NjStudioButton(
+                    NjButton(
                         text = "+",
                         onClick = {
                             if (pattern.bars < 8) {
@@ -145,7 +146,7 @@ fun DrumTrackDrawer(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                NjStudioButton(
+                NjButton(
                     text = "Rename",
                     onClick = {
                         onAction(
@@ -157,7 +158,7 @@ fun DrumTrackDrawer(
                     },
                     textColor = NjMuted2.copy(alpha = 0.7f)
                 )
-                NjStudioButton(
+                NjButton(
                     text = "Delete",
                     onClick = {
                         onAction(StudioAction.ConfirmDeleteTrack(track.id))

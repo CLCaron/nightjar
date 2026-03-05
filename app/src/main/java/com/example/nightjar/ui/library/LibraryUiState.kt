@@ -11,7 +11,8 @@ data class LibraryUiState(
     val selectedTagNormalized: String? = null,
     val sortMode: SortMode = SortMode.NEWEST,
     val isLoading: Boolean = true,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val previewingIdeaId: Long? = null
 )
 
 /** User-initiated actions on the Library screen. */
@@ -20,6 +21,8 @@ sealed interface LibraryAction {
     data object ClearTagFilter : LibraryAction
     data class SelectTag(val tagNormalized: String) : LibraryAction
     data class SetSortMode(val mode: SortMode) : LibraryAction
+    data class PlayPreview(val ideaId: Long) : LibraryAction
+    data object StopPreview : LibraryAction
 }
 
 /** One-shot side effects emitted by [LibraryViewModel]. */

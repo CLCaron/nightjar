@@ -2,10 +2,10 @@ package com.example.nightjar.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// ── Nightjar color palette — warm plum midnight, pocket recorder ───
-val NjBg = Color(0xFF110C14)          // deep plum near-black
-val NjSurface = Color(0xFF18121A)          // plum-tinted surface
-val NjSurface2 = Color(0xFF1E1720)          // elevated plum surface
+// ── Nightjar color palette — warm indigo midnight, pocket recorder ──
+val NjBg = Color(0xFF0F0D18)          // deep indigo near-black (unified with Studio)
+val NjSurface = Color(0xFF16131E)          // indigo-tinted surface (unified with Studio)
+val NjSurface2 = Color(0xFF1C1824)          // elevated indigo surface (unified with Studio)
 
 val NjPrimary = Color(0xFF7A6388)          // dusty mauve — buttons, accents
 val NjPrimary2 = Color(0xFF8B7498)          // lighter mauve — secondary accent
@@ -23,19 +23,15 @@ val NjStarlight = Color(0xFF9E8CB0)         // warm lilac — waveforms, subtle 
 
 val NjStardust = Color(0xFFECE0D4)          // warm gold-cream — starfield base
 
-val NjOutline = Color(0xFF261D28)          // plum-tinted borders
+val NjOutline = Color(0xFF231E2C)          // indigo-tinted borders (unified with Studio)
+
+val NjPanelInset = Color(0xFF0A0810)       // deeper than NjBg -- recessed display panels
 
 val NjRecordCoral = Color(0xFFC46050)      // warm muted coral — record button LED
 val NjError = Color(0xFFD4727A)          // muted rose
 
-// ── Studio warm variants — indoor midnight ──────────────────────
-// Same darkness, but the blues shift toward indigo/warm gray.
-// Like stepping from the open night sky into a dimly lit room.
-val NjStudioBg = Color(0xFF0F0D18)          // NjBg warmed — faint indigo
-val NjStudioSurface = Color(0xFF16131E)     // NjSurface warmed
-val NjStudioSurface2 = Color(0xFF1C1824)    // NjSurface2 warmed — drawer, panels
-val NjStudioLane = Color(0xFF1A161E)        // NjMidnight2 warmed — track lanes
-val NjStudioOutline = Color(0xFF231E2C)     // NjOutline warmed — borders
+// ── Studio tokens ──
+val NjStudioLane = Color(0xFF1A161E)        // track lane background
 val NjStudioAccent = Color(0xFFBE7B4A)      // warm amber-orange — playhead, Loop LED
 val NjStudioGreen = Color(0xFF7DA87A)       // muted sage green -- Play LED
 val NjStudioTeal = Color(0xFF5EA8A3)        // dusty teal -- Solo LED

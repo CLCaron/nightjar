@@ -1,5 +1,6 @@
 package com.example.nightjar.ui.studio
 
+import com.example.nightjar.ui.components.NjButton
 import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -42,10 +43,10 @@ import com.example.nightjar.ui.theme.NjStudioAccent
 import com.example.nightjar.ui.theme.NjStudioTeal
 import com.example.nightjar.ui.theme.NjError
 import com.example.nightjar.ui.theme.NjMuted2
-import com.example.nightjar.ui.theme.NjStudioSurface2
+import com.example.nightjar.ui.theme.NjSurface2
 import com.example.nightjar.ui.theme.NjStudioYellow
 
-// Pressed-in body -- slightly darker than NjStudioSurface2 (0xFF1C1824).
+// Pressed-in body -- slightly darker than NjSurface2 (0xFF1C1824).
 private val PressedBodyColor = Color(0xFF12101A)
 
 // Raised body -- semi-transparent muted surface.
@@ -85,7 +86,7 @@ fun TrackDrawerPanel(
                     strokeWidth = 1.dp.toPx()
                 )
             }
-            .background(NjStudioSurface2)
+            .background(NjSurface2)
             .padding(horizontal = 12.dp)
     ) {
         val isNarrow = maxWidth < NARROW_BREAKPOINT
@@ -153,7 +154,7 @@ fun TrackDrawerPanel(
                     horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    NjStudioButton(
+                    NjButton(
                         text = "Rename",
                         onClick = {
                             onAction(
@@ -166,7 +167,7 @@ fun TrackDrawerPanel(
                         textColor = NjMuted2.copy(alpha = 0.7f)
                     )
                     Spacer(Modifier.width(8.dp))
-                    NjStudioButton(
+                    NjButton(
                         text = "Delete",
                         onClick = {
                             onAction(StudioAction.ConfirmDeleteTrack(track.id))
@@ -240,7 +241,7 @@ fun TrackDrawerPanel(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    NjStudioButton(
+                    NjButton(
                         text = "Rename",
                         onClick = {
                             onAction(
@@ -252,7 +253,7 @@ fun TrackDrawerPanel(
                         },
                         textColor = NjMuted2.copy(alpha = 0.7f)
                     )
-                    NjStudioButton(
+                    NjButton(
                         text = "Delete",
                         onClick = {
                             onAction(StudioAction.ConfirmDeleteTrack(track.id))

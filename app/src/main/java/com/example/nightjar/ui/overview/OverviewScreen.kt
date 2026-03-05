@@ -37,27 +37,29 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.example.nightjar.share.ShareUtils
-import com.example.nightjar.ui.components.NjDestructiveButton
-import com.example.nightjar.ui.components.NjInlineAction
-import com.example.nightjar.ui.components.NjStarburst
-import com.example.nightjar.ui.components.NjPrimaryButton
-import com.example.nightjar.ui.components.NjSecondaryButton
 import com.example.nightjar.ui.components.NjSectionTitle
+import com.example.nightjar.ui.components.NjButton
 import com.example.nightjar.ui.components.NjTagChip
 import com.example.nightjar.ui.components.NjTextField
 import com.example.nightjar.ui.components.NjTopBar
 import com.example.nightjar.ui.components.NjWaveform
+import com.example.nightjar.ui.theme.NjAccent
+import com.example.nightjar.ui.theme.NjError
+import com.example.nightjar.ui.theme.NjStudioGreen
+import com.example.nightjar.ui.theme.NjTrackColors
 import kotlinx.coroutines.flow.collectLatest
 
 /**
- * Overview screen — view and edit a single idea.
+ * Overview screen -- view and edit a single idea.
  *
  * Provides playback controls with waveform visualization, editable title and
  * notes fields, tag management, favorite toggle, sharing, and deletion. Title
  * and notes are auto-saved with a 600 ms debounce. The "Studio" button opens
  * the multi-track studio for this idea.
+ *
+ * All controls use NjButton for a unified hardware aesthetic.
  */
 @Composable
 fun OverviewScreen(
@@ -154,14 +156,14 @@ fun OverviewScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        NjDestructiveButton(
+                        NjButton(
                             text = "Delete",
                             onClick = { showDeleteConfirm = true },
                             modifier = Modifier.weight(1f),
-                            fullWidth = false
+                            textColor = NjError
                         )
                         firstTrackFile?.let { file ->
-                            NjSecondaryButton(
+                            NjButton(
                                 text = "Share",
                                 onClick = {
                                     ShareUtils.shareAudioFile(
@@ -170,8 +172,7 @@ fun OverviewScreen(
                                         title = loaded.title
                                     )
                                 },
-                                modifier = Modifier.weight(1f),
-                                fullWidth = false
+                                modifier = Modifier.weight(1f)
                             )
                         }
                     }
@@ -199,7 +200,7 @@ fun OverviewScreen(
 
             if (loaded == null) {
                 Text(
-                    "Loading\u2026",
+                    "Loading...",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
                 )
@@ -210,13 +211,13 @@ fun OverviewScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                NjInlineAction(
+                NjButton(
                     text = if (loaded.isFavorite) "Favorited" else "Favorite",
-                    onClick = { vm.onAction(OverviewAction.ToggleFavorite) },
-                    emphasized = loaded.isFavorite,
-                    leadingIcon = { NjStarburst(filled = loaded.isFavorite, size = 16.dp) }
+                    isActive = loaded.isFavorite,
+                    ledColor = NjAccent,
+                    onClick = { vm.onAction(OverviewAction.ToggleFavorite) }
                 )
-                NjInlineAction(
+                NjButton(
                     text = "Studio",
                     onClick = { onOpenStudio(ideaId) }
                 )
@@ -237,6 +238,7 @@ fun OverviewScreen(
                     amplitudes = compositeWaveform,
                     modifier = Modifier.fillMaxWidth(),
                     height = 64.dp,
+                    barColor = NjTrackColors[0].copy(alpha = 0.65f),
                     progressFraction = displayFraction,
                     onScrub = { fraction ->
                         isScrubbing = true
@@ -272,23 +274,18 @@ fun OverviewScreen(
                 )
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                NjPrimaryButton(
-                    text = if (isPlaying) "Pause" else "Play",
-                    onClick = {
-                        if (isPlaying) {
-                            vm.onAction(OverviewAction.Pause)
-                        } else {
-                            vm.onAction(OverviewAction.Play)
-                        }
-                    },
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
-                )
-            }
+            NjButton(
+                text = if (isPlaying) "Pause" else "Play",
+                isActive = isPlaying,
+                ledColor = NjStudioGreen,
+                onClick = {
+                    if (isPlaying) {
+                        vm.onAction(OverviewAction.Pause)
+                    } else {
+                        vm.onAction(OverviewAction.Play)
+                    }
+                }
+            )
 
             NjSectionTitle("Notes")
             NjTextField(
@@ -337,15 +334,13 @@ fun OverviewScreen(
                 )
             )
 
-            NjPrimaryButton(
+            NjButton(
                 text = "Add Tag",
                 onClick = {
                     val text = newTagText
                     newTagText = ""
                     vm.onAction(OverviewAction.AddTagsFromInput(text))
-                },
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+                }
             )
 
             Spacer(Modifier.height(96.dp))
