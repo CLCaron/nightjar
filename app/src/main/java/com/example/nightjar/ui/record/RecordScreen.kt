@@ -35,6 +35,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -162,155 +163,244 @@ fun RecordScreen(
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
     ) { padding ->
-        Column(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
                 .navigationBarsPadding()
-                .padding(horizontal = 20.dp, vertical = 18.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Box {
-                Text(
-                    text = "Nightjar",
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
-                )
-                Text(
-                    text = "Nightjar",
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = Color.White.copy(alpha = 0.25f),
-                    modifier = Modifier.offset(x = 1.1.dp, y = 1.3.dp)
-                )
-            }
-
-            // Subtle groove below title
-            Spacer(Modifier.height(10.dp))
-            Canvas(Modifier.fillMaxWidth(0.5f).height(1.dp)) {
-                drawLine(
-                    brush = Brush.horizontalGradient(
-                        colors = listOf(
-                            Color.Transparent,
-                            NjMuted.copy(alpha = 0.18f),
-                            Color.Transparent
-                        )
-                    ),
-                    start = Offset(0f, size.height / 2),
-                    end = Offset(size.width, size.height / 2),
-                    strokeWidth = size.height
-                )
-            }
-
-            Spacer(Modifier.height(24.dp))
+            val isCompact = maxHeight < 500.dp
 
             if (!hasMicPermission) {
-                Text(
-                    text = "Microphone permission is required to record.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.80f)
-                )
-
-                Spacer(Modifier.height(14.dp))
-
-                NjButton(
-                    text = "Enable microphone",
-                    onClick = { requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
-                    isActive = false,
-                    ledColor = NjRecordCoral,
-                    modifier = Modifier.heightIn(min = 48.dp)
-                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 20.dp, vertical = 18.dp),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    TitleBlock()
+                    Spacer(Modifier.height(24.dp))
+                    Text(
+                        text = "Microphone permission is required to record.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.80f)
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    NjButton(
+                        text = "Enable microphone",
+                        onClick = { requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
+                        isActive = false,
+                        ledColor = NjRecordCoral,
+                        modifier = Modifier.heightIn(min = 48.dp)
+                    )
+                }
             } else {
-                HardwareRecordButton(
-                    isRecording = state.isRecording,
-                    onClick = {
-                        if (!state.isRecording) vm.onAction(RecordAction.StartRecording)
-                        else vm.onAction(RecordAction.StopAndSave)
-                    }
-                )
-
-                Spacer(Modifier.height(14.dp))
-
                 val postRecording = state.postRecording
                 val isSaving = !state.isRecording && postRecording == null &&
                     state.liveAmplitudes.isNotEmpty()
                 val isBusy = state.isRecording || isSaving
                 val waveformColor = NjTrackColors[0].copy(alpha = 0.65f)
-
-                // LCD status text -- always visible, content changes per state
                 val lcdText = when {
                     state.isRecording -> "RECORDING"
                     isSaving -> "SAVING"
                     postRecording != null -> "SAVED"
                     else -> "RECORD"
                 }
-                StatusLcd(lcdText)
+                val onToggleRecording = {
+                    if (!state.isRecording) vm.onAction(RecordAction.StartRecording)
+                    else vm.onAction(RecordAction.StopAndSave)
+                }
+                val writeSunk = isBusy || postRecording != null
 
-                Spacer(Modifier.height(16.dp))
-
-                // Waveform panel -- always present, content changes per state
-                when {
-                    postRecording != null -> {
-                        TransformingWaveformPanel(
-                            audioFile = postRecording.audioFile,
-                            barColor = waveformColor,
-                            onClick = { vm.onAction(RecordAction.GoToOverview) },
-                            modifier = Modifier.fillMaxWidth(0.85f)
-                        )
-                    }
-                    state.liveAmplitudes.isNotEmpty() -> {
-                        NjRecessedPanel(
-                            modifier = Modifier.fillMaxWidth(0.85f)
+                if (isCompact) {
+                    // Landscape / short: two-column layout
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Left panel: title, record button, LCD
+                        Column(
+                            modifier = Modifier.weight(0.45f),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
                         ) {
-                            NjLiveWaveform(
-                                amplitudes = state.liveAmplitudes,
-                                modifier = Modifier.fillMaxWidth(),
-                                height = 48.dp,
-                                barColor = waveformColor
+                            TitleBlock()
+                            Spacer(Modifier.height(12.dp))
+                            HardwareRecordButton(
+                                isRecording = state.isRecording,
+                                onClick = onToggleRecording,
+                                modifier = Modifier.size(72.dp)
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            StatusLcd(lcdText)
+                        }
+                        // Right panel: waveform, action buttons
+                        Column(
+                            modifier = Modifier.weight(0.55f),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            WaveformBlock(
+                                state = state,
+                                waveformColor = waveformColor,
+                                onGoToOverview = { vm.onAction(RecordAction.GoToOverview) },
+                                modifier = Modifier.fillMaxWidth(0.9f)
+                            )
+                            Spacer(Modifier.height(10.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                RecordScreenButton(
+                                    icon = Icons.Filled.Edit,
+                                    label = "Write",
+                                    onClick = { vm.onAction(RecordAction.CreateWriteIdea) },
+                                    enabled = !writeSunk,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                RecordScreenButton(
+                                    icon = Icons.Filled.Tune,
+                                    label = "Studio",
+                                    onClick = {
+                                        if (postRecording != null) vm.onAction(RecordAction.GoToStudio)
+                                        else vm.onAction(RecordAction.CreateStudioIdea)
+                                    },
+                                    enabled = !isBusy,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            RecordScreenButton(
+                                icon = Icons.AutoMirrored.Filled.List,
+                                label = "Library",
+                                onClick = onOpenLibrary,
+                                enabled = !isBusy
                             )
                         }
                     }
-                    else -> {
-                        // Empty powered-off panel
-                        NjRecessedPanel(
+                } else {
+                    // Portrait: single centered column
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 20.dp, vertical = 18.dp),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        TitleBlock()
+                        Spacer(Modifier.height(24.dp))
+                        HardwareRecordButton(
+                            isRecording = state.isRecording,
+                            onClick = onToggleRecording,
+                            modifier = Modifier.size(92.dp)
+                        )
+                        Spacer(Modifier.height(14.dp))
+                        StatusLcd(lcdText)
+                        Spacer(Modifier.height(16.dp))
+                        WaveformBlock(
+                            state = state,
+                            waveformColor = waveformColor,
+                            onGoToOverview = { vm.onAction(RecordAction.GoToOverview) },
                             modifier = Modifier.fillMaxWidth(0.85f)
-                        ) {
-                            Spacer(Modifier.height(48.dp).fillMaxWidth())
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            RecordScreenButton(
+                                icon = Icons.Filled.Edit,
+                                label = "Write",
+                                onClick = { vm.onAction(RecordAction.CreateWriteIdea) },
+                                enabled = !writeSunk,
+                                modifier = Modifier.weight(1f)
+                            )
+                            RecordScreenButton(
+                                icon = Icons.Filled.Tune,
+                                label = "Studio",
+                                onClick = {
+                                    if (postRecording != null) vm.onAction(RecordAction.GoToStudio)
+                                    else vm.onAction(RecordAction.CreateStudioIdea)
+                                },
+                                enabled = !isBusy,
+                                modifier = Modifier.weight(1f)
+                            )
                         }
+                        Spacer(Modifier.height(10.dp))
+                        RecordScreenButton(
+                            icon = Icons.AutoMirrored.Filled.List,
+                            label = "Library",
+                            onClick = onOpenLibrary,
+                            enabled = !isBusy
+                        )
                     }
                 }
+            }
+        }
+    }
+}
 
-                Spacer(Modifier.height(16.dp))
-
-                // Write stays sunk after recording (waveform button handles
-                // navigation to Overview)
-                val writeSunk = isBusy || postRecording != null
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    RecordScreenButton(
-                        icon = Icons.Filled.Edit,
-                        label = "Write",
-                        onClick = { vm.onAction(RecordAction.CreateWriteIdea) },
-                        enabled = !writeSunk,
-                        modifier = Modifier.weight(1f)
-                    )
-                    RecordScreenButton(
-                        icon = Icons.Filled.Tune,
-                        label = "Studio",
-                        onClick = {
-                            if (postRecording != null) vm.onAction(RecordAction.GoToStudio)
-                            else vm.onAction(RecordAction.CreateStudioIdea)
-                        },
-                        enabled = !isBusy,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-                Spacer(Modifier.height(10.dp))
-                RecordScreenButton(
-                    icon = Icons.AutoMirrored.Filled.List,
-                    label = "Library",
-                    onClick = onOpenLibrary,
-                    enabled = !isBusy
+/** App title with subtle shadow and groove line underneath. */
+@Composable
+private fun TitleBlock() {
+    Box {
+        Text(
+            text = "Nightjar",
+            style = MaterialTheme.typography.headlineSmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+        )
+        Text(
+            text = "Nightjar",
+            style = MaterialTheme.typography.headlineSmall,
+            color = Color.White.copy(alpha = 0.25f),
+            modifier = Modifier.offset(x = 1.1.dp, y = 1.3.dp)
+        )
+    }
+    Spacer(Modifier.height(10.dp))
+    Canvas(Modifier.fillMaxWidth(0.5f).height(1.dp)) {
+        drawLine(
+            brush = Brush.horizontalGradient(
+                colors = listOf(
+                    Color.Transparent,
+                    NjMuted.copy(alpha = 0.18f),
+                    Color.Transparent
                 )
+            ),
+            start = Offset(0f, size.height / 2),
+            end = Offset(size.width, size.height / 2),
+            strokeWidth = size.height
+        )
+    }
+}
+
+/** Waveform panel -- shows live waveform, saved waveform card, or empty recessed panel. */
+@Composable
+private fun WaveformBlock(
+    state: RecordUiState,
+    waveformColor: Color,
+    onGoToOverview: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val postRecording = state.postRecording
+    when {
+        postRecording != null -> {
+            TransformingWaveformPanel(
+                audioFile = postRecording.audioFile,
+                barColor = waveformColor,
+                onClick = onGoToOverview,
+                modifier = modifier
+            )
+        }
+        state.liveAmplitudes.isNotEmpty() -> {
+            NjRecessedPanel(modifier = modifier) {
+                NjLiveWaveform(
+                    amplitudes = state.liveAmplitudes,
+                    modifier = Modifier.fillMaxWidth(),
+                    height = 48.dp,
+                    barColor = waveformColor
+                )
+            }
+        }
+        else -> {
+            NjRecessedPanel(modifier = modifier) {
+                Spacer(Modifier.height(48.dp).fillMaxWidth())
             }
         }
     }
@@ -403,7 +493,6 @@ private fun HardwareRecordButton(
 
     Box(
         modifier = modifier
-            .size(92.dp)
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
