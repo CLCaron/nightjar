@@ -803,8 +803,8 @@ private fun MidiTrackLane(
             val barHeight = (laneH / (pitchSpan + 2)).coerceIn(2f, 6f)
 
             for (note in notes) {
-                val x = note.startMs / msPerDp
-                val w = (note.durationMs / msPerDp).coerceAtLeast(2f)
+                val x = ((note.startMs / msPerDp) * density).toFloat()
+                val w = ((note.durationMs / msPerDp) * density).coerceAtLeast(2f)
                 // Map pitch to Y within lane (higher pitch = higher on screen = lower Y)
                 val normalizedPitch = (note.pitch - pitchRange.first).toFloat() / pitchSpan
                 val y = laneH - (normalizedPitch * (laneH - barHeight)) - barHeight
