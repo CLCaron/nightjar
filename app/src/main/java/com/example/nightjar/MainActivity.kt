@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.NavType
 import androidx.navigation.compose.*
 import androidx.navigation.navArgument
+import com.example.nightjar.ui.studio.PianoRollScreen
 import com.example.nightjar.ui.studio.StudioScreen
 import com.example.nightjar.ui.record.RecordScreen
 import dagger.hilt.android.AndroidEntryPoint
@@ -47,6 +48,7 @@ private object Routes {
     const val LIBRARY = "library"
     const val OVERVIEW = "overview"
     const val STUDIO = "studio"
+    const val PIANO_ROLL = "piano_roll"
 }
 
 /** Top-level navigation graph: Record → Library → Overview → Studio. */
@@ -94,6 +96,20 @@ fun NightjarApp() {
             val ideaId = entry.arguments?.getLong("ideaId") ?: -1L
             StudioScreen(
                 ideaId = ideaId,
+                onBack = { navController.popBackStack() },
+                onOpenPianoRoll = { trackId ->
+                    navController.navigate("${Routes.PIANO_ROLL}/$trackId/$ideaId")
+                }
+            )
+        }
+        composable(
+            route = "${Routes.PIANO_ROLL}/{trackId}/{ideaId}",
+            arguments = listOf(
+                navArgument("trackId") { type = NavType.LongType },
+                navArgument("ideaId") { type = NavType.LongType }
+            )
+        ) {
+            PianoRollScreen(
                 onBack = { navController.popBackStack() }
             )
         }

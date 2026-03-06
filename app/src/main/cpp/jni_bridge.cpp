@@ -1,6 +1,7 @@
 #include <jni.h>
 #include "audio_engine.h"
 #include <memory>
+#include <vector>
 
 /**
  * JNI bridge between Kotlin OboeAudioEngine and C++ AudioEngine.
@@ -298,6 +299,68 @@ JNIEXPORT void JNICALL
 Java_com_example_nightjar_audio_OboeAudioEngine_nativeSetDrumSequencerEnabled(
         JNIEnv* /* env */, jobject /* thiz */, jboolean enabled) {
     if (sEngine) sEngine->setDrumSequencerEnabled(static_cast<bool>(enabled));
+}
+
+// ── MIDI Sequencer API ──────────────────────────────────────────────────
+
+JNIEXPORT void JNICALL
+Java_com_example_nightjar_audio_OboeAudioEngine_nativeUpdateMidiTracks(
+        JNIEnv* env, jobject /* thiz */,
+        jintArray channelsArr, jintArray programsArr,
+        jfloatArray volumesArr, jbooleanArray mutedArr,
+        jintArray trackEventCountsArr,
+        jlongArray eventFramesArr, jintArray eventChannelsArr,
+        jintArray eventNotesArr, jintArray eventVelocitiesArr) {
+    if (!sEngine) return;
+
+    jint trackCount = env->GetArrayLength(channelsArr);
+    jint* channels = env->GetIntArrayElements(channelsArr, nullptr);
+    jint* programs = env->GetIntArrayElements(programsArr, nullptr);
+    jfloat* volumes = env->GetFloatArrayElements(volumesArr, nullptr);
+    jboolean* mutedRaw = env->GetBooleanArrayElements(mutedArr, nullptr);
+    jint* trackEventCounts = env->GetIntArrayElements(trackEventCountsArr, nullptr);
+
+    // Convert jboolean array to bool array (can't use vector<bool> — it's a bit-packed
+    // specialization without .data()). Use a plain bool array instead.
+    std::vector<uint8_t> mutedBuf(trackCount);
+    for (int i = 0; i < trackCount; ++i) {
+        mutedBuf[i] = mutedRaw[i] != JNI_FALSE ? 1 : 0;
+    }
+
+    jint totalEvents = env->GetArrayLength(eventFramesArr);
+    jlong* eventFrames = env->GetLongArrayElements(eventFramesArr, nullptr);
+    jint* eventChannels = env->GetIntArrayElements(eventChannelsArr, nullptr);
+    jint* eventNotes = env->GetIntArrayElements(eventNotesArr, nullptr);
+    jint* eventVelocities = env->GetIntArrayElements(eventVelocitiesArr, nullptr);
+
+    sEngine->updateMidiTracks(
+        static_cast<const int*>(channels),
+        static_cast<const int*>(programs),
+        static_cast<const float*>(volumes),
+        reinterpret_cast<const bool*>(mutedBuf.data()),
+        static_cast<int>(trackCount),
+        static_cast<const int*>(trackEventCounts),
+        reinterpret_cast<const int64_t*>(eventFrames),
+        static_cast<const int*>(eventChannels),
+        static_cast<const int*>(eventNotes),
+        static_cast<const int*>(eventVelocities),
+        static_cast<int>(totalEvents));
+
+    env->ReleaseIntArrayElements(channelsArr, channels, JNI_ABORT);
+    env->ReleaseIntArrayElements(programsArr, programs, JNI_ABORT);
+    env->ReleaseFloatArrayElements(volumesArr, volumes, JNI_ABORT);
+    env->ReleaseBooleanArrayElements(mutedArr, mutedRaw, JNI_ABORT);
+    env->ReleaseIntArrayElements(trackEventCountsArr, trackEventCounts, JNI_ABORT);
+    env->ReleaseLongArrayElements(eventFramesArr, eventFrames, JNI_ABORT);
+    env->ReleaseIntArrayElements(eventChannelsArr, eventChannels, JNI_ABORT);
+    env->ReleaseIntArrayElements(eventNotesArr, eventNotes, JNI_ABORT);
+    env->ReleaseIntArrayElements(eventVelocitiesArr, eventVelocities, JNI_ABORT);
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_nightjar_audio_OboeAudioEngine_nativeSetMidiSequencerEnabled(
+        JNIEnv* /* env */, jobject /* thiz */, jboolean enabled) {
+    if (sEngine) sEngine->setMidiSequencerEnabled(static_cast<bool>(enabled));
 }
 
 }  // extern "C"

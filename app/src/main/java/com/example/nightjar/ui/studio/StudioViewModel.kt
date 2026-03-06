@@ -9,7 +9,9 @@ import com.example.nightjar.audio.OboeAudioEngine
 import com.example.nightjar.audio.SoundFontManager
 import com.example.nightjar.audio.WavSplitter
 import com.example.nightjar.data.db.entity.TakeEntity
+import com.example.nightjar.data.db.entity.MidiNoteEntity
 import com.example.nightjar.data.repository.DrumRepository
+import com.example.nightjar.data.repository.MidiRepository
 import com.example.nightjar.data.repository.StudioRepository
 import com.example.nightjar.data.repository.IdeaRepository
 import com.example.nightjar.data.storage.RecordingStorage
@@ -55,6 +57,7 @@ class StudioViewModel @Inject constructor(
     private val ideaRepo: IdeaRepository,
     private val studioRepo: StudioRepository,
     private val drumRepo: DrumRepository,
+    private val midiRepo: MidiRepository,
     private val audioEngine: OboeAudioEngine,
     private val recordingStorage: RecordingStorage,
     private val latencyEstimator: AudioLatencyEstimator,
@@ -94,6 +97,11 @@ class StudioViewModel @Inject constructor(
     private var soundFontLoaded: Boolean = false
     // Active drum pattern observation jobs per track
     private val drumPatternJobs: MutableMap<Long, Job> = mutableMapOf()
+    // Active MIDI note observation jobs per track
+    private val midiNoteJobs: MutableMap<Long, Job> = mutableMapOf()
+    // Preview channel for instrument audition
+    private val previewChannel = 15
+    private var previewNoteOffJob: Job? = null
     // Track ID that was armed when recording started (for saving takes)
     private var recordingArmedTrackId: Long? = null
     // Whether this is a first-track-creation recording (no armed track)
@@ -161,6 +169,7 @@ class StudioViewModel @Inject constructor(
                         }
                     }
                     NewTrackType.DRUM_SEQUENCER -> addDrumTrack()
+                    NewTrackType.MIDI_INSTRUMENT -> addMidiTrack()
                 }
             }
             StudioAction.MicPermissionGranted -> startRecordingAfterPermission()
@@ -339,6 +348,21 @@ class StudioViewModel @Inject constructor(
             is StudioAction.UpdateDragClip -> updateDragClip(action.previewOffsetMs)
             is StudioAction.FinishDragClip -> finishDragClip(action.trackId, action.clipId, action.newOffsetMs)
             StudioAction.CancelDragClip -> cancelDragClip()
+
+            // MIDI instrument tracks
+            is StudioAction.OpenPianoRoll -> {
+                viewModelScope.launch {
+                    _effects.emit(StudioEffect.NavigateToPianoRoll(action.trackId))
+                }
+            }
+            is StudioAction.ShowInstrumentPicker -> {
+                _state.update { it.copy(showInstrumentPickerForTrackId = action.trackId) }
+            }
+            StudioAction.DismissInstrumentPicker -> {
+                _state.update { it.copy(showInstrumentPickerForTrackId = null) }
+            }
+            is StudioAction.SetMidiInstrument -> setMidiInstrument(action.trackId, action.program)
+            is StudioAction.PreviewInstrument -> previewInstrument(action.program)
         }
     }
 
@@ -385,6 +409,9 @@ class StudioViewModel @Inject constructor(
 
                 // Load drum patterns for any drum tracks
                 loadDrumPatterns(tracks)
+
+                // Load MIDI tracks
+                loadMidiTracks(tracks)
             } catch (e: Exception) {
                 val msg = e.message ?: "Failed to load project."
                 _state.update { it.copy(isLoading = false, errorMessage = msg) }
@@ -450,7 +477,7 @@ class StudioViewModel @Inject constructor(
     // ── Arm ────────────────────────────────────────────────────────────────
 
     private fun toggleArm(trackId: Long) {
-        // Only audio tracks can be armed
+        // Only audio tracks can be armed (not drum or MIDI)
         val track = _state.value.tracks.find { it.id == trackId } ?: return
         if (!track.isAudio) return
 
@@ -1524,6 +1551,212 @@ class StudioViewModel @Inject constructor(
     // ── Helpers ──────────────────────────────────────────────────────────
 
     /** Reload tracks from DB and re-prepare the native engine. */
+    // ── MIDI tracks ────────────────────────────────────────────────────────
+
+    private fun addMidiTrack() {
+        val ideaId = currentIdeaId ?: return
+        viewModelScope.launch {
+            try {
+                if (!ensureSoundFontLoaded()) return@launch
+
+                val channel = midiRepo.nextAvailableChannel(ideaId)
+                val trackId = studioRepo.addMidiTrack(ideaId, channel, 0)
+
+                _state.update {
+                    it.copy(
+                        midiTracks = it.midiTracks + (trackId to MidiTrackUiState(
+                            midiProgram = 0,
+                            instrumentName = gmInstrumentName(0)
+                        ))
+                    )
+                }
+
+                audioEngine.setMidiSequencerEnabled(true)
+                observeMidiNotes(trackId)
+                reloadAndPrepare()
+            } catch (e: Exception) {
+                _effects.emit(
+                    StudioEffect.ShowError(e.message ?: "Failed to add MIDI track.")
+                )
+            }
+        }
+    }
+
+    /**
+     * Load MIDI note data for all MIDI tracks. Called once during [load].
+     * Starts Flow observation for each track so note changes push to the engine.
+     */
+    private suspend fun loadMidiTracks(
+        tracks: List<com.example.nightjar.data.db.entity.TrackEntity>
+    ) {
+        val midiTracks = tracks.filter { it.isMidi }
+        if (midiTracks.isEmpty()) return
+
+        if (!ensureSoundFontLoaded()) return
+
+        val midiTrackStates = mutableMapOf<Long, MidiTrackUiState>()
+        for (track in midiTracks) {
+            val notes = midiRepo.getNotesForTrack(track.id)
+            midiTrackStates[track.id] = MidiTrackUiState(
+                notes = notes,
+                midiProgram = track.midiProgram,
+                instrumentName = gmInstrumentName(track.midiProgram)
+            )
+            observeMidiNotes(track.id)
+        }
+
+        _state.update { it.copy(midiTracks = it.midiTracks + midiTrackStates) }
+        pushAllMidiToEngine()
+        audioEngine.setMidiSequencerEnabled(true)
+    }
+
+    /** Start observing MIDI notes for a track via Flow. */
+    private fun observeMidiNotes(trackId: Long) {
+        midiNoteJobs[trackId]?.cancel()
+        midiNoteJobs[trackId] = viewModelScope.launch {
+            midiRepo.observeNotes(trackId).collect { notes ->
+                _state.update { st ->
+                    val existing = st.midiTracks[trackId] ?: MidiTrackUiState()
+                    st.copy(
+                        midiTracks = st.midiTracks + (trackId to existing.copy(notes = notes))
+                    )
+                }
+                pushAllMidiToEngine()
+            }
+        }
+    }
+
+    /**
+     * Convert all MIDI tracks to flat arrays and push to the C++ engine.
+     * Called whenever notes change or tracks are added/removed.
+     */
+    private fun pushAllMidiToEngine() {
+        val st = _state.value
+        val midiTrackEntries = st.tracks.filter { it.isMidi }
+        if (midiTrackEntries.isEmpty()) {
+            // Push empty to clear
+            audioEngine.updateMidiTracks(
+                IntArray(0), IntArray(0), FloatArray(0), BooleanArray(0), IntArray(0),
+                LongArray(0), IntArray(0), IntArray(0), IntArray(0)
+            )
+            return
+        }
+
+        val trackCount = midiTrackEntries.size
+        val channels = IntArray(trackCount)
+        val programs = IntArray(trackCount)
+        val volumes = FloatArray(trackCount)
+        val muted = BooleanArray(trackCount)
+        val trackEventCounts = IntArray(trackCount)
+
+        // Collect all events across all tracks
+        val allFrames = mutableListOf<Long>()
+        val allChannels = mutableListOf<Int>()
+        val allNotes = mutableListOf<Int>()
+        val allVelocities = mutableListOf<Int>()
+
+        for (i in midiTrackEntries.indices) {
+            val track = midiTrackEntries[i]
+            val midiState = st.midiTracks[track.id]
+            val notes = midiState?.notes ?: emptyList()
+
+            channels[i] = track.midiChannel
+            programs[i] = track.midiProgram
+            volumes[i] = track.volume
+            muted[i] = track.isMuted
+
+            // Generate noteOn/noteOff event pairs from notes, sorted by frame
+            val events = generateMidiEvents(notes, track.midiChannel)
+            trackEventCounts[i] = events.size
+
+            for (event in events) {
+                allFrames.add(event.framePos)
+                allChannels.add(event.channel)
+                allNotes.add(event.note)
+                allVelocities.add(event.velocity)
+            }
+        }
+
+        audioEngine.updateMidiTracks(
+            channels = channels,
+            programs = programs,
+            volumes = volumes,
+            muted = muted,
+            trackEventCounts = trackEventCounts,
+            eventFrames = allFrames.toLongArray(),
+            eventChannels = allChannels.toIntArray(),
+            eventNotes = allNotes.toIntArray(),
+            eventVelocities = allVelocities.toIntArray()
+        )
+    }
+
+    /**
+     * Generate sorted noteOn/noteOff event pairs from MIDI note entities.
+     * Each note produces two events: noteOn at startMs, noteOff at startMs + durationMs.
+     */
+    private fun generateMidiEvents(
+        notes: List<MidiNoteEntity>,
+        channel: Int
+    ): List<MidiEventFlat> {
+        val events = mutableListOf<MidiEventFlat>()
+        val sampleRate = 44100L
+
+        for (note in notes) {
+            val startFrame = (note.startMs * sampleRate) / 1000
+            val endFrame = ((note.startMs + note.durationMs) * sampleRate) / 1000
+            val velocity = (note.velocity * 127).toInt().coerceIn(1, 127)
+
+            events.add(MidiEventFlat(startFrame, channel, note.pitch, velocity))
+            events.add(MidiEventFlat(endFrame, channel, note.pitch, 0))
+        }
+
+        // Sort by frame position, noteOff before noteOn at same position
+        events.sortWith(compareBy<MidiEventFlat> { it.framePos }.thenBy { if (it.velocity == 0) 0 else 1 })
+        return events
+    }
+
+    private data class MidiEventFlat(
+        val framePos: Long,
+        val channel: Int,
+        val note: Int,
+        val velocity: Int
+    )
+
+    /** Set instrument (GM program) for a MIDI track. */
+    private fun setMidiInstrument(trackId: Long, program: Int) {
+        viewModelScope.launch {
+            try {
+                midiRepo.setInstrument(trackId, program)
+                _state.update { st ->
+                    val existing = st.midiTracks[trackId] ?: MidiTrackUiState()
+                    st.copy(
+                        midiTracks = st.midiTracks + (trackId to existing.copy(
+                            midiProgram = program,
+                            instrumentName = gmInstrumentName(program)
+                        )),
+                        showInstrumentPickerForTrackId = null
+                    )
+                }
+                // Reload tracks from DB to update track entity midiProgram
+                reloadTracks()
+                pushAllMidiToEngine()
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError("Failed to change instrument"))
+            }
+        }
+    }
+
+    /** Preview an instrument by playing a short note on the preview channel. */
+    private fun previewInstrument(program: Int) {
+        previewNoteOffJob?.cancel()
+        // Program change on preview channel, then play middle C
+        audioEngine.synthNoteOn(previewChannel, 60, 80)
+        previewNoteOffJob = viewModelScope.launch {
+            delay(300L)
+            audioEngine.synthNoteOff(previewChannel, 60)
+        }
+    }
+
     private suspend fun reloadAndPrepare() {
         val ideaId = currentIdeaId ?: return
         val tracks = studioRepo.getTracks(ideaId)
@@ -1564,12 +1797,16 @@ class StudioViewModel @Inject constructor(
         super.onCleared()
         tickJob?.cancel()
         recordingTickJob?.cancel()
+        previewNoteOffJob?.cancel()
         drumPatternJobs.values.forEach { it.cancel() }
         drumPatternJobs.clear()
+        midiNoteJobs.values.forEach { it.cancel() }
+        midiNoteJobs.clear()
         if (audioEngine.isRecordingActive()) {
             audioEngine.stopRecording()
         }
         audioEngine.setDrumSequencerEnabled(false)
+        audioEngine.setMidiSequencerEnabled(false)
         audioEngine.removeAllTracks()
     }
 }

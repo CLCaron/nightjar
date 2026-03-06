@@ -3,6 +3,7 @@
 #include "common.h"
 #include "spsc_ring_buffer.h"
 #include "step_sequencer.h"
+#include "midi_sequencer.h"
 #include <atomic>
 #include <thread>
 #include <string>
@@ -99,6 +100,17 @@ public:
     /** Get max end frame from the step sequencer for timeline length. */
     int64_t getSequencerMaxEndFrame(double bpm) const;
 
+    // ── MIDI sequencer control ───────────────────────────────────────────
+
+    /** Replace all MIDI track data. Called from UI thread via JNI. */
+    void updateMidiTracks(const std::vector<MidiTrackData>& tracks);
+
+    /** Enable/disable the MIDI sequencer. */
+    void setMidiSequencerEnabled(bool enabled);
+
+    /** Get max end frame from the MIDI sequencer for timeline length. */
+    int64_t getMidiMaxEndFrame() const;
+
 private:
     void renderThreadFunc();
 
@@ -119,6 +131,11 @@ private:
     // Step sequencer
     StepSequencer sequencer_;
     std::atomic<bool> sequencerEnabled_{false};
+
+    // MIDI sequencer
+    MidiSequencer midiSequencer_;
+    std::atomic<bool> midiSequencerEnabled_{false};
+
     int64_t renderPos_ = 0;       // render thread's timeline position
     bool wasPlaying_ = false;     // for detecting play/pause transitions
 };

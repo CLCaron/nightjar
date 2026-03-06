@@ -4,6 +4,7 @@
 #include "track_mixer.h"
 #include "synth_engine.h"
 #include "step_sequencer.h"
+#include "midi_sequencer.h"
 #include "atomic_transport.h"
 #include "common.h"
 
@@ -316,6 +317,56 @@ void AudioEngine::setDrumSequencerEnabled(bool enabled) {
     if (synthEngine_) synthEngine_->setSequencerEnabled(enabled);
 }
 
+// ── MIDI sequencer API ─────────────────────────────────────────────
+
+void AudioEngine::updateMidiTracks(const int* channels, const int* programs,
+                                    const float* volumes, const bool* muted, int trackCount,
+                                    const int* trackEventCounts,
+                                    const int64_t* eventFrames, const int* eventChannels,
+                                    const int* eventNotes, const int* eventVelocities,
+                                    int totalEventCount) {
+    if (!synthEngine_) return;
+
+    // Reconstruct MidiTrackData from flat arrays
+    std::vector<MidiTrackData> tracks;
+    tracks.reserve(trackCount);
+
+    int eventOffset = 0;
+    for (int t = 0; t < trackCount; ++t) {
+        MidiTrackData td;
+        td.channel = channels[t];
+        td.program = programs[t];
+        td.volume = volumes[t];
+        td.muted = muted[t];
+
+        int eventCount = trackEventCounts[t];
+        td.events.reserve(eventCount);
+        for (int e = 0; e < eventCount; ++e) {
+            int idx = eventOffset + e;
+            MidiEvent me;
+            me.framePos = eventFrames[idx];
+            me.channel = eventChannels[idx];
+            me.note = eventNotes[idx];
+            me.velocity = eventVelocities[idx];
+            td.events.push_back(me);
+        }
+        eventOffset += eventCount;
+
+        tracks.push_back(std::move(td));
+    }
+
+    synthEngine_->updateMidiTracks(tracks);
+
+    // Update MIDI end frames for timeline length
+    int64_t midiEnd = synthEngine_->getMidiMaxEndFrame();
+    midiEndFrames_.store(midiEnd, std::memory_order_relaxed);
+    recomputeTotalFrames();
+}
+
+void AudioEngine::setMidiSequencerEnabled(bool enabled) {
+    if (synthEngine_) synthEngine_->setMidiSequencerEnabled(enabled);
+}
+
 // ── Hardware latency measurement ────────────────────────────────────
 
 int64_t AudioEngine::getOutputLatencyMs() const {
@@ -334,7 +385,8 @@ void AudioEngine::recomputeTotalFrames() {
     if (!transport_) return;
     int64_t mixerFrames = mixer_ ? mixer_->computeTotalFrames() : 0;
     int64_t drumFrames = drumEndFrames_.load(std::memory_order_relaxed);
-    int64_t total = std::max(mixerFrames, drumFrames);
+    int64_t midiFrames = midiEndFrames_.load(std::memory_order_relaxed);
+    int64_t total = std::max({mixerFrames, drumFrames, midiFrames});
     transport_->totalFrames.store(total, std::memory_order_relaxed);
 }
 
