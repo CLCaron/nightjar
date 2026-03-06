@@ -84,6 +84,7 @@ void SynthEngine::start() {
     renderPos_ = transport_.posFrames.load(std::memory_order_relaxed);
     wasPlaying_ = false;
     sequencer_.reset();
+    midiSequencer_.reset();
     running_.store(true, std::memory_order_release);
     renderThread_ = std::thread(&SynthEngine::renderThreadFunc, this);
     LOGD("SynthEngine: render thread started");
@@ -98,6 +99,7 @@ void SynthEngine::stop() {
     }
     ringBuffer_.reset();
     sequencer_.reset();
+    midiSequencer_.reset();
     LOGD("SynthEngine: render thread stopped");
 }
 
@@ -156,6 +158,27 @@ int64_t SynthEngine::getSequencerMaxEndFrame(double bpm) const {
     return sequencer_.getMaxEndFrame(bpm);
 }
 
+// ── MIDI sequencer control ─────────────────────────────────────────────
+
+void SynthEngine::updateMidiTracks(const std::vector<MidiTrackData>& tracks) {
+    if (!synth_) return;
+
+    // Apply program changes for each track
+    for (const auto& track : tracks) {
+        fluid_synth_program_change(FS_SYNTH, track.channel, track.program);
+    }
+
+    midiSequencer_.updateTracks(tracks);
+}
+
+void SynthEngine::setMidiSequencerEnabled(bool enabled) {
+    midiSequencerEnabled_.store(enabled, std::memory_order_release);
+}
+
+int64_t SynthEngine::getMidiMaxEndFrame() const {
+    return midiSequencer_.getMaxEndFrame();
+}
+
 // ── Render thread ──────────────────────────────────────────────────────────
 
 void SynthEngine::renderThreadFunc() {
@@ -171,6 +194,7 @@ void SynthEngine::renderThreadFunc() {
             }
             sequencer_.reset();
             renderPos_ = transport_.posFrames.load(std::memory_order_relaxed);
+            midiSequencer_.resetToPosition(renderPos_);
             flushRequested_.store(false, std::memory_order_release);
         }
 
@@ -181,6 +205,7 @@ void SynthEngine::renderThreadFunc() {
             // Play started -- sync render position with transport
             renderPos_ = transport_.posFrames.load(std::memory_order_relaxed);
             sequencer_.reset();
+            midiSequencer_.resetToPosition(renderPos_);
         }
         if (!playing && wasPlaying_) {
             // Play stopped -- silence any ringing notes
@@ -188,6 +213,7 @@ void SynthEngine::renderThreadFunc() {
                 fluid_synth_all_notes_off(FS_SYNTH, -1);
             }
             sequencer_.reset();
+            midiSequencer_.reset();
         }
         wasPlaying_ = playing;
 
@@ -204,6 +230,21 @@ void SynthEngine::renderThreadFunc() {
             const auto& events = sequencer_.tick(
                 renderPos_, kSynthRenderChunkFrames, bpm);
             for (const auto& e : events) {
+                if (synth_) {
+                    if (e.velocity > 0) {
+                        fluid_synth_noteon(FS_SYNTH, e.channel, e.note, e.velocity);
+                    } else {
+                        fluid_synth_noteoff(FS_SYNTH, e.channel, e.note);
+                    }
+                }
+            }
+        }
+
+        // Tick MIDI sequencer while playing
+        if (playing && midiSequencerEnabled_.load(std::memory_order_relaxed)) {
+            const auto& midiEvents = midiSequencer_.tick(
+                renderPos_, kSynthRenderChunkFrames);
+            for (const auto& e : midiEvents) {
                 if (synth_) {
                     if (e.velocity > 0) {
                         fluid_synth_noteon(FS_SYNTH, e.channel, e.note, e.velocity);

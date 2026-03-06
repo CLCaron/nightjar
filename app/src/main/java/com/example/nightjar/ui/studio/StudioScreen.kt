@@ -86,7 +86,8 @@ import kotlinx.coroutines.flow.collectLatest
 @Composable
 fun StudioScreen(
     ideaId: Long,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onOpenPianoRoll: (Long) -> Unit = {}
 ) {
     val vm: StudioViewModel = hiltViewModel()
     val context = LocalContext.current
@@ -135,6 +136,9 @@ fun StudioScreen(
                     } else {
                         permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                     }
+                }
+                is StudioEffect.NavigateToPianoRoll -> {
+                    onOpenPianoRoll(effect.trackId)
                 }
             }
         }
@@ -329,6 +333,7 @@ fun StudioScreen(
                     expandedTakeTrackIds = state.expandedTakeTrackIds,
                     expandedTakeDrawerIds = state.expandedTakeDrawerIds,
                     drumPatterns = state.drumPatterns,
+                    midiTracks = state.midiTracks,
                     clipDragState = state.clipDragState,
                     bpm = state.bpm,
                     timeSignatureNumerator = state.timeSignatureNumerator,
@@ -363,6 +368,21 @@ fun StudioScreen(
         AddTrackBottomSheet(
             onSelect = { type -> vm.onAction(StudioAction.SelectNewTrackType(type)) },
             onDismiss = { vm.onAction(StudioAction.DismissAddTrackSheet) }
+        )
+    }
+
+    if (state.showInstrumentPickerForTrackId != null) {
+        val trackId = state.showInstrumentPickerForTrackId!!
+        val currentProgram = state.midiTracks[trackId]?.midiProgram ?: 0
+        InstrumentPicker(
+            currentProgram = currentProgram,
+            onSelect = { program ->
+                vm.onAction(StudioAction.SetMidiInstrument(trackId, program))
+            },
+            onPreview = { program ->
+                vm.onAction(StudioAction.PreviewInstrument(program))
+            },
+            onDismiss = { vm.onAction(StudioAction.DismissInstrumentPicker) }
         )
     }
 

@@ -85,16 +85,26 @@ public:
     void setBpm(double bpm);
     void setDrumSequencerEnabled(bool enabled);
 
+    // ── MIDI sequencer API ─────────────────────────────────────────
+    void updateMidiTracks(const int* channels, const int* programs,
+                          const float* volumes, const bool* muted, int trackCount,
+                          const int* trackEventCounts,
+                          const int64_t* eventFrames, const int* eventChannels,
+                          const int* eventNotes, const int* eventVelocities,
+                          int totalEventCount);
+    void setMidiSequencerEnabled(bool enabled);
+
     // ── Hardware latency measurement ──────────────────────────────────
     int64_t getOutputLatencyMs() const;
     int64_t getInputLatencyMs() const;
 
 private:
-    /** Recompute totalFrames from max(mixer tracks, drum patterns). */
+    /** Recompute totalFrames from max(mixer tracks, drum patterns, MIDI). */
     void recomputeTotalFrames();
 
     std::atomic<bool> initialized_{false};
     std::atomic<int64_t> drumEndFrames_{0};
+    std::atomic<int64_t> midiEndFrames_{0};
     std::unique_ptr<OboeRecordingStream> recordingStream_;
     std::unique_ptr<TrackMixer> mixer_;
     std::unique_ptr<SynthEngine> synthEngine_;

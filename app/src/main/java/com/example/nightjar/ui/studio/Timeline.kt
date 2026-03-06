@@ -71,6 +71,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.nightjar.audio.MusicalTimeConverter
+import com.example.nightjar.data.db.entity.MidiNoteEntity
 import com.example.nightjar.data.db.entity.TakeEntity
 import com.example.nightjar.data.db.entity.TrackEntity
 import com.example.nightjar.ui.components.NjWaveform
@@ -128,6 +129,7 @@ fun TimelinePanel(
     expandedTakeTrackIds: Set<Long>,
     expandedTakeDrawerIds: Set<Long>,
     drumPatterns: Map<Long, DrumPatternUiState> = emptyMap(),
+    midiTracks: Map<Long, MidiTrackUiState> = emptyMap(),
     clipDragState: ClipDragState? = null,
     bpm: Double = 120.0,
     timeSignatureNumerator: Int = 4,
@@ -271,35 +273,50 @@ fun TimelinePanel(
                                 laneHeight = TRACK_LANE_HEIGHT
                             )
                         }
-                        if (track.isDrum) {
-                            val drumPattern = drumPatterns[track.id]
-                            DrumTrackLane(
-                                track = track,
-                                trackColor = trackColor,
-                                msPerDp = msPerDp,
-                                bpm = bpm,
-                                pattern = drumPattern,
-                                clipDragState = clipDragState,
-                                timelineWidth = timelineWidthDp,
-                                laneHeight = TRACK_LANE_HEIGHT,
-                                effectivelyMuted = effectivelyMuted,
-                                onAction = onAction,
-                                timeSignatureNumerator = timeSignatureNumerator,
-                                timeSignatureDenominator = timeSignatureDenominator
-                            )
-                        } else {
-                            TimelineTrackLane(
-                                track = track,
-                                trackColor = trackColor,
-                                msPerDp = msPerDp,
-                                timelineWidth = timelineWidthDp,
-                                laneHeight = TRACK_LANE_HEIGHT,
-                                dragState = dragState,
-                                trimState = trimState,
-                                effectivelyMuted = effectivelyMuted,
-                                getAudioFile = getAudioFile,
-                                onAction = onAction
-                            )
+                        when {
+                            track.isDrum -> {
+                                val drumPattern = drumPatterns[track.id]
+                                DrumTrackLane(
+                                    track = track,
+                                    trackColor = trackColor,
+                                    msPerDp = msPerDp,
+                                    bpm = bpm,
+                                    pattern = drumPattern,
+                                    clipDragState = clipDragState,
+                                    timelineWidth = timelineWidthDp,
+                                    laneHeight = TRACK_LANE_HEIGHT,
+                                    effectivelyMuted = effectivelyMuted,
+                                    onAction = onAction,
+                                    timeSignatureNumerator = timeSignatureNumerator,
+                                    timeSignatureDenominator = timeSignatureDenominator
+                                )
+                            }
+                            track.isMidi -> {
+                                val midiState = midiTracks[track.id]
+                                MidiTrackLane(
+                                    track = track,
+                                    trackColor = trackColor,
+                                    msPerDp = msPerDp,
+                                    notes = midiState?.notes ?: emptyList(),
+                                    laneHeight = TRACK_LANE_HEIGHT,
+                                    effectivelyMuted = effectivelyMuted,
+                                    onAction = onAction
+                                )
+                            }
+                            else -> {
+                                TimelineTrackLane(
+                                    track = track,
+                                    trackColor = trackColor,
+                                    msPerDp = msPerDp,
+                                    timelineWidth = timelineWidthDp,
+                                    laneHeight = TRACK_LANE_HEIGHT,
+                                    dragState = dragState,
+                                    trimState = trimState,
+                                    effectivelyMuted = effectivelyMuted,
+                                    getAudioFile = getAudioFile,
+                                    onAction = onAction
+                                )
+                            }
                         }
 
                         if (loopStartMs != null && loopEndMs != null) {
@@ -328,25 +345,37 @@ fun TimelinePanel(
                 enter = drawerEnter,
                 exit = drawerExit
             ) {
-                if (track.isDrum) {
-                    val drumPattern = drumPatterns[track.id]
-                    DrumTrackDrawer(
-                        track = track,
-                        isSoloed = isSoloed,
-                        pattern = drumPattern,
-                        bpm = bpm,
-                        onAction = onAction,
-                        beatsPerBar = timeSignatureNumerator
-                    )
-                } else {
-                    TrackDrawerPanel(
-                        track = track,
-                        isSoloed = isSoloed,
-                        isArmed = isArmed,
-                        hasTakes = takes.isNotEmpty(),
-                        takesExpanded = takesExpanded,
-                        onAction = onAction
-                    )
+                when {
+                    track.isDrum -> {
+                        val drumPattern = drumPatterns[track.id]
+                        DrumTrackDrawer(
+                            track = track,
+                            isSoloed = isSoloed,
+                            pattern = drumPattern,
+                            bpm = bpm,
+                            onAction = onAction,
+                            beatsPerBar = timeSignatureNumerator
+                        )
+                    }
+                    track.isMidi -> {
+                        val midiState = midiTracks[track.id]
+                        MidiTrackDrawer(
+                            track = track,
+                            isSoloed = isSoloed,
+                            instrumentName = midiState?.instrumentName ?: "Unknown",
+                            onAction = onAction
+                        )
+                    }
+                    else -> {
+                        TrackDrawerPanel(
+                            track = track,
+                            isSoloed = isSoloed,
+                            isArmed = isArmed,
+                            hasTakes = takes.isNotEmpty(),
+                            takesExpanded = takesExpanded,
+                            onAction = onAction
+                        )
+                    }
                 }
             }
 
@@ -740,6 +769,54 @@ private fun TimelineTrackLane(
         }
     }
     } // CompositionLocalProvider
+}
+
+/**
+ * Compact MIDI track lane in the timeline. Shows small horizontal bars
+ * at pitch-proportional Y positions. Tap to open piano roll.
+ */
+@Composable
+private fun MidiTrackLane(
+    track: TrackEntity,
+    trackColor: Color,
+    msPerDp: Float,
+    notes: List<MidiNoteEntity>,
+    laneHeight: Dp,
+    effectivelyMuted: Boolean,
+    onAction: (StudioAction) -> Unit
+) {
+    val mutedAlpha = if (effectivelyMuted) 0.35f else 1.0f
+
+    Box(
+        modifier = Modifier
+            .height(laneHeight)
+            .fillMaxWidth()
+            .alpha(mutedAlpha)
+            .clickable { onAction(StudioAction.OpenPianoRoll(track.id)) }
+    ) {
+        Canvas(modifier = Modifier.matchParentSize()) {
+            if (notes.isEmpty()) return@Canvas
+
+            val pitchRange = notes.minOf { it.pitch }..notes.maxOf { it.pitch }
+            val pitchSpan = (pitchRange.last - pitchRange.first).coerceAtLeast(1)
+            val laneH = size.height
+            val barHeight = (laneH / (pitchSpan + 2)).coerceIn(2f, 6f)
+
+            for (note in notes) {
+                val x = note.startMs / msPerDp
+                val w = (note.durationMs / msPerDp).coerceAtLeast(2f)
+                // Map pitch to Y within lane (higher pitch = higher on screen = lower Y)
+                val normalizedPitch = (note.pitch - pitchRange.first).toFloat() / pitchSpan
+                val y = laneH - (normalizedPitch * (laneH - barHeight)) - barHeight
+
+                drawRect(
+                    color = trackColor,
+                    topLeft = Offset(x, y),
+                    size = Size(w, barHeight)
+                )
+            }
+        }
+    }
 }
 
 /**

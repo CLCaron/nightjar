@@ -70,6 +70,7 @@ add_library(nightjar-audio SHARED
     track_mixer.cpp
     synth_engine.cpp
     step_sequencer.cpp
+    midi_sequencer.cpp
 )
 
 target_include_directories(nightjar-audio PRIVATE

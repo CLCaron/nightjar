@@ -92,6 +92,22 @@ class StudioRepository(
         return trackDao.insertTrack(track)
     }
 
+    /** Create a new MIDI instrument track. Returns the track ID. */
+    suspend fun addMidiTrack(ideaId: Long, midiChannel: Int, midiProgram: Int = 0): Long {
+        val nextIndex = trackDao.getTrackCount(ideaId)
+        val track = TrackEntity(
+            ideaId = ideaId,
+            trackType = "midi",
+            audioFileName = null,
+            displayName = "MIDI ${nextIndex + 1}",
+            sortIndex = nextIndex,
+            durationMs = 0L,
+            midiChannel = midiChannel,
+            midiProgram = midiProgram
+        )
+        return trackDao.insertTrack(track)
+    }
+
     // ── Timeline edits ────────────────────────────────────────────────────
 
     suspend fun moveTrack(trackId: Long, newOffsetMs: Long) {

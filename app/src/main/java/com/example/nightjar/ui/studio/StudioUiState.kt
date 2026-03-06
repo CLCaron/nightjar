@@ -2,6 +2,7 @@ package com.example.nightjar.ui.studio
 
 import com.example.nightjar.audio.AudioLatencyEstimator
 import com.example.nightjar.data.db.entity.DrumStepEntity
+import com.example.nightjar.data.db.entity.MidiNoteEntity
 import com.example.nightjar.data.db.entity.TakeEntity
 import com.example.nightjar.data.db.entity.TrackEntity
 
@@ -29,6 +30,13 @@ data class DrumPatternUiState(
 ) {
     val totalSteps: Int get() = stepsPerBar * bars
 }
+
+/** Snapshot of MIDI track data for UI rendering, keyed by track ID. */
+data class MidiTrackUiState(
+    val notes: List<MidiNoteEntity> = emptyList(),
+    val midiProgram: Int = 0,
+    val instrumentName: String = "Acoustic Grand Piano"
+)
 
 /** UI state for the Studio (multi-track workspace) screen. */
 data class StudioUiState(
@@ -73,7 +81,9 @@ data class StudioUiState(
     val timeSignatureDenominator: Int = 4,
     val isSnapEnabled: Boolean = true,
     val drumPatterns: Map<Long, DrumPatternUiState> = emptyMap(),
-    val clipDragState: ClipDragState? = null
+    val clipDragState: ClipDragState? = null,
+    val midiTracks: Map<Long, MidiTrackUiState> = emptyMap(),
+    val showInstrumentPickerForTrackId: Long? = null
 ) {
     val hasLoopRegion: Boolean get() = loopStartMs != null && loopEndMs != null
 
@@ -121,7 +131,9 @@ data class StudioUiState(
                 timeSignatureDenominator == other.timeSignatureDenominator &&
                 isSnapEnabled == other.isSnapEnabled &&
                 drumPatterns == other.drumPatterns &&
-                clipDragState == other.clipDragState
+                clipDragState == other.clipDragState &&
+                midiTracks == other.midiTracks &&
+                showInstrumentPickerForTrackId == other.showInstrumentPickerForTrackId
     }
 
     override fun hashCode(): Int {
@@ -167,6 +179,8 @@ data class StudioUiState(
         result = 31 * result + isSnapEnabled.hashCode()
         result = 31 * result + drumPatterns.hashCode()
         result = 31 * result + (clipDragState?.hashCode() ?: 0)
+        result = 31 * result + midiTracks.hashCode()
+        result = 31 * result + (showInstrumentPickerForTrackId?.hashCode() ?: 0)
         return result
     }
 }
@@ -273,6 +287,13 @@ sealed interface StudioAction {
     data class UpdateDragClip(val previewOffsetMs: Long) : StudioAction
     data class FinishDragClip(val trackId: Long, val clipId: Long, val newOffsetMs: Long) : StudioAction
     data object CancelDragClip : StudioAction
+
+    // MIDI instrument tracks
+    data class OpenPianoRoll(val trackId: Long) : StudioAction
+    data class ShowInstrumentPicker(val trackId: Long) : StudioAction
+    data object DismissInstrumentPicker : StudioAction
+    data class SetMidiInstrument(val trackId: Long, val program: Int) : StudioAction
+    data class PreviewInstrument(val program: Int) : StudioAction
 }
 
 /** One-shot side effects emitted by [StudioViewModel]. */
@@ -280,10 +301,12 @@ sealed interface StudioEffect {
     data object NavigateBack : StudioEffect
     data class ShowError(val message: String) : StudioEffect
     data object RequestMicPermission : StudioEffect
+    data class NavigateToPianoRoll(val trackId: Long) : StudioEffect
 }
 
 /** Available track types for the "Add Track" bottom sheet. */
 enum class NewTrackType(val label: String, val description: String) {
     AUDIO_RECORDING("Audio Recording", "Record with your microphone"),
-    DRUM_SEQUENCER("Drum Sequencer", "Step-based drum pattern")
+    DRUM_SEQUENCER("Drum Sequencer", "Step-based drum pattern"),
+    MIDI_INSTRUMENT("MIDI Instrument", "Piano, guitar, bass, synths & more")
 }

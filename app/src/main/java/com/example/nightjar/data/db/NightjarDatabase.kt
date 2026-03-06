@@ -6,6 +6,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import com.example.nightjar.data.db.dao.DrumPatternDao
 import com.example.nightjar.data.db.dao.IdeaDao
+import com.example.nightjar.data.db.dao.MidiNoteDao
 import com.example.nightjar.data.db.dao.TagDao
 import com.example.nightjar.data.db.dao.TakeDao
 import com.example.nightjar.data.db.dao.TrackDao
@@ -13,6 +14,7 @@ import com.example.nightjar.data.db.entity.DrumClipEntity
 import com.example.nightjar.data.db.entity.DrumPatternEntity
 import com.example.nightjar.data.db.entity.DrumStepEntity
 import com.example.nightjar.data.db.entity.IdeaEntity
+import com.example.nightjar.data.db.entity.MidiNoteEntity
 import com.example.nightjar.data.db.entity.TagEntity
 import com.example.nightjar.data.db.entity.TakeEntity
 import com.example.nightjar.data.db.entity.TrackEntity
@@ -30,15 +32,18 @@ import com.example.nightjar.data.db.entity.TrackEntity
  *            `drum_patterns` and `drum_steps` tables for drum sequencer support.
  * - **v7** — Added `drum_clips` table for timeline clip placements of drum patterns.
  * - **v8** — Added `timeSignatureNumerator` and `timeSignatureDenominator` to ideas.
+ * - **v9** — Added `midiProgram` and `midiChannel` to tracks, `midi_notes` table for
+ *            MIDI instrument track support.
  */
 @Database(
     entities = [
         IdeaEntity::class, TagEntity::class, IdeaTagCrossRef::class,
         TrackEntity::class, TakeEntity::class,
         DrumPatternEntity::class, DrumStepEntity::class,
-        DrumClipEntity::class
+        DrumClipEntity::class,
+        MidiNoteEntity::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = false
 )
 abstract class NightjarDatabase : RoomDatabase() {
@@ -48,6 +53,7 @@ abstract class NightjarDatabase : RoomDatabase() {
     abstract fun trackDao(): TrackDao
     abstract fun takeDao(): TakeDao
     abstract fun drumPatternDao(): DrumPatternDao
+    abstract fun midiNoteDao(): MidiNoteDao
 
     companion object {
         @Volatile private var INSTANCE: NightjarDatabase? = null
@@ -289,6 +295,37 @@ abstract class NightjarDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v8 -> v9: MIDI instrument track support.
+         *
+         * - tracks: add `midiProgram` and `midiChannel` columns (default 0).
+         * - New table: `midi_notes` for MIDI note events.
+         */
+        private val MIGRATION_8_9 = object : androidx.room.migration.Migration(8, 9) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE tracks ADD COLUMN midiProgram INTEGER NOT NULL DEFAULT 0"
+                )
+                db.execSQL(
+                    "ALTER TABLE tracks ADD COLUMN midiChannel INTEGER NOT NULL DEFAULT 0"
+                )
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS midi_notes (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        trackId INTEGER NOT NULL,
+                        pitch INTEGER NOT NULL,
+                        startMs INTEGER NOT NULL,
+                        durationMs INTEGER NOT NULL,
+                        velocity REAL NOT NULL DEFAULT 0.8,
+                        FOREIGN KEY(trackId) REFERENCES tracks(id) ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_midi_notes_trackId ON midi_notes(trackId)"
+                )
+            }
+        }
+
         fun getInstance(context: Context): NightjarDatabase {
             return INSTANCE ?: synchronized(this) {
                 val db = Room.databaseBuilder(
@@ -298,7 +335,7 @@ abstract class NightjarDatabase : RoomDatabase() {
                 ).addMigrations(
                     MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4,
                     MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
-                    MIGRATION_7_8
+                    MIGRATION_7_8, MIGRATION_8_9
                 ).build()
                 INSTANCE = db
                 db

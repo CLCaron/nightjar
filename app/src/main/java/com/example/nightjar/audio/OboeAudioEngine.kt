@@ -193,6 +193,40 @@ class OboeAudioEngine @Inject constructor() {
     fun setDrumSequencerEnabled(enabled: Boolean) =
         nativeSetDrumSequencerEnabled(enabled)
 
+    // ── MIDI Sequencer ────────────────────────────────────────────────────
+
+    /**
+     * Replace all MIDI track data in the C++ MIDI sequencer.
+     * Flat parallel arrays: per-track metadata + flattened noteOn/noteOff events.
+     *
+     * @param channels         MIDI channel per track (size = trackCount)
+     * @param programs         GM program per track (size = trackCount)
+     * @param volumes          Volume per track (size = trackCount)
+     * @param muted            Mute flag per track (size = trackCount)
+     * @param trackEventCounts Number of events per track (size = trackCount)
+     * @param eventFrames      Frame position of each event (size = totalEvents)
+     * @param eventChannels    MIDI channel of each event (size = totalEvents)
+     * @param eventNotes       MIDI note of each event (size = totalEvents)
+     * @param eventVelocities  Velocity of each event, 0 = noteOff (size = totalEvents)
+     */
+    fun updateMidiTracks(
+        channels: IntArray,
+        programs: IntArray,
+        volumes: FloatArray,
+        muted: BooleanArray,
+        trackEventCounts: IntArray,
+        eventFrames: LongArray,
+        eventChannels: IntArray,
+        eventNotes: IntArray,
+        eventVelocities: IntArray
+    ) = nativeUpdateMidiTracks(
+        channels, programs, volumes, muted, trackEventCounts,
+        eventFrames, eventChannels, eventNotes, eventVelocities
+    )
+
+    fun setMidiSequencerEnabled(enabled: Boolean) =
+        nativeSetMidiSequencerEnabled(enabled)
+
     // ── Hardware latency measurement ──────────────────────────────────────
 
     /**
@@ -268,6 +302,16 @@ class OboeAudioEngine @Inject constructor() {
     )
     private external fun nativeSetBpm(bpm: Double)
     private external fun nativeSetDrumSequencerEnabled(enabled: Boolean)
+
+    // MIDI sequencer
+    private external fun nativeUpdateMidiTracks(
+        channels: IntArray, programs: IntArray,
+        volumes: FloatArray, muted: BooleanArray,
+        trackEventCounts: IntArray,
+        eventFrames: LongArray, eventChannels: IntArray,
+        eventNotes: IntArray, eventVelocities: IntArray
+    )
+    private external fun nativeSetMidiSequencerEnabled(enabled: Boolean)
 
     // Hardware latency
     private external fun nativeGetOutputLatencyMs(): Long
