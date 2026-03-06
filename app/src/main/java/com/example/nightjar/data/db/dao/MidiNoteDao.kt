@@ -39,4 +39,12 @@ interface MidiNoteDao {
 
     @Query("SELECT COUNT(*) FROM midi_notes WHERE trackId = :trackId")
     suspend fun getNoteCount(trackId: Long): Int
+
+    @Query("""
+        UPDATE midi_notes
+        SET startMs = CAST(ROUND(startMs * :scaleFactor) AS INTEGER),
+            durationMs = CAST(ROUND(durationMs * :scaleFactor) AS INTEGER)
+        WHERE trackId IN (SELECT id FROM tracks WHERE ideaId = :ideaId AND trackType = 'midi')
+    """)
+    suspend fun scaleNotePositions(ideaId: Long, scaleFactor: Double)
 }

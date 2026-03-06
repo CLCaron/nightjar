@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToLong
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -1419,17 +1420,38 @@ class StudioViewModel @Inject constructor(
         }
     }
 
-    /** Update project BPM on the idea and in the native engine. */
+    /** Update project BPM on the idea and in the native engine, scaling MIDI note positions. */
     private fun setBpm(bpm: Double) {
         val clamped = bpm.coerceIn(30.0, 300.0)
-        _state.update { it.copy(bpm = clamped) }
+        val oldBpm = _state.value.bpm
+        if (clamped == oldBpm) return
+
+        val scaleFactor = oldBpm / clamped
+
+        // Atomic update: new BPM + scaled MIDI note positions
+        _state.update { st ->
+            st.copy(
+                bpm = clamped,
+                midiTracks = st.midiTracks.mapValues { (_, ms) ->
+                    ms.copy(notes = ms.notes.map { n ->
+                        n.copy(
+                            startMs = (n.startMs * scaleFactor).roundToLong(),
+                            durationMs = (n.durationMs * scaleFactor).roundToLong()
+                        )
+                    })
+                }
+            )
+        }
         audioEngine.setBpm(clamped)
+        pushAllMidiToEngine()
+
         val ideaId = currentIdeaId ?: return
         viewModelScope.launch {
             try {
                 ideaRepo.updateBpm(ideaId, clamped)
+                midiRepo.scaleNotePositions(ideaId, scaleFactor)
             } catch (e: Exception) {
-                Log.w(TAG, "Failed to persist BPM: ${e.message}")
+                Log.w(TAG, "Failed to persist BPM change: ${e.message}")
             }
         }
     }
