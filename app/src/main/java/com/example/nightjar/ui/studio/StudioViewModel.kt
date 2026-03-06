@@ -1805,8 +1805,12 @@ class StudioViewModel @Inject constructor(
         if (audioEngine.isRecordingActive()) {
             audioEngine.stopRecording()
         }
+        // Order matters: pause stops the render thread from ticking,
+        // disable prevents new note events, then silence kills remaining notes
+        audioEngine.pause()
         audioEngine.setDrumSequencerEnabled(false)
         audioEngine.setMidiSequencerEnabled(false)
+        audioEngine.synthAllSoundsOff()
         audioEngine.removeAllTracks()
     }
 }

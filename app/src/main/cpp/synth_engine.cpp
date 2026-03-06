@@ -139,6 +139,12 @@ void SynthEngine::requestFlush() {
     flushRequested_.store(true, std::memory_order_release);
 }
 
+void SynthEngine::allSoundsOff() {
+    if (synth_) {
+        fluid_synth_all_sounds_off(FS_SYNTH, -1);  // -1 = all channels
+    }
+}
+
 // ── Step sequencer control ──────────────────────────────────────────────
 
 void SynthEngine::updateDrumPattern(int stepsPerBar, int bars, int64_t offsetFrames,
@@ -152,6 +158,9 @@ void SynthEngine::updateDrumPattern(int stepsPerBar, int bars, int64_t offsetFra
 
 void SynthEngine::setSequencerEnabled(bool enabled) {
     sequencerEnabled_.store(enabled, std::memory_order_release);
+    if (!enabled) {
+        allSoundsOff();
+    }
 }
 
 int64_t SynthEngine::getSequencerMaxEndFrame(double bpm) const {
@@ -173,6 +182,9 @@ void SynthEngine::updateMidiTracks(const std::vector<MidiTrackData>& tracks) {
 
 void SynthEngine::setMidiSequencerEnabled(bool enabled) {
     midiSequencerEnabled_.store(enabled, std::memory_order_release);
+    if (!enabled) {
+        allSoundsOff();
+    }
 }
 
 int64_t SynthEngine::getMidiMaxEndFrame() const {
@@ -190,7 +202,9 @@ void SynthEngine::renderThreadFunc() {
         if (flushRequested_.load(std::memory_order_acquire)) {
             ringBuffer_.reset();
             if (synth_) {
-                fluid_synth_all_notes_off(FS_SYNTH, -1);  // -1 = all channels
+                // CC 120 (All Sound Off) kills notes instantly with no release
+                // tail, giving a clean loop transition
+                fluid_synth_all_sounds_off(FS_SYNTH, -1);  // -1 = all channels
             }
             sequencer_.reset();
             renderPos_ = transport_.posFrames.load(std::memory_order_relaxed);
@@ -202,20 +216,31 @@ void SynthEngine::renderThreadFunc() {
         bool playing = transport_.playing.load(std::memory_order_relaxed);
 
         if (playing && !wasPlaying_) {
-            // Play started -- sync render position with transport
-            renderPos_ = transport_.posFrames.load(std::memory_order_relaxed);
+            // Play started -- discard stale audio and sync to the position
+            // captured by play() before it set playing=true.  Using
+            // pendingStartPos avoids a race where the audio callback
+            // advances posFrames before this thread wakes up, which would
+            // cause notes at the start position (e.g. frame 0) to be skipped.
+            ringBuffer_.reset();
+            renderPos_ = transport_.pendingStartPos.load(std::memory_order_acquire);
             sequencer_.reset();
             midiSequencer_.resetToPosition(renderPos_);
         }
         if (!playing && wasPlaying_) {
-            // Play stopped -- silence any ringing notes
+            // Play stopped -- kill notes instantly (CC 120, no release tail)
             if (synth_) {
-                fluid_synth_all_notes_off(FS_SYNTH, -1);
+                fluid_synth_all_sounds_off(FS_SYNTH, -1);
             }
             sequencer_.reset();
             midiSequencer_.reset();
         }
         wasPlaying_ = playing;
+
+        // Don't render while paused -- prevents stale audio accumulating
+        if (!playing) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            continue;
+        }
 
         // If the ring buffer is nearly full, sleep to avoid wasted CPU
         size_t buffered = ringBuffer_.availableToRead();
@@ -224,8 +249,8 @@ void SynthEngine::renderThreadFunc() {
             continue;
         }
 
-        // Tick step sequencer while playing
-        if (playing && sequencerEnabled_.load(std::memory_order_relaxed)) {
+        // Tick step sequencer (playing is guaranteed true here)
+        if (sequencerEnabled_.load(std::memory_order_relaxed)) {
             double bpm = transport_.bpm.load(std::memory_order_relaxed);
             const auto& events = sequencer_.tick(
                 renderPos_, kSynthRenderChunkFrames, bpm);
@@ -240,8 +265,8 @@ void SynthEngine::renderThreadFunc() {
             }
         }
 
-        // Tick MIDI sequencer while playing
-        if (playing && midiSequencerEnabled_.load(std::memory_order_relaxed)) {
+        // Tick MIDI sequencer (playing is guaranteed true here)
+        if (midiSequencerEnabled_.load(std::memory_order_relaxed)) {
             const auto& midiEvents = midiSequencer_.tick(
                 renderPos_, kSynthRenderChunkFrames);
             for (const auto& e : midiEvents) {
@@ -270,9 +295,57 @@ void SynthEngine::renderThreadFunc() {
 
         ringBuffer_.write(renderBuf, kChunkSamples);
 
-        // Advance render position only while playing
-        if (playing) {
-            renderPos_ += kSynthRenderChunkFrames;
+        // Advance render position (playing is guaranteed true here)
+        renderPos_ += kSynthRenderChunkFrames;
+
+        // Loop detection: wrap render position at loop boundary so the ring
+        // buffer contains seamless audio across iterations (no flush needed)
+        int64_t loopEnd = transport_.loopEndFrames.load(std::memory_order_relaxed);
+        int64_t loopStart = transport_.loopStartFrames.load(std::memory_order_relaxed);
+        if (loopStart >= 0 && loopEnd > loopStart && renderPos_ >= loopEnd) {
+            int64_t overshoot = renderPos_ - loopEnd;
+            if (synth_) {
+                fluid_synth_all_sounds_off(FS_SYNTH, -1);
+            }
+            sequencer_.reset();
+            midiSequencer_.resetToPosition(loopStart);
+
+            // Tick sequencers for the overshoot frames so events at
+            // loopStart are not skipped on loop wrap
+            if (overshoot > 0) {
+                auto overshootFrames = static_cast<int32_t>(overshoot);
+
+                if (sequencerEnabled_.load(std::memory_order_relaxed)) {
+                    double bpm = transport_.bpm.load(std::memory_order_relaxed);
+                    const auto& events = sequencer_.tick(
+                        loopStart, overshootFrames, bpm);
+                    for (const auto& e : events) {
+                        if (synth_) {
+                            if (e.velocity > 0) {
+                                fluid_synth_noteon(FS_SYNTH, e.channel, e.note, e.velocity);
+                            } else {
+                                fluid_synth_noteoff(FS_SYNTH, e.channel, e.note);
+                            }
+                        }
+                    }
+                }
+
+                if (midiSequencerEnabled_.load(std::memory_order_relaxed)) {
+                    const auto& midiEvents = midiSequencer_.tick(
+                        loopStart, overshootFrames);
+                    for (const auto& e : midiEvents) {
+                        if (synth_) {
+                            if (e.velocity > 0) {
+                                fluid_synth_noteon(FS_SYNTH, e.channel, e.note, e.velocity);
+                            } else {
+                                fluid_synth_noteoff(FS_SYNTH, e.channel, e.note);
+                            }
+                        }
+                    }
+                }
+            }
+
+            renderPos_ = loopStart + overshoot;
         }
     }
 }

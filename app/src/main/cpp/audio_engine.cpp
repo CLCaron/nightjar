@@ -158,6 +158,7 @@ void AudioEngine::play() {
         transport_->posFrames.store(pos, std::memory_order_relaxed);
     }
 
+    transport_->pendingStartPos.store(pos, std::memory_order_release);
     transport_->playing.store(true, std::memory_order_release);
     LOGD("AudioEngine: play (pos=%lldms)", (long long)framesToMs(pos));
 }
@@ -255,6 +256,10 @@ void AudioEngine::synthNoteOff(int channel, int note) {
 
 void AudioEngine::setSynthVolume(float volume) {
     if (synthEngine_) synthEngine_->setVolume(volume);
+}
+
+void AudioEngine::synthAllSoundsOff() {
+    if (synthEngine_) synthEngine_->allSoundsOff();
 }
 
 // ── Drum sequencer API ──────────────────────────────────────────────

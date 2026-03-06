@@ -36,6 +36,12 @@ struct AtomicTransport {
     /** Incremented by the audio callback each time the loop resets to loopStart. */
     std::atomic<int64_t> loopResetCount{0};
 
+    /** Start position captured by play() before setting playing=true.
+     *  Read by the synth render thread on play-start to avoid the race
+     *  where the audio callback advances posFrames before the render
+     *  thread wakes up. */
+    std::atomic<int64_t> pendingStartPos{0};
+
     /** Project-level tempo in BPM. Read by the step sequencer on the render thread. */
     std::atomic<double> bpm{120.0};
 
