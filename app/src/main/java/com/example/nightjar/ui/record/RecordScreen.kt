@@ -16,6 +16,7 @@ import com.example.nightjar.ui.theme.NjMuted
 import com.example.nightjar.ui.theme.NjMuted2
 import com.example.nightjar.ui.theme.NjRecordCoral
 import com.example.nightjar.ui.theme.NjTrackColors
+import android.content.res.Configuration
 import android.Manifest
 import android.content.pm.PackageManager
 import android.view.HapticFeedbackConstants
@@ -78,6 +79,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
@@ -159,52 +161,24 @@ fun RecordScreen(
         }
     }
 
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .navigationBarsPadding()
-                .padding(horizontal = 20.dp, vertical = 18.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Box {
-                Text(
-                    text = "Nightjar",
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
-                )
-                Text(
-                    text = "Nightjar",
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = Color.White.copy(alpha = 0.25f),
-                    modifier = Modifier.offset(x = 1.1.dp, y = 1.3.dp)
-                )
-            }
+        val contentModifier = Modifier
+            .fillMaxSize()
+            .padding(padding)
+            .navigationBarsPadding()
+            .padding(horizontal = 20.dp, vertical = if (isLandscape) 8.dp else 18.dp)
 
-            // Subtle groove below title
-            Spacer(Modifier.height(10.dp))
-            Canvas(Modifier.fillMaxWidth(0.5f).height(1.dp)) {
-                drawLine(
-                    brush = Brush.horizontalGradient(
-                        colors = listOf(
-                            Color.Transparent,
-                            NjMuted.copy(alpha = 0.18f),
-                            Color.Transparent
-                        )
-                    ),
-                    start = Offset(0f, size.height / 2),
-                    end = Offset(size.width, size.height / 2),
-                    strokeWidth = size.height
-                )
-            }
-
-            Spacer(Modifier.height(24.dp))
-
-            if (!hasMicPermission) {
+        if (!hasMicPermission) {
+            Column(
+                modifier = contentModifier,
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
                 Text(
                     text = "Microphone permission is required to record.",
                     style = MaterialTheme.typography.bodyMedium,
@@ -220,97 +194,281 @@ fun RecordScreen(
                     ledColor = NjRecordCoral,
                     modifier = Modifier.heightIn(min = 48.dp)
                 )
-            } else {
-                HardwareRecordButton(
+            }
+        } else {
+            val postRecording = state.postRecording
+            val isSaving = !state.isRecording && postRecording == null &&
+                state.liveAmplitudes.isNotEmpty()
+            val isBusy = state.isRecording || isSaving
+            val waveformColor = NjTrackColors[0].copy(alpha = 0.65f)
+            val writeSunk = isBusy || postRecording != null
+
+            val lcdText = when {
+                state.isRecording -> "RECORDING"
+                isSaving -> "SAVING"
+                postRecording != null -> "SAVED"
+                else -> "RECORD"
+            }
+
+            if (isLandscape) {
+                LandscapeRecordLayout(
                     isRecording = state.isRecording,
-                    onClick = {
+                    lcdText = lcdText,
+                    postRecording = postRecording,
+                    liveAmplitudes = state.liveAmplitudes,
+                    waveformColor = waveformColor,
+                    isBusy = isBusy,
+                    writeSunk = writeSunk,
+                    onRecord = {
                         if (!state.isRecording) vm.onAction(RecordAction.StartRecording)
                         else vm.onAction(RecordAction.StopAndSave)
-                    }
+                    },
+                    onGoToOverview = { vm.onAction(RecordAction.GoToOverview) },
+                    onWrite = { vm.onAction(RecordAction.CreateWriteIdea) },
+                    onStudio = {
+                        if (postRecording != null) vm.onAction(RecordAction.GoToStudio)
+                        else vm.onAction(RecordAction.CreateStudioIdea)
+                    },
+                    onLibrary = onOpenLibrary,
+                    modifier = contentModifier
                 )
+            } else {
+                PortraitRecordLayout(
+                    isRecording = state.isRecording,
+                    lcdText = lcdText,
+                    postRecording = postRecording,
+                    liveAmplitudes = state.liveAmplitudes,
+                    waveformColor = waveformColor,
+                    isBusy = isBusy,
+                    writeSunk = writeSunk,
+                    onRecord = {
+                        if (!state.isRecording) vm.onAction(RecordAction.StartRecording)
+                        else vm.onAction(RecordAction.StopAndSave)
+                    },
+                    onGoToOverview = { vm.onAction(RecordAction.GoToOverview) },
+                    onWrite = { vm.onAction(RecordAction.CreateWriteIdea) },
+                    onStudio = {
+                        if (postRecording != null) vm.onAction(RecordAction.GoToStudio)
+                        else vm.onAction(RecordAction.CreateStudioIdea)
+                    },
+                    onLibrary = onOpenLibrary,
+                    modifier = contentModifier
+                )
+            }
+        }
+    }
+}
 
-                Spacer(Modifier.height(14.dp))
+@Composable
+private fun PortraitRecordLayout(
+    isRecording: Boolean,
+    lcdText: String,
+    postRecording: PostRecordingState?,
+    liveAmplitudes: FloatArray,
+    waveformColor: Color,
+    isBusy: Boolean,
+    writeSunk: Boolean,
+    onRecord: () -> Unit,
+    onGoToOverview: () -> Unit,
+    onWrite: () -> Unit,
+    onStudio: () -> Unit,
+    onLibrary: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box {
+            Text(
+                text = "Nightjar",
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+            )
+            Text(
+                text = "Nightjar",
+                style = MaterialTheme.typography.headlineSmall,
+                color = Color.White.copy(alpha = 0.25f),
+                modifier = Modifier.offset(x = 1.1.dp, y = 1.3.dp)
+            )
+        }
 
-                val postRecording = state.postRecording
-                val isSaving = !state.isRecording && postRecording == null &&
-                    state.liveAmplitudes.isNotEmpty()
-                val isBusy = state.isRecording || isSaving
-                val waveformColor = NjTrackColors[0].copy(alpha = 0.65f)
-
-                // LCD status text -- always visible, content changes per state
-                val lcdText = when {
-                    state.isRecording -> "RECORDING"
-                    isSaving -> "SAVING"
-                    postRecording != null -> "SAVED"
-                    else -> "RECORD"
-                }
-                StatusLcd(lcdText)
-
-                Spacer(Modifier.height(16.dp))
-
-                // Waveform panel -- always present, content changes per state
-                when {
-                    postRecording != null -> {
-                        TransformingWaveformPanel(
-                            audioFile = postRecording.audioFile,
-                            barColor = waveformColor,
-                            onClick = { vm.onAction(RecordAction.GoToOverview) },
-                            modifier = Modifier.fillMaxWidth(0.85f)
-                        )
-                    }
-                    state.liveAmplitudes.isNotEmpty() -> {
-                        NjRecessedPanel(
-                            modifier = Modifier.fillMaxWidth(0.85f)
-                        ) {
-                            NjLiveWaveform(
-                                amplitudes = state.liveAmplitudes,
-                                modifier = Modifier.fillMaxWidth(),
-                                height = 48.dp,
-                                barColor = waveformColor
-                            )
-                        }
-                    }
-                    else -> {
-                        // Empty powered-off panel
-                        NjRecessedPanel(
-                            modifier = Modifier.fillMaxWidth(0.85f)
-                        ) {
-                            Spacer(Modifier.height(48.dp).fillMaxWidth())
-                        }
-                    }
-                }
-
-                Spacer(Modifier.height(16.dp))
-
-                // Write stays sunk after recording (waveform button handles
-                // navigation to Overview)
-                val writeSunk = isBusy || postRecording != null
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    RecordScreenButton(
-                        icon = Icons.Filled.Edit,
-                        label = "Write",
-                        onClick = { vm.onAction(RecordAction.CreateWriteIdea) },
-                        enabled = !writeSunk,
-                        modifier = Modifier.weight(1f)
+        // Subtle groove below title
+        Spacer(Modifier.height(10.dp))
+        Canvas(Modifier.fillMaxWidth(0.5f).height(1.dp)) {
+            drawLine(
+                brush = Brush.horizontalGradient(
+                    colors = listOf(
+                        Color.Transparent,
+                        NjMuted.copy(alpha = 0.18f),
+                        Color.Transparent
                     )
-                    RecordScreenButton(
-                        icon = Icons.Filled.Tune,
-                        label = "Studio",
-                        onClick = {
-                            if (postRecording != null) vm.onAction(RecordAction.GoToStudio)
-                            else vm.onAction(RecordAction.CreateStudioIdea)
-                        },
-                        enabled = !isBusy,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-                Spacer(Modifier.height(10.dp))
+                ),
+                start = Offset(0f, size.height / 2),
+                end = Offset(size.width, size.height / 2),
+                strokeWidth = size.height
+            )
+        }
+
+        Spacer(Modifier.height(24.dp))
+
+        HardwareRecordButton(
+            isRecording = isRecording,
+            onClick = onRecord
+        )
+
+        Spacer(Modifier.height(14.dp))
+
+        StatusLcd(lcdText)
+
+        Spacer(Modifier.height(16.dp))
+
+        WaveformSection(
+            postRecording = postRecording,
+            liveAmplitudes = liveAmplitudes,
+            waveformColor = waveformColor,
+            onGoToOverview = onGoToOverview,
+            modifier = Modifier.fillMaxWidth(0.85f)
+        )
+
+        Spacer(Modifier.height(16.dp))
+
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            RecordScreenButton(
+                icon = Icons.Filled.Edit,
+                label = "Write",
+                onClick = onWrite,
+                enabled = !writeSunk,
+                modifier = Modifier.weight(1f)
+            )
+            RecordScreenButton(
+                icon = Icons.Filled.Tune,
+                label = "Studio",
+                onClick = onStudio,
+                enabled = !isBusy,
+                modifier = Modifier.weight(1f)
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        RecordScreenButton(
+            icon = Icons.AutoMirrored.Filled.List,
+            label = "Library",
+            onClick = onLibrary,
+            enabled = !isBusy
+        )
+    }
+}
+
+@Composable
+private fun LandscapeRecordLayout(
+    isRecording: Boolean,
+    lcdText: String,
+    postRecording: PostRecordingState?,
+    liveAmplitudes: FloatArray,
+    waveformColor: Color,
+    isBusy: Boolean,
+    writeSunk: Boolean,
+    onRecord: () -> Unit,
+    onGoToOverview: () -> Unit,
+    onWrite: () -> Unit,
+    onStudio: () -> Unit,
+    onLibrary: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Left: Record button, centered
+        Box(
+            modifier = Modifier.weight(1f),
+            contentAlignment = Alignment.Center
+        ) {
+            HardwareRecordButton(
+                isRecording = isRecording,
+                onClick = onRecord
+            )
+        }
+
+        // Right: LCD + Waveform + Action buttons
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            StatusLcd(lcdText)
+
+            Spacer(Modifier.height(12.dp))
+
+            WaveformSection(
+                postRecording = postRecording,
+                liveAmplitudes = liveAmplitudes,
+                waveformColor = waveformColor,
+                onGoToOverview = onGoToOverview,
+                modifier = Modifier.fillMaxWidth(0.85f)
+            )
+
+            Spacer(Modifier.height(12.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                RecordScreenButton(
+                    icon = Icons.Filled.Edit,
+                    label = "Write",
+                    onClick = onWrite,
+                    enabled = !writeSunk,
+                    modifier = Modifier.weight(1f)
+                )
+                RecordScreenButton(
+                    icon = Icons.Filled.Tune,
+                    label = "Studio",
+                    onClick = onStudio,
+                    enabled = !isBusy,
+                    modifier = Modifier.weight(1f)
+                )
                 RecordScreenButton(
                     icon = Icons.AutoMirrored.Filled.List,
                     label = "Library",
-                    onClick = onOpenLibrary,
-                    enabled = !isBusy
+                    onClick = onLibrary,
+                    enabled = !isBusy,
+                    modifier = Modifier.weight(1f)
                 )
+            }
+        }
+    }
+}
+
+/** Waveform panel section -- shows live waveform, post-recording card, or empty panel. */
+@Composable
+private fun WaveformSection(
+    postRecording: PostRecordingState?,
+    liveAmplitudes: FloatArray,
+    waveformColor: Color,
+    onGoToOverview: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    when {
+        postRecording != null -> {
+            TransformingWaveformPanel(
+                audioFile = postRecording.audioFile,
+                barColor = waveformColor,
+                onClick = onGoToOverview,
+                modifier = modifier
+            )
+        }
+        liveAmplitudes.isNotEmpty() -> {
+            NjRecessedPanel(modifier = modifier) {
+                NjLiveWaveform(
+                    amplitudes = liveAmplitudes,
+                    modifier = Modifier.fillMaxWidth(),
+                    height = 48.dp,
+                    barColor = waveformColor
+                )
+            }
+        }
+        else -> {
+            NjRecessedPanel(modifier = modifier) {
+                Spacer(Modifier.height(48.dp).fillMaxWidth())
             }
         }
     }
