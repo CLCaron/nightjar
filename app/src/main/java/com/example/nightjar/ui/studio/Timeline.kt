@@ -137,6 +137,8 @@ fun TimelinePanel(
     isSnapEnabled: Boolean = true,
     getAudioFile: (String) -> File,
     onAction: (StudioAction) -> Unit,
+    onScrub: (Long) -> Unit = {},
+    onScrubFinished: (Long) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val scrollState = rememberScrollState()
@@ -216,12 +218,15 @@ fun TimelinePanel(
                         )
                     }
 
-                    LoopRulerGestureLayer(
+                    RulerGestureLayer(
                         loopStartMs = loopStartMs,
                         loopEndMs = loopEndMs,
+                        isRecording = isRecording,
                         msPerDp = msPerDp,
                         totalDurationMs = totalDurationMs,
                         timelineWidth = timelineWidthDp,
+                        onScrub = onScrub,
+                        onScrubFinished = onScrubFinished,
                         onAction = onAction
                     )
 
@@ -1283,26 +1288,35 @@ private fun LoopOverlaySegment(
     }
 }
 
-/** Drag mode for the loop ruler gesture layer. */
-private enum class LoopDragMode { NEW_SELECTION, ADJUST_START, ADJUST_END }
+/** Drag mode for the ruler gesture layer. */
+private enum class RulerDragMode { SCRUB, ADJUST_LOOP_START, ADJUST_LOOP_END }
 
 /**
- * Ruler-height gesture layer for all loop interactions. Confined to
- * [RULER_HEIGHT] so it never overlaps track lanes.
+ * Ruler-height gesture layer for scrub and loop-handle interactions.
+ * Confined to [RULER_HEIGHT] so it never overlaps track lanes.
+ *
+ * Default gesture is **scrub/seek**. Only when the touch starts within
+ * 32dp of an existing loop handle does it enter handle-adjust mode.
  */
 @Composable
-private fun LoopRulerGestureLayer(
+private fun RulerGestureLayer(
     loopStartMs: Long?,
     loopEndMs: Long?,
+    isRecording: Boolean,
     msPerDp: Float,
     totalDurationMs: Long,
     timelineWidth: Dp,
+    onScrub: (Long) -> Unit,
+    onScrubFinished: (Long) -> Unit,
     onAction: (StudioAction) -> Unit
 ) {
     val density = LocalDensity.current
     val currentStartMs by rememberUpdatedState(loopStartMs)
     val currentEndMs by rememberUpdatedState(loopEndMs)
     val currentTotalMs by rememberUpdatedState(totalDurationMs)
+    val currentIsRecording by rememberUpdatedState(isRecording)
+    val currentOnScrub by rememberUpdatedState(onScrub)
+    val currentOnScrubFinished by rememberUpdatedState(onScrubFinished)
     val currentOnAction by rememberUpdatedState(onAction)
 
     Box(
@@ -1338,30 +1352,50 @@ private fun LoopRulerGestureLayer(
                     val dragMode = when {
                         nearStart && nearEnd -> {
                             if (abs(touchX - startPx) <= abs(touchX - endPx))
-                                LoopDragMode.ADJUST_START else LoopDragMode.ADJUST_END
+                                RulerDragMode.ADJUST_LOOP_START else RulerDragMode.ADJUST_LOOP_END
                         }
-                        nearStart -> LoopDragMode.ADJUST_START
-                        nearEnd -> LoopDragMode.ADJUST_END
-                        else -> LoopDragMode.NEW_SELECTION
+                        nearStart -> RulerDragMode.ADJUST_LOOP_START
+                        nearEnd -> RulerDragMode.ADJUST_LOOP_END
+                        else -> RulerDragMode.SCRUB
                     }
 
-                    val slop = awaitHorizontalTouchSlopOrCancellation(down.id) { change, _ ->
-                        change.consume()
-                    }
-                    if (slop != null) {
-                        val anchorMs = pxToMs(down.position.x)
-                        horizontalDrag(slop.id) { change ->
+                    if (dragMode == RulerDragMode.SCRUB) {
+                        // Disable scrub during recording
+                        if (currentIsRecording) return@awaitEachGesture
+
+                        // Immediate seek on touch down
+                        val tapMs = pxToMs(touchX)
+                        currentOnScrub(tapMs)
+
+                        var lastScrubMs = tapMs
+                        val slop = awaitHorizontalTouchSlopOrCancellation(down.id) { change, _ ->
                             change.consume()
-                            val fingerMs = pxToMs(change.position.x)
-                            when (dragMode) {
-                                LoopDragMode.ADJUST_START ->
-                                    currentOnAction(StudioAction.UpdateLoopRegionStart(fingerMs))
-                                LoopDragMode.ADJUST_END ->
-                                    currentOnAction(StudioAction.UpdateLoopRegionEnd(fingerMs))
-                                LoopDragMode.NEW_SELECTION -> {
-                                    val leftMs = minOf(anchorMs, fingerMs)
-                                    val rightMs = maxOf(anchorMs, fingerMs)
-                                    currentOnAction(StudioAction.SetLoopRegion(leftMs, rightMs))
+                        }
+                        if (slop != null) {
+                            horizontalDrag(slop.id) { change ->
+                                change.consume()
+                                val fingerMs = pxToMs(change.position.x)
+                                lastScrubMs = fingerMs
+                                currentOnScrub(fingerMs)
+                            }
+                        }
+                        // Commit seek on release (tap or drag end)
+                        currentOnScrubFinished(lastScrubMs)
+                    } else {
+                        // Loop handle adjustment (same as before)
+                        val slop = awaitHorizontalTouchSlopOrCancellation(down.id) { change, _ ->
+                            change.consume()
+                        }
+                        if (slop != null) {
+                            horizontalDrag(slop.id) { change ->
+                                change.consume()
+                                val fingerMs = pxToMs(change.position.x)
+                                when (dragMode) {
+                                    RulerDragMode.ADJUST_LOOP_START ->
+                                        currentOnAction(StudioAction.UpdateLoopRegionStart(fingerMs))
+                                    RulerDragMode.ADJUST_LOOP_END ->
+                                        currentOnAction(StudioAction.UpdateLoopRegionEnd(fingerMs))
+                                    else -> {}
                                 }
                             }
                         }

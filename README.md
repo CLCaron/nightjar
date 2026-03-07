@@ -34,7 +34,7 @@ A lightweight multi-track workspace. Not a replacement for professional tools, b
 - **Overdub** -- record new layers while existing tracks play back, with hardware-compensated sync. Live coral waveform grows in real time on the timeline during recording.
 - **Takes** -- arm a track and record multiple takes. Each take is an independent audio clip on the timeline. Tap to mute, long-press for rename/delete. Drag and layer takes freely.
 - **Loop recording** -- with a loop region active, record continuously. On stop, the recording is automatically split into individual takes at each loop boundary -- zero gaps, no manual slicing.
-- **Loop playback** -- drag on the ruler to define a loop region, with draggable handles
+- **Loop playback** -- tap Loop to auto-create a full-timeline region, adjust with draggable handles on the ruler
 - **Drag to reposition** -- long-press a track and slide it along the timeline
 - **Non-destructive trim** -- drag handles on track edges
 - **Measure/beat timeline** -- the ruler displays measure numbers with beat subdivisions instead of seconds. Supports time signatures (4/4, 3/4, 6/8, 2/4) and project-level BPM. Position readout shows current playhead as "measure.beat".
@@ -76,7 +76,8 @@ Nightjar is in active development, working toward a v1.0 Play Store release.
 - Multi-track overdub with hardware timestamp latency compensation
 - Per-track takes with arm toggle, loop recording with auto-split into takes
 - Drag-to-reposition, non-destructive trim, per-track volume/mute/solo/delete
-- Loop playback with ruler-based region selection and toggle controls
+- Loop playback with ruler scrub-to-seek and loop handle adjustment
+- Timeline ruler as primary scrub surface (tap or drag to seek)
 - Studio transport bar: Restart, Play/Pause, Rec (right cluster) with Loop/Clear rocker pill (left). Sticky pinned overlay when scrolled past.
 - Inline track drawer with hardware-style controls (arm, solo, mute, takes, volume knob, rename, delete)
 - Drum step sequencer with FluidSynth synthesis, pattern editor, clip-based timeline arrangement

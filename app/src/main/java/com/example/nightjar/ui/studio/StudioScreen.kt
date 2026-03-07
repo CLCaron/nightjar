@@ -62,7 +62,6 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.example.nightjar.ui.components.NjScrubber
 import com.example.nightjar.ui.components.NjTopBar
 import com.example.nightjar.ui.theme.NjMuted2
 import com.example.nightjar.ui.theme.NjStudioAccent
@@ -259,12 +258,7 @@ fun StudioScreen(
                         timeSignatureDenominator = state.timeSignatureDenominator,
                         isSnapEnabled = state.isSnapEnabled,
                         getAudioFile = vm::getAudioFile,
-                        onAction = vm::onAction
-                    )
-
-                    NjScrubber(
-                        positionMs = scrubMs,
-                        durationMs = state.totalDurationMs,
+                        onAction = vm::onAction,
                         onScrub = { newMs ->
                             isScrubbing = true
                             scrubMs = newMs
@@ -272,10 +266,7 @@ fun StudioScreen(
                         onScrubFinished = { finalMs ->
                             isScrubbing = false
                             vm.onAction(StudioAction.SeekFinished(finalMs))
-                        },
-                        activeColor = NjStudioAccent.copy(alpha = 0.6f),
-                        inactiveColor = NjStudioWaveform.copy(alpha = 0.15f),
-                        thumbColor = NjStudioAccent
+                        }
                     )
                 }
 
