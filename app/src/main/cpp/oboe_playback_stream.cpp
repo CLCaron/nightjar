@@ -118,11 +118,8 @@ oboe::DataCallbackResult OboePlaybackStream::onAudioReady(
     if (loopStart >= 0 && loopEnd > loopStart && pos >= loopEnd) {
         pos = loopStart;
         transport_.loopResetCount.fetch_add(1, std::memory_order_release);
-        // Flush synth ring buffer so stale audio from the previous loop
-        // iteration doesn't bleed into the new one
-        if (synth_ && synth_->isRunning()) {
-            synth_->requestFlush();
-        }
+        // Loop detection for synth audio is handled in the render thread
+        // (SynthEngine wraps renderPos_ at loop boundaries seamlessly)
     }
 
     // End-of-timeline check

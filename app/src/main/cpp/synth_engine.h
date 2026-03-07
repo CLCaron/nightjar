@@ -79,8 +79,11 @@ public:
     /** Set master synth volume (0.0 - 1.0). Lock-free. */
     void setVolume(float volume);
 
-    /** Request a ring buffer flush + all-notes-off. Used on seek/loop. */
+    /** Request a ring buffer flush + all-sounds-off. Used on seek/loop. */
     void requestFlush();
+
+    /** Immediately silence all sounding notes on all channels (CC 120). */
+    void allSoundsOff();
 
     bool isRunning() const { return running_.load(std::memory_order_acquire); }
     bool isSoundFontLoaded() const { return soundFontLoaded_.load(std::memory_order_acquire); }

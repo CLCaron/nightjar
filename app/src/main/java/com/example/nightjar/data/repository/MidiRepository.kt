@@ -88,6 +88,12 @@ class MidiRepository(
         return 0
     }
 
+    // -- BPM scaling --
+
+    suspend fun scaleNotePositions(ideaId: Long, scaleFactor: Double) {
+        midiNoteDao.scaleNotePositions(ideaId, scaleFactor)
+    }
+
     // -- Track duration --
 
     /**

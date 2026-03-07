@@ -73,6 +73,7 @@ public:
     void synthNoteOn(int channel, int note, int velocity);
     void synthNoteOff(int channel, int note);
     void setSynthVolume(float volume);
+    void synthAllSoundsOff();
 
     // ── Drum sequencer API ──────────────────────────────────────────
     void updateDrumPattern(int stepsPerBar, int bars, int64_t offsetMs,

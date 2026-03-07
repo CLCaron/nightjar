@@ -116,10 +116,15 @@ fun PianoRollScreen(
     val rowHeightPx = with(density) { ROW_HEIGHT_DP.dp.toPx() }
     val totalGridHeight = (TOTAL_NOTES * ROW_HEIGHT_DP).dp
 
-    // Compute grid width from content
+    // Compute grid width from content (BPM-aware)
+    val measureMs = MusicalTimeConverter.msPerMeasure(
+        state.bpm, state.timeSignatureNumerator, state.timeSignatureDenominator
+    ).toLong().coerceAtLeast(1L)
+    val paddingMs = measureMs * 4          // 4 measures of empty space after last note
+    val minContentMs = measureMs * 16      // always show at least 16 measures
     val maxNoteEndMs = state.notes.maxOfOrNull { it.startMs + it.durationMs } ?: 0L
-    val contentMs = maxOf(maxNoteEndMs + 4000L, state.totalDurationMs + 4000L, 16000L)
-    val gridWidthDp = (contentMs * PX_PER_MS / density.density).dp
+    val contentMs = maxOf(maxNoteEndMs + paddingMs, state.totalDurationMs + paddingMs, minContentMs)
+    val gridWidthDp = (contentMs * PX_PER_MS).dp
 
     val verticalScrollState = rememberScrollState(
         (DEFAULT_SCROLL_NOTE * ROW_HEIGHT_DP * density.density).toInt()

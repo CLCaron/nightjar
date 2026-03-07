@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToLong
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -1098,6 +1099,10 @@ class StudioViewModel @Inject constructor(
                 )
             }
         }
+        // Re-push all MIDI tracks with effective mute state (bulk operation)
+        if (st.tracks.any { it.isMidi }) {
+            pushAllMidiToEngine()
+        }
     }
 
     private fun setTrackVolume(trackId: Long, volume: Float) {
@@ -1419,17 +1424,38 @@ class StudioViewModel @Inject constructor(
         }
     }
 
-    /** Update project BPM on the idea and in the native engine. */
+    /** Update project BPM on the idea and in the native engine, scaling MIDI note positions. */
     private fun setBpm(bpm: Double) {
         val clamped = bpm.coerceIn(30.0, 300.0)
-        _state.update { it.copy(bpm = clamped) }
+        val oldBpm = _state.value.bpm
+        if (clamped == oldBpm) return
+
+        val scaleFactor = oldBpm / clamped
+
+        // Atomic update: new BPM + scaled MIDI note positions
+        _state.update { st ->
+            st.copy(
+                bpm = clamped,
+                midiTracks = st.midiTracks.mapValues { (_, ms) ->
+                    ms.copy(notes = ms.notes.map { n ->
+                        n.copy(
+                            startMs = (n.startMs * scaleFactor).roundToLong(),
+                            durationMs = (n.durationMs * scaleFactor).roundToLong()
+                        )
+                    })
+                }
+            )
+        }
         audioEngine.setBpm(clamped)
+        pushAllMidiToEngine()
+
         val ideaId = currentIdeaId ?: return
         viewModelScope.launch {
             try {
                 ideaRepo.updateBpm(ideaId, clamped)
+                midiRepo.scaleNotePositions(ideaId, scaleFactor)
             } catch (e: Exception) {
-                Log.w(TAG, "Failed to persist BPM: ${e.message}")
+                Log.w(TAG, "Failed to persist BPM change: ${e.message}")
             }
         }
     }
@@ -1648,6 +1674,7 @@ class StudioViewModel @Inject constructor(
         val volumes = FloatArray(trackCount)
         val muted = BooleanArray(trackCount)
         val trackEventCounts = IntArray(trackCount)
+        val anySoloed = st.soloedTrackIds.isNotEmpty()
 
         // Collect all events across all tracks
         val allFrames = mutableListOf<Long>()
@@ -1663,7 +1690,8 @@ class StudioViewModel @Inject constructor(
             channels[i] = track.midiChannel
             programs[i] = track.midiProgram
             volumes[i] = track.volume
-            muted[i] = track.isMuted
+            muted[i] = track.isMuted ||
+                (anySoloed && track.id !in st.soloedTrackIds)
 
             // Generate noteOn/noteOff event pairs from notes, sorted by frame
             val events = generateMidiEvents(notes, track.midiChannel)
@@ -1805,8 +1833,12 @@ class StudioViewModel @Inject constructor(
         if (audioEngine.isRecordingActive()) {
             audioEngine.stopRecording()
         }
+        // Order matters: pause stops the render thread from ticking,
+        // disable prevents new note events, then silence kills remaining notes
+        audioEngine.pause()
         audioEngine.setDrumSequencerEnabled(false)
         audioEngine.setMidiSequencerEnabled(false)
+        audioEngine.synthAllSoundsOff()
         audioEngine.removeAllTracks()
     }
 }

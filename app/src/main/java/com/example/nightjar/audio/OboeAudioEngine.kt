@@ -167,6 +167,9 @@ class OboeAudioEngine @Inject constructor() {
     fun setSynthVolume(volume: Float) =
         nativeSetSynthVolume(volume)
 
+    /** Immediately silence all sounding synth notes on all channels. */
+    fun synthAllSoundsOff() = nativeSynthAllSoundsOff()
+
     // ── Drum Sequencer ─────────────────────────────────────────────────────
 
     /**
@@ -292,6 +295,7 @@ class OboeAudioEngine @Inject constructor() {
     private external fun nativeSynthNoteOn(channel: Int, note: Int, velocity: Int)
     private external fun nativeSynthNoteOff(channel: Int, note: Int)
     private external fun nativeSetSynthVolume(volume: Float)
+    private external fun nativeSynthAllSoundsOff()
 
     // Drum sequencer
     private external fun nativeUpdateDrumPattern(

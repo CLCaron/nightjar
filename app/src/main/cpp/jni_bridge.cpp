@@ -246,6 +246,12 @@ Java_com_example_nightjar_audio_OboeAudioEngine_nativeSetSynthVolume(
     if (sEngine) sEngine->setSynthVolume(static_cast<float>(volume));
 }
 
+JNIEXPORT void JNICALL
+Java_com_example_nightjar_audio_OboeAudioEngine_nativeSynthAllSoundsOff(
+        JNIEnv* /* env */, jobject /* thiz */) {
+    if (sEngine) sEngine->synthAllSoundsOff();
+}
+
 // ── Drum Sequencer API ───────────────────────────────────────────────────
 
 JNIEXPORT void JNICALL
