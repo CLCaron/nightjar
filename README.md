@@ -77,7 +77,7 @@ Nightjar is in active development, working toward a v1.0 Play Store release.
 - Per-track takes with arm toggle, loop recording with auto-split into takes
 - Drag-to-reposition, non-destructive trim, per-track volume/mute/solo/delete
 - Loop playback with ruler-based region selection and toggle controls
-- Record button in the Studio button panel (alongside Loop and Play/Pause)
+- Studio transport bar: Restart, Play/Pause, Rec (right cluster) with Loop/Clear rocker pill (left)
 - Inline track drawer with hardware-style controls (arm, solo, mute, takes, volume knob, rename, delete)
 - Drum step sequencer with FluidSynth synthesis, pattern editor, clip-based timeline arrangement
 - MIDI instrument tracks with full-screen piano roll editor, 128 GM instruments, and C++ MidiSequencer

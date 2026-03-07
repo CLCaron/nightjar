@@ -2,7 +2,6 @@ package com.example.nightjar.ui.studio
 
 import com.example.nightjar.audio.AudioLatencyEstimator
 import com.example.nightjar.audio.MusicalTimeConverter
-import com.example.nightjar.ui.components.NjSectionTitle
 import com.example.nightjar.ui.components.NjButton
 import android.Manifest
 import android.content.pm.PackageManager
@@ -71,6 +70,7 @@ import com.example.nightjar.ui.theme.NjStudioWaveform
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Repeat
 import kotlinx.coroutines.flow.collectLatest
@@ -211,84 +211,93 @@ fun StudioScreen(
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                NjSectionTitle("Timeline")
-
-                if (!state.isLoading) {
+                // Loop + Clear rocker pill (left)
+                if (state.tracks.isNotEmpty()) {
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.height(IntrinsicSize.Min),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Loop + Clear rocker pill
-                        if (state.tracks.isNotEmpty()) {
-                            Row(
-                                modifier = Modifier.height(IntrinsicSize.Min),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                NjButton(
-                                    text = "Loop",
-                                    icon = Icons.Outlined.Repeat,
-                                    onClick = { vm.onAction(StudioAction.ToggleLoop) },
-                                    isActive = state.isLoopEnabled,
-                                    ledColor = NjStudioAccent,
-                                )
-
-                                Box(
-                                    Modifier
-                                        .width(1.dp)
-                                        .fillMaxHeight()
-                                        .background(NjOutline)
-                                )
-
-                                NjButton(
-                                    text = "Clear",
-                                    icon = Icons.Outlined.Close,
-                                    onClick = {
-                                        if (state.hasLoopRegion) {
-                                            vm.onAction(StudioAction.ClearLoopRegion)
-                                        }
-                                    },
-                                    isActive = !state.hasLoopRegion,
-                                    ledColor = NjMuted2,
-                                    activeGlow = false,
-                                )
-                            }
-                        }
-
-                        // Record button — coral LED, always enabled
                         NjButton(
-                            text = "Rec",
-                            icon = Icons.Filled.FiberManualRecord,
-                            onClick = {
-                                if (state.isRecording) {
-                                    vm.onAction(StudioAction.StopRecording)
-                                } else {
-                                    vm.onAction(StudioAction.StartRecording)
-                                }
-                            },
-                            isActive = state.isRecording,
-                            ledColor = NjRecordCoral,
+                            text = "Loop",
+                            icon = Icons.Outlined.Repeat,
+                            onClick = { vm.onAction(StudioAction.ToggleLoop) },
+                            isActive = state.isLoopEnabled,
+                            ledColor = NjStudioAccent,
                         )
 
-                        // Play / Pause
-                        if (state.tracks.isNotEmpty() && !state.isRecording) {
-                            NjButton(
-                                text = if (state.isPlaying) "Pause" else "Play",
-                                icon = Icons.Filled.PlayArrow,
-                                onClick = {
-                                    if (state.isPlaying) {
-                                        vm.onAction(StudioAction.Pause)
-                                    } else {
-                                        vm.onAction(StudioAction.Play)
-                                    }
-                                },
-                                isActive = state.isPlaying,
-                                ledColor = NjStudioGreen,
-                            )
-                        }
+                        Box(
+                            Modifier
+                                .width(1.dp)
+                                .fillMaxHeight()
+                                .background(NjOutline)
+                        )
+
+                        NjButton(
+                            text = "Clear",
+                            icon = Icons.Outlined.Close,
+                            onClick = {
+                                if (state.hasLoopRegion) {
+                                    vm.onAction(StudioAction.ClearLoopRegion)
+                                }
+                            },
+                            isActive = !state.hasLoopRegion,
+                            ledColor = NjMuted2,
+                            activeGlow = false,
+                        )
                     }
+                }
+
+                Spacer(Modifier.weight(1f))
+
+                // Transport cluster (right): Restart, Play, Rec
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Restart
+                    if (state.tracks.isNotEmpty() && !state.isRecording) {
+                        NjButton(
+                            text = "Restart",
+                            icon = Icons.Filled.SkipPrevious,
+                            onClick = { vm.onAction(StudioAction.RestartPlayback) },
+                            textColor = NjStudioGreen,
+                        )
+                    }
+
+                    // Play / Pause
+                    if (state.tracks.isNotEmpty() && !state.isRecording) {
+                        NjButton(
+                            text = if (state.isPlaying) "Pause" else "Play",
+                            icon = Icons.Filled.PlayArrow,
+                            onClick = {
+                                if (state.isPlaying) {
+                                    vm.onAction(StudioAction.Pause)
+                                } else {
+                                    vm.onAction(StudioAction.Play)
+                                }
+                            },
+                            isActive = state.isPlaying,
+                            ledColor = NjStudioGreen,
+                        )
+                    }
+
+                    // Record button — coral LED
+                    NjButton(
+                        text = "Rec",
+                        icon = Icons.Filled.FiberManualRecord,
+                        onClick = {
+                            if (state.isRecording) {
+                                vm.onAction(StudioAction.StopRecording)
+                            } else {
+                                vm.onAction(StudioAction.StartRecording)
+                            }
+                        },
+                        isActive = state.isRecording,
+                        ledColor = NjRecordCoral,
+                    )
                 }
             }
 
