@@ -50,7 +50,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -101,6 +105,8 @@ fun StudioScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val currentIsRecording by rememberUpdatedState(state.isRecording)
 
+    val scrollState = rememberScrollState()
+    var transportOffsetPx by remember { mutableFloatStateOf(0f) }
     var isScrubbing by remember { mutableStateOf(false) }
     var scrubMs by remember { mutableLongStateOf(0L) }
 
@@ -171,205 +177,143 @@ fun StudioScreen(
             }
         }
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = 16.dp)
-                .padding(top = 8.dp)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            NjTopBar(
-                title = state.ideaTitle.ifBlank { "Studio" },
-                onBack = onBack,
-                trailing = {
-                    IconButton(
-                        onClick = { vm.onAction(StudioAction.ShowLatencySetup) }
-                    ) {
-                        Text(
-                            "Setup",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
-                        )
-                    }
-                }
-            )
-
-            state.errorMessage?.let { msg ->
-                Text(msg, color = MaterialTheme.colorScheme.error)
-            }
-
-            if (state.isLoading) {
-                Text(
-                    "Loading…",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
-                )
-                return@Column
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
+        Box(Modifier.fillMaxSize().padding(padding)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp)
+                    .padding(top = 8.dp)
+                    .verticalScroll(scrollState),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Loop + Clear rocker pill (left)
-                if (state.tracks.isNotEmpty()) {
-                    Row(
-                        modifier = Modifier.height(IntrinsicSize.Min),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        NjButton(
-                            text = "Loop",
-                            icon = Icons.Outlined.Repeat,
-                            onClick = { vm.onAction(StudioAction.ToggleLoop) },
-                            isActive = state.isLoopEnabled,
-                            ledColor = NjStudioAccent,
-                        )
-
-                        Box(
-                            Modifier
-                                .width(1.dp)
-                                .fillMaxHeight()
-                                .background(NjOutline)
-                        )
-
-                        NjButton(
-                            text = "Clear",
-                            icon = Icons.Outlined.Close,
-                            onClick = {
-                                if (state.hasLoopRegion) {
-                                    vm.onAction(StudioAction.ClearLoopRegion)
-                                }
-                            },
-                            isActive = !state.hasLoopRegion,
-                            ledColor = NjMuted2,
-                            activeGlow = false,
-                        )
+                NjTopBar(
+                    title = state.ideaTitle.ifBlank { "Studio" },
+                    onBack = onBack,
+                    trailing = {
+                        IconButton(
+                            onClick = { vm.onAction(StudioAction.ShowLatencySetup) }
+                        ) {
+                            Text(
+                                "Setup",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+                            )
+                        }
                     }
+                )
+
+                state.errorMessage?.let { msg ->
+                    Text(msg, color = MaterialTheme.colorScheme.error)
                 }
 
-                Spacer(Modifier.weight(1f))
+                if (state.isLoading) {
+                    Text(
+                        "Loading…",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
+                    )
+                    return@Column
+                }
 
-                // Transport cluster (right): Restart, Play, Rec
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Restart
-                    if (state.tracks.isNotEmpty() && !state.isRecording) {
-                        NjButton(
-                            text = "Restart",
-                            icon = Icons.Filled.SkipPrevious,
-                            onClick = { vm.onAction(StudioAction.RestartPlayback) },
-                            textColor = NjStudioGreen,
-                        )
+                TransportAndControls(
+                    state = state,
+                    onAction = vm::onAction,
+                    modifier = Modifier.onGloballyPositioned { coords ->
+                        transportOffsetPx = coords.positionInParent().y
                     }
+                )
 
-                    // Play / Pause
-                    if (state.tracks.isNotEmpty() && !state.isRecording) {
-                        NjButton(
-                            text = if (state.isPlaying) "Pause" else "Play",
-                            icon = Icons.Filled.PlayArrow,
-                            onClick = {
-                                if (state.isPlaying) {
-                                    vm.onAction(StudioAction.Pause)
-                                } else {
-                                    vm.onAction(StudioAction.Play)
-                                }
-                            },
-                            isActive = state.isPlaying,
-                            ledColor = NjStudioGreen,
-                        )
-                    }
+                if (state.tracks.isEmpty() && !state.isRecording) {
+                    TimelinePlaceholder("No tracks yet.")
+                } else {
+                    val displayPositionMs =
+                        if (isScrubbing) scrubMs else state.globalPositionMs
 
-                    // Record button — coral LED
-                    NjButton(
-                        text = "Rec",
-                        icon = Icons.Filled.FiberManualRecord,
-                        onClick = {
-                            if (state.isRecording) {
-                                vm.onAction(StudioAction.StopRecording)
-                            } else {
-                                vm.onAction(StudioAction.StartRecording)
-                            }
+                    TimelinePanel(
+                        tracks = state.tracks,
+                        globalPositionMs = displayPositionMs,
+                        totalDurationMs = state.totalDurationMs,
+                        msPerDp = state.msPerDp,
+                        isPlaying = state.isPlaying,
+                        isRecording = state.isRecording,
+                        liveAmplitudes = state.liveAmplitudes,
+                        recordingStartGlobalMs = state.recordingStartGlobalMs,
+                        recordingTargetTrackId = state.recordingTargetTrackId,
+                        recordingElapsedMs = state.recordingElapsedMs,
+                        dragState = state.dragState,
+                        trimState = state.trimState,
+                        loopStartMs = state.loopStartMs,
+                        loopEndMs = state.loopEndMs,
+                        isLoopEnabled = state.isLoopEnabled,
+                        expandedTrackIds = state.expandedTrackIds,
+                        soloedTrackIds = state.soloedTrackIds,
+                        armedTrackId = state.armedTrackId,
+                        trackTakes = state.trackTakes,
+                        expandedTakeTrackIds = state.expandedTakeTrackIds,
+                        expandedTakeDrawerIds = state.expandedTakeDrawerIds,
+                        drumPatterns = state.drumPatterns,
+                        midiTracks = state.midiTracks,
+                        clipDragState = state.clipDragState,
+                        bpm = state.bpm,
+                        timeSignatureNumerator = state.timeSignatureNumerator,
+                        timeSignatureDenominator = state.timeSignatureDenominator,
+                        isSnapEnabled = state.isSnapEnabled,
+                        getAudioFile = vm::getAudioFile,
+                        onAction = vm::onAction
+                    )
+
+                    NjScrubber(
+                        positionMs = scrubMs,
+                        durationMs = state.totalDurationMs,
+                        onScrub = { newMs ->
+                            isScrubbing = true
+                            scrubMs = newMs
                         },
-                        isActive = state.isRecording,
-                        ledColor = NjRecordCoral,
+                        onScrubFinished = { finalMs ->
+                            isScrubbing = false
+                            vm.onAction(StudioAction.SeekFinished(finalMs))
+                        },
+                        activeColor = NjStudioAccent.copy(alpha = 0.6f),
+                        inactiveColor = NjStudioWaveform.copy(alpha = 0.15f),
+                        thumbColor = NjStudioAccent
                     )
                 }
+
+                Spacer(Modifier.height(80.dp))
             }
 
-            // Project controls: time sig, BPM, snap, position
-            if (!state.isLoading && state.errorMessage == null) {
-                ProjectControlsBar(
-                    bpm = state.bpm,
-                    timeSignatureNumerator = state.timeSignatureNumerator,
-                    timeSignatureDenominator = state.timeSignatureDenominator,
-                    isSnapEnabled = state.isSnapEnabled,
-                    globalPositionMs = state.globalPositionMs,
-                    onAction = vm::onAction
-                )
+            // Pinned transport overlay when scrolled past original position
+            val isPinned = !state.isLoading
+                && transportOffsetPx > 0f
+                && scrollState.value.toFloat() >= transportOffsetPx
+
+            if (isPinned) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(NjBg)
+                        .padding(horizontal = 16.dp)
+                        .padding(top = 8.dp, bottom = 4.dp)
+                ) {
+                    TransportAndControls(state = state, onAction = vm::onAction)
+                    Spacer(Modifier.height(4.dp))
+                    Canvas(Modifier.fillMaxWidth().height(1.dp)) {
+                        drawLine(
+                            brush = Brush.horizontalGradient(
+                                listOf(
+                                    Color.Transparent,
+                                    NjOutline.copy(alpha = 0.5f),
+                                    NjOutline.copy(alpha = 0.5f),
+                                    Color.Transparent
+                                )
+                            ),
+                            start = Offset(0f, 0f),
+                            end = Offset(size.width, 0f),
+                            strokeWidth = size.height
+                        )
+                    }
+                }
             }
-
-            if (state.tracks.isEmpty() && !state.isRecording) {
-                TimelinePlaceholder("No tracks yet.")
-            } else {
-                val displayPositionMs =
-                    if (isScrubbing) scrubMs else state.globalPositionMs
-
-                TimelinePanel(
-                    tracks = state.tracks,
-                    globalPositionMs = displayPositionMs,
-                    totalDurationMs = state.totalDurationMs,
-                    msPerDp = state.msPerDp,
-                    isPlaying = state.isPlaying,
-                    isRecording = state.isRecording,
-                    liveAmplitudes = state.liveAmplitudes,
-                    recordingStartGlobalMs = state.recordingStartGlobalMs,
-                    recordingTargetTrackId = state.recordingTargetTrackId,
-                    recordingElapsedMs = state.recordingElapsedMs,
-                    dragState = state.dragState,
-                    trimState = state.trimState,
-                    loopStartMs = state.loopStartMs,
-                    loopEndMs = state.loopEndMs,
-                    isLoopEnabled = state.isLoopEnabled,
-                    expandedTrackIds = state.expandedTrackIds,
-                    soloedTrackIds = state.soloedTrackIds,
-                    armedTrackId = state.armedTrackId,
-                    trackTakes = state.trackTakes,
-                    expandedTakeTrackIds = state.expandedTakeTrackIds,
-                    expandedTakeDrawerIds = state.expandedTakeDrawerIds,
-                    drumPatterns = state.drumPatterns,
-                    midiTracks = state.midiTracks,
-                    clipDragState = state.clipDragState,
-                    bpm = state.bpm,
-                    timeSignatureNumerator = state.timeSignatureNumerator,
-                    timeSignatureDenominator = state.timeSignatureDenominator,
-                    isSnapEnabled = state.isSnapEnabled,
-                    getAudioFile = vm::getAudioFile,
-                    onAction = vm::onAction
-                )
-
-                NjScrubber(
-                    positionMs = scrubMs,
-                    durationMs = state.totalDurationMs,
-                    onScrub = { newMs ->
-                        isScrubbing = true
-                        scrubMs = newMs
-                    },
-                    onScrubFinished = { finalMs ->
-                        isScrubbing = false
-                        vm.onAction(StudioAction.SeekFinished(finalMs))
-                    },
-                    activeColor = NjStudioAccent.copy(alpha = 0.6f),
-                    inactiveColor = NjStudioWaveform.copy(alpha = 0.15f),
-                    thumbColor = NjStudioAccent
-                )
-            }
-
-            Spacer(Modifier.height(80.dp))
         }
     }
 
@@ -478,6 +422,119 @@ fun StudioScreen(
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun TransportAndControls(
+    state: StudioUiState,
+    onAction: (StudioAction) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Loop + Clear rocker pill (left)
+            if (state.tracks.isNotEmpty()) {
+                Row(
+                    modifier = Modifier.height(IntrinsicSize.Min),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    NjButton(
+                        text = "Loop",
+                        icon = Icons.Outlined.Repeat,
+                        onClick = { onAction(StudioAction.ToggleLoop) },
+                        isActive = state.isLoopEnabled,
+                        ledColor = NjStudioAccent,
+                    )
+
+                    Box(
+                        Modifier
+                            .width(1.dp)
+                            .fillMaxHeight()
+                            .background(NjOutline)
+                    )
+
+                    NjButton(
+                        text = "Clear",
+                        icon = Icons.Outlined.Close,
+                        onClick = {
+                            if (state.hasLoopRegion) {
+                                onAction(StudioAction.ClearLoopRegion)
+                            }
+                        },
+                        isActive = !state.hasLoopRegion,
+                        ledColor = NjMuted2,
+                        activeGlow = false,
+                    )
+                }
+            }
+
+            Spacer(Modifier.weight(1f))
+
+            // Transport cluster (right): Restart, Play, Rec
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Restart
+                if (state.tracks.isNotEmpty() && !state.isRecording) {
+                    NjButton(
+                        text = "Restart",
+                        icon = Icons.Filled.SkipPrevious,
+                        onClick = { onAction(StudioAction.RestartPlayback) },
+                        textColor = NjStudioGreen,
+                    )
+                }
+
+                // Play / Pause
+                if (state.tracks.isNotEmpty() && !state.isRecording) {
+                    NjButton(
+                        text = if (state.isPlaying) "Pause" else "Play",
+                        icon = Icons.Filled.PlayArrow,
+                        onClick = {
+                            if (state.isPlaying) {
+                                onAction(StudioAction.Pause)
+                            } else {
+                                onAction(StudioAction.Play)
+                            }
+                        },
+                        isActive = state.isPlaying,
+                        ledColor = NjStudioGreen,
+                    )
+                }
+
+                // Record button -- coral LED
+                NjButton(
+                    text = "Rec",
+                    icon = Icons.Filled.FiberManualRecord,
+                    onClick = {
+                        if (state.isRecording) {
+                            onAction(StudioAction.StopRecording)
+                        } else {
+                            onAction(StudioAction.StartRecording)
+                        }
+                    },
+                    isActive = state.isRecording,
+                    ledColor = NjRecordCoral,
+                )
+            }
+        }
+
+        // Project controls: time sig, BPM, snap, position
+        if (!state.isLoading && state.errorMessage == null) {
+            ProjectControlsBar(
+                bpm = state.bpm,
+                timeSignatureNumerator = state.timeSignatureNumerator,
+                timeSignatureDenominator = state.timeSignatureDenominator,
+                isSnapEnabled = state.isSnapEnabled,
+                globalPositionMs = state.globalPositionMs,
+                onAction = onAction
+            )
+        }
     }
 }
 
