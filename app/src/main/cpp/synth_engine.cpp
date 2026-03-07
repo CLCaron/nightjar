@@ -271,7 +271,10 @@ void SynthEngine::renderThreadFunc() {
                 renderPos_, kSynthRenderChunkFrames);
             for (const auto& e : midiEvents) {
                 if (synth_) {
-                    if (e.velocity > 0) {
+                    if (e.note < 0) {
+                        // Sentinel: silence all notes on this channel (mute transition)
+                        fluid_synth_all_notes_off(FS_SYNTH, e.channel);
+                    } else if (e.velocity > 0) {
                         fluid_synth_noteon(FS_SYNTH, e.channel, e.note, e.velocity);
                     } else {
                         fluid_synth_noteoff(FS_SYNTH, e.channel, e.note);

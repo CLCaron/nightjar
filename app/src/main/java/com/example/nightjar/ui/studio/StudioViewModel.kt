@@ -1099,6 +1099,10 @@ class StudioViewModel @Inject constructor(
                 )
             }
         }
+        // Re-push all MIDI tracks with effective mute state (bulk operation)
+        if (st.tracks.any { it.isMidi }) {
+            pushAllMidiToEngine()
+        }
     }
 
     private fun setTrackVolume(trackId: Long, volume: Float) {
@@ -1670,6 +1674,7 @@ class StudioViewModel @Inject constructor(
         val volumes = FloatArray(trackCount)
         val muted = BooleanArray(trackCount)
         val trackEventCounts = IntArray(trackCount)
+        val anySoloed = st.soloedTrackIds.isNotEmpty()
 
         // Collect all events across all tracks
         val allFrames = mutableListOf<Long>()
@@ -1685,7 +1690,8 @@ class StudioViewModel @Inject constructor(
             channels[i] = track.midiChannel
             programs[i] = track.midiProgram
             volumes[i] = track.volume
-            muted[i] = track.isMuted
+            muted[i] = track.isMuted ||
+                (anySoloed && track.id !in st.soloedTrackIds)
 
             // Generate noteOn/noteOff event pairs from notes, sorted by frame
             val events = generateMidiEvents(notes, track.midiChannel)

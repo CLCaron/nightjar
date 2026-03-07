@@ -95,6 +95,9 @@ private:
     std::mutex editMutex_;
 
     std::vector<NoteEvent> pendingEvents_;
+
+    // Bitmask of channels that need all-notes-off (set by updateTracks, consumed by tick)
+    std::atomic<uint16_t> silenceChannelMask_{0};
 };
 
 }  // namespace nightjar
