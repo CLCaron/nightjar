@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -146,110 +147,120 @@ fun LibraryScreen(
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
     ) { padding ->
-        Column(
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(padding),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            NjTopBar(
-                title = "Library",
-                onBack = onBack
-            )
+            item {
+                NjTopBar(
+                    title = "Library",
+                    onBack = onBack
+                )
+            }
 
             state.errorMessage?.let { msg ->
-                Text(msg, color = MaterialTheme.colorScheme.error)
+                item {
+                    Text(msg, color = MaterialTheme.colorScheme.error)
+                }
             }
 
             if (state.usedTags.isNotEmpty()) {
-                Text(
-                    text = "Filter",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
-                )
-
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    item {
-                        NjButton(
-                            text = "All",
-                            isActive = state.selectedTagNormalized == null,
-                            ledColor = NjStudioAccent,
-                            onClick = { vm.onAction(LibraryAction.ClearTagFilter) }
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(
+                            text = "Filter",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
                         )
-                    }
 
-                    items(state.usedTags, key = { it.id }) { tag ->
-                        NjButton(
-                            text = tag.name,
-                            isActive = state.selectedTagNormalized == tag.nameNormalized,
-                            ledColor = NjStudioAccent,
-                            onClick = { vm.onAction(LibraryAction.SelectTag(tag.nameNormalized)) }
-                        )
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            item {
+                                NjButton(
+                                    text = "All",
+                                    isActive = state.selectedTagNormalized == null,
+                                    ledColor = NjStudioAccent,
+                                    onClick = { vm.onAction(LibraryAction.ClearTagFilter) }
+                                )
+                            }
+
+                            items(state.usedTags, key = { it.id }) { tag ->
+                                NjButton(
+                                    text = tag.name,
+                                    isActive = state.selectedTagNormalized == tag.nameNormalized,
+                                    ledColor = NjStudioAccent,
+                                    onClick = { vm.onAction(LibraryAction.SelectTag(tag.nameNormalized)) }
+                                )
+                            }
+                        }
                     }
                 }
             }
 
-            Text(
-                text = "Sort",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
-            )
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = "Sort",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
+                    )
 
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                item {
-                    NjButton(
-                        text = "Newest",
-                        isActive = state.sortMode == SortMode.NEWEST,
-                        ledColor = NjStudioAccent,
-                        onClick = { vm.onAction(LibraryAction.SetSortMode(SortMode.NEWEST)) }
-                    )
-                }
-                item {
-                    NjButton(
-                        text = "Oldest",
-                        isActive = state.sortMode == SortMode.OLDEST,
-                        ledColor = NjStudioAccent,
-                        onClick = { vm.onAction(LibraryAction.SetSortMode(SortMode.OLDEST)) }
-                    )
-                }
-                item {
-                    NjButton(
-                        text = "Favs",
-                        isActive = state.sortMode == SortMode.FAVORITES_FIRST,
-                        ledColor = NjStudioAccent,
-                        onClick = { vm.onAction(LibraryAction.SetSortMode(SortMode.FAVORITES_FIRST)) }
-                    )
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        item {
+                            NjButton(
+                                text = "Newest",
+                                isActive = state.sortMode == SortMode.NEWEST,
+                                ledColor = NjStudioAccent,
+                                onClick = { vm.onAction(LibraryAction.SetSortMode(SortMode.NEWEST)) }
+                            )
+                        }
+                        item {
+                            NjButton(
+                                text = "Oldest",
+                                isActive = state.sortMode == SortMode.OLDEST,
+                                ledColor = NjStudioAccent,
+                                onClick = { vm.onAction(LibraryAction.SetSortMode(SortMode.OLDEST)) }
+                            )
+                        }
+                        item {
+                            NjButton(
+                                text = "Favs",
+                                isActive = state.sortMode == SortMode.FAVORITES_FIRST,
+                                ledColor = NjStudioAccent,
+                                onClick = { vm.onAction(LibraryAction.SetSortMode(SortMode.FAVORITES_FIRST)) }
+                            )
+                        }
+                    }
                 }
             }
-
-            Spacer(Modifier.padding(top = 6.dp))
 
             if (state.ideas.isEmpty()) {
-                Text(
-                    text = if (state.selectedTagNormalized != null) {
-                        "No ideas match this filter."
-                    } else {
-                        "No ideas yet. Record something."
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
-                )
+                item {
+                    Text(
+                        text = if (state.selectedTagNormalized != null) {
+                            "No ideas match this filter."
+                        } else {
+                            "No ideas yet. Record something."
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
+                    )
+                }
             } else {
-                LazyColumn {
-                    items(state.ideas, key = { it.id }) { idea ->
-                        IdeaRow(
-                            idea = idea,
-                            durationMs = state.durations[idea.id],
-                            isPreviewing = state.previewingIdeaId == idea.id,
-                            onClick = { onOpenOverview(idea.id) },
-                            onPlayClick = { vm.onAction(LibraryAction.PlayPreview(idea.id)) }
-                        )
-                    }
+                items(state.ideas, key = { it.id }) { idea ->
+                    IdeaRow(
+                        idea = idea,
+                        durationMs = state.durations[idea.id],
+                        isPreviewing = state.previewingIdeaId == idea.id,
+                        onClick = { onOpenOverview(idea.id) },
+                        onPlayClick = { vm.onAction(LibraryAction.PlayPreview(idea.id)) }
+                    )
                 }
             }
         }
