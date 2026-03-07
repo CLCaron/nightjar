@@ -195,6 +195,7 @@ sealed interface StudioAction {
     data object StopOverdubRecording : StudioAction
     data object Play : StudioAction
     data object Pause : StudioAction
+    data object RestartPlayback : StudioAction
     data class SeekTo(val positionMs: Long) : StudioAction
     data class SeekFinished(val positionMs: Long) : StudioAction
 

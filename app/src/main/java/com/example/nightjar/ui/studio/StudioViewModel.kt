@@ -177,6 +177,10 @@ class StudioViewModel @Inject constructor(
             StudioAction.StopOverdubRecording -> stopRecording()
             StudioAction.Play -> audioEngine.play()
             StudioAction.Pause -> audioEngine.pause()
+            StudioAction.RestartPlayback -> {
+                audioEngine.pause()
+                audioEngine.seekTo(0L)
+            }
             is StudioAction.SeekTo -> audioEngine.seekTo(action.positionMs)
             is StudioAction.SeekFinished -> audioEngine.seekTo(action.positionMs)
 
