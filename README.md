@@ -89,7 +89,7 @@ Nightjar is in active development, working toward a v1.0 Play Store release.
 - Unified indigo color palette (base and Studio tokens merged)
 - Record screen with knurled record button, LCD status readout, transforming waveform panel, embossed text
 - Library with tag filtering, sort options, and audio preview playback
-- Overview with playback, waveform visualization, auto-saving notes, tags, sharing, and delete
+- Overview with playback, waveform visualization, auto-saving notes, tags, sharing, and delete. Studio entry button with perimeter-tracing teal outline animation.
 
 **What's next:**
 - Track reorder, track labels

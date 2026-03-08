@@ -72,6 +72,7 @@ import com.example.nightjar.ui.theme.NjOutline
 import com.example.nightjar.ui.theme.NjStudioWaveform
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FiberManualRecord
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.outlined.Close
@@ -428,40 +429,42 @@ private fun TransportAndControls(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Loop + Clear rocker pill (left)
-            if (state.tracks.isNotEmpty()) {
-                Row(
-                    modifier = Modifier.height(IntrinsicSize.Min),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    NjButton(
-                        text = "Loop",
-                        icon = Icons.Outlined.Repeat,
-                        onClick = { onAction(StudioAction.ToggleLoop) },
-                        isActive = state.isLoopEnabled,
-                        ledColor = NjStudioAccent,
-                    )
+            val hasTracksAndNotRecording = state.tracks.isNotEmpty() && !state.isRecording
 
-                    Box(
-                        Modifier
-                            .width(1.dp)
-                            .fillMaxHeight()
-                            .background(NjOutline)
-                    )
+            // Loop + Clear rocker pill (left) -- always visible, dimmed when disabled
+            Row(
+                modifier = Modifier
+                    .height(IntrinsicSize.Min)
+                    .alpha(if (hasTracksAndNotRecording) 1f else 0.35f),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                NjButton(
+                    text = "Loop",
+                    icon = Icons.Outlined.Repeat,
+                    onClick = { if (hasTracksAndNotRecording) onAction(StudioAction.ToggleLoop) },
+                    isActive = state.isLoopEnabled,
+                    ledColor = NjStudioAccent,
+                )
 
-                    NjButton(
-                        text = "Clear",
-                        icon = Icons.Outlined.Close,
-                        onClick = {
-                            if (state.hasLoopRegion) {
-                                onAction(StudioAction.ClearLoopRegion)
-                            }
-                        },
-                        isActive = !state.hasLoopRegion,
-                        ledColor = NjMuted2,
-                        activeGlow = false,
-                    )
-                }
+                Box(
+                    Modifier
+                        .width(1.dp)
+                        .fillMaxHeight()
+                        .background(NjOutline)
+                )
+
+                NjButton(
+                    text = "Clear",
+                    icon = Icons.Outlined.Close,
+                    onClick = {
+                        if (hasTracksAndNotRecording && state.hasLoopRegion) {
+                            onAction(StudioAction.ClearLoopRegion)
+                        }
+                    },
+                    isActive = !state.hasLoopRegion,
+                    ledColor = NjMuted2,
+                    activeGlow = false,
+                )
             }
 
             Spacer(Modifier.weight(1f))
@@ -471,32 +474,32 @@ private fun TransportAndControls(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Restart
-                if (state.tracks.isNotEmpty() && !state.isRecording) {
-                    NjButton(
-                        text = "Restart",
-                        icon = Icons.Filled.SkipPrevious,
-                        onClick = { onAction(StudioAction.RestartPlayback) },
-                        textColor = NjStudioGreen,
-                    )
-                }
+                // Restart -- always visible, dimmed when no tracks or recording
+                NjButton(
+                    text = "Restart",
+                    icon = Icons.Filled.SkipPrevious,
+                    onClick = { if (hasTracksAndNotRecording) onAction(StudioAction.RestartPlayback) },
+                    modifier = Modifier.alpha(if (hasTracksAndNotRecording) 1f else 0.35f),
+                    textColor = NjStudioGreen,
+                )
 
-                // Play / Pause
-                if (state.tracks.isNotEmpty() && !state.isRecording) {
-                    NjButton(
-                        text = if (state.isPlaying) "Pause" else "Play",
-                        icon = Icons.Filled.PlayArrow,
-                        onClick = {
+                // Play / Pause -- always visible, dimmed when no tracks or recording
+                NjButton(
+                    text = if (state.isPlaying) "Pause" else "Play",
+                    icon = if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    onClick = {
+                        if (hasTracksAndNotRecording) {
                             if (state.isPlaying) {
                                 onAction(StudioAction.Pause)
                             } else {
                                 onAction(StudioAction.Play)
                             }
-                        },
-                        isActive = state.isPlaying,
-                        ledColor = NjStudioGreen,
-                    )
-                }
+                        }
+                    },
+                    isActive = state.isPlaying,
+                    ledColor = NjStudioGreen,
+                    modifier = Modifier.alpha(if (hasTracksAndNotRecording) 1f else 0.35f),
+                )
 
                 // Record button -- coral LED
                 NjButton(

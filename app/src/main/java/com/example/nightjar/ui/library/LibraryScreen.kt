@@ -8,12 +8,14 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -27,12 +29,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.example.nightjar.data.db.entity.IdeaEntity
-import com.example.nightjar.ui.components.NjCard
-import com.example.nightjar.ui.components.NjLedDot
 import com.example.nightjar.ui.components.NjButton
+import com.example.nightjar.ui.components.NjCard
+import com.example.nightjar.ui.components.NjIcons
 import com.example.nightjar.ui.components.NjTopBar
 import com.example.nightjar.ui.theme.NjAccent
 import com.example.nightjar.ui.theme.NjStudioAccent
@@ -52,9 +57,29 @@ private fun IdeaRow(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
     ) {
-        // LED dot for favorites
+        // Gold star for favorites
         if (idea.isFavorite) {
-            NjLedDot(isLit = true, litColor = NjAccent)
+            Icon(
+                imageVector = Icons.Filled.Star,
+                contentDescription = "Favorite",
+                tint = NjAccent,
+                modifier = Modifier
+                    .size(18.dp)
+                    .drawBehind {
+                        drawCircle(
+                            brush = Brush.radialGradient(
+                                colors = listOf(
+                                    NjAccent.copy(alpha = 0.3f),
+                                    Color.Transparent
+                                ),
+                                center = center,
+                                radius = 14.dp.toPx()
+                            ),
+                            radius = 14.dp.toPx(),
+                            center = center
+                        )
+                    }
+            )
             Spacer(Modifier.width(10.dp))
         }
 
@@ -93,7 +118,7 @@ private fun IdeaRow(
             Spacer(Modifier.width(8.dp))
             NjButton(
                 text = "",
-                icon = Icons.Default.PlayArrow,
+                icon = NjIcons.PlayPause,
                 isActive = isPreviewing,
                 ledColor = NjStudioGreen,
                 onClick = onPlayClick
@@ -214,6 +239,15 @@ fun LibraryScreen(
                     ) {
                         item {
                             NjButton(
+                                text = "Favs",
+                                icon = Icons.Filled.Star,
+                                isActive = state.sortMode == SortMode.FAVORITES_FIRST,
+                                ledColor = NjAccent,
+                                onClick = { vm.onAction(LibraryAction.SetSortMode(SortMode.FAVORITES_FIRST)) }
+                            )
+                        }
+                        item {
+                            NjButton(
                                 text = "Newest",
                                 isActive = state.sortMode == SortMode.NEWEST,
                                 ledColor = NjStudioAccent,
@@ -226,14 +260,6 @@ fun LibraryScreen(
                                 isActive = state.sortMode == SortMode.OLDEST,
                                 ledColor = NjStudioAccent,
                                 onClick = { vm.onAction(LibraryAction.SetSortMode(SortMode.OLDEST)) }
-                            )
-                        }
-                        item {
-                            NjButton(
-                                text = "Favs",
-                                isActive = state.sortMode == SortMode.FAVORITES_FIRST,
-                                ledColor = NjStudioAccent,
-                                onClick = { vm.onAction(LibraryAction.SetSortMode(SortMode.FAVORITES_FIRST)) }
                             )
                         }
                     }

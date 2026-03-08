@@ -1,6 +1,19 @@
 package com.example.nightjar.ui.overview
 
+import android.view.HapticFeedbackConstants
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -9,13 +22,22 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -30,8 +52,23 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathMeasure
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.addOutline
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -39,6 +76,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.example.nightjar.share.ShareUtils
+import com.example.nightjar.ui.components.NjIcons
+import com.example.nightjar.ui.components.collectIsPressedWithMinDuration
 import com.example.nightjar.ui.components.NjSectionTitle
 import com.example.nightjar.ui.components.NjButton
 import com.example.nightjar.ui.components.NjTagChip
@@ -47,7 +86,10 @@ import com.example.nightjar.ui.components.NjTopBar
 import com.example.nightjar.ui.components.NjWaveform
 import com.example.nightjar.ui.theme.NjAccent
 import com.example.nightjar.ui.theme.NjError
+import com.example.nightjar.ui.theme.NjMuted2
 import com.example.nightjar.ui.theme.NjStudioGreen
+import com.example.nightjar.ui.theme.NjStudioTeal
+import com.example.nightjar.ui.theme.NjSurface2
 import com.example.nightjar.ui.theme.NjTrackColors
 import kotlinx.coroutines.flow.collectLatest
 
@@ -158,6 +200,7 @@ fun OverviewScreen(
                     ) {
                         NjButton(
                             text = "Delete",
+                            icon = Icons.Filled.Delete,
                             onClick = { showDeleteConfirm = true },
                             modifier = Modifier.weight(1f),
                             textColor = NjError
@@ -165,6 +208,7 @@ fun OverviewScreen(
                         firstTrackFile?.let { file ->
                             NjButton(
                                 text = "Share",
+                                icon = Icons.Filled.Share,
                                 onClick = {
                                     ShareUtils.shareAudioFile(
                                         context = context,
@@ -209,16 +253,18 @@ fun OverviewScreen(
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 NjButton(
                     text = if (loaded.isFavorite) "Favorited" else "Favorite",
+                    icon = Icons.Filled.Star,
                     isActive = loaded.isFavorite,
                     ledColor = NjAccent,
                     onClick = { vm.onAction(OverviewAction.ToggleFavorite) }
                 )
-                NjButton(
-                    text = "Studio",
+
+                NjStudioEntryButton(
                     onClick = { onOpenStudio(ideaId) }
                 )
             }
@@ -276,6 +322,7 @@ fun OverviewScreen(
 
             NjButton(
                 text = if (isPlaying) "Pause" else "Play",
+                icon = NjIcons.PlayPause,
                 isActive = isPlaying,
                 ledColor = NjStudioGreen,
                 onClick = {
@@ -370,4 +417,227 @@ private fun formatMs(ms: Long): String {
     val m = totalSec / 60
     val s = totalSec % 60
     return "%d:%02d".format(m, s)
+}
+
+/** Muted teal used for the Studio entry button text and glow. */
+private val StudioEntryTeal = Color(0xFF367C7C)
+
+/**
+ * Content-width Studio entry button with hardware aesthetic.
+ *
+ * Features a scanline overlay, teal-glowing text, Tune icon,
+ * breathing teal ambient glow, and press-to-darken animation
+ * matching NjButton's bevel feel.
+ */
+@Composable
+private fun NjStudioEntryButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedWithMinDuration()
+    val view = LocalView.current
+
+    LaunchedEffect(interactionSource) {
+        interactionSource.interactions.collect { interaction ->
+            when (interaction) {
+                is PressInteraction.Press ->
+                    view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                is PressInteraction.Release ->
+                    view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+            }
+        }
+    }
+
+    val bgColor = if (isPressed) {
+        NjSurface2.copy(alpha = 0.4f)
+    } else {
+        NjMuted2.copy(alpha = 0.12f)
+    }
+
+    val glowShadow = Shadow(
+        color = StudioEntryTeal.copy(alpha = 0.25f),
+        offset = Offset.Zero,
+        blurRadius = 10f
+    )
+
+    // Perimeter-tracing teal outline animation
+    val traceTransition = rememberInfiniteTransition(label = "studioTrace")
+    val traceProgress by traceTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 12000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "traceProgress"
+    )
+
+    val cornerRadius = 2.dp
+    val strokeWidthDp = 1.5.dp
+    val mutedOutlineColor = StudioEntryTeal.copy(alpha = 0.15f)
+    val litTraceColor = StudioEntryTeal.copy(alpha = 0.6f)
+
+    // Outer box draws static muted outline + animated lit trace
+    Box(
+        modifier = modifier.drawBehind {
+            val cr = cornerRadius.toPx()
+            val sw = strokeWidthDp.toPx()
+            val inset = sw / 2f
+
+            val path = Path().apply {
+                addRoundRect(
+                    RoundRect(
+                        left = inset,
+                        top = inset,
+                        right = size.width - inset,
+                        bottom = size.height - inset,
+                        radiusX = cr,
+                        radiusY = cr
+                    )
+                )
+            }
+
+            // Static muted outline (always visible)
+            drawPath(
+                path = path,
+                color = mutedOutlineColor,
+                style = Stroke(width = sw, cap = StrokeCap.Round)
+            )
+
+            val measure = PathMeasure().apply { setPath(path, forceClosed = true) }
+            val totalLength = measure.length
+
+            // Fill phase (0..0.5): leading edge advances, trailing stays at 0
+            // Drain phase (0.5..1): trailing edge catches up, leading stays at end
+            val startDist: Float
+            val endDist: Float
+            if (traceProgress <= 0.5f) {
+                val fillT = traceProgress / 0.5f
+                startDist = 0f
+                endDist = fillT * totalLength
+            } else {
+                val drainT = (traceProgress - 0.5f) / 0.5f
+                startDist = drainT * totalLength
+                endDist = totalLength
+            }
+
+            if (endDist > startDist) {
+                val segment = Path()
+                measure.getSegment(startDist, endDist, segment, startWithMoveTo = true)
+                drawPath(
+                    path = segment,
+                    color = litTraceColor,
+                    style = Stroke(width = sw, cap = StrokeCap.Round)
+                )
+            }
+        }
+    ) {
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(cornerRadius))
+                .background(bgColor)
+                .drawWithContent {
+                    drawContent()
+
+                    val sw = 1.dp.toPx()
+
+                    if (isPressed) {
+                        // Pressed: dark top+left, light bottom+right
+                        drawLine(
+                            Color.Black.copy(alpha = 0.45f),
+                            Offset(0f, sw / 2),
+                            Offset(size.width, sw / 2),
+                            sw * 1.5f
+                        )
+                        drawLine(
+                            Color.Black.copy(alpha = 0.25f),
+                            Offset(sw / 2, 0f),
+                            Offset(sw / 2, size.height),
+                            sw
+                        )
+                        drawLine(
+                            Color.White.copy(alpha = 0.06f),
+                            Offset(0f, size.height - sw / 2),
+                            Offset(size.width, size.height - sw / 2),
+                            sw
+                        )
+                        drawLine(
+                            Color.White.copy(alpha = 0.04f),
+                            Offset(size.width - sw / 2, 0f),
+                            Offset(size.width - sw / 2, size.height),
+                            sw
+                        )
+                    } else {
+                        // Raised: light top+left, dark bottom+right
+                        drawLine(
+                            Color.White.copy(alpha = 0.09f),
+                            Offset(0f, sw / 2),
+                            Offset(size.width, sw / 2),
+                            sw
+                        )
+                        drawLine(
+                            Color.White.copy(alpha = 0.05f),
+                            Offset(sw / 2, 0f),
+                            Offset(sw / 2, size.height),
+                            sw
+                        )
+                        drawLine(
+                            Color.Black.copy(alpha = 0.35f),
+                            Offset(0f, size.height - sw / 2),
+                            Offset(size.width, size.height - sw / 2),
+                            sw
+                        )
+                        drawLine(
+                            Color.Black.copy(alpha = 0.18f),
+                            Offset(size.width - sw / 2, 0f),
+                            Offset(size.width - sw / 2, size.height),
+                            sw
+                        )
+                    }
+
+                    // Scanline overlay
+                    val scanlineSpacing = 2.dp.toPx()
+                    val scanlineColor = Color.White.copy(alpha = 0.06f)
+                    var y = 0f
+                    while (y < size.height) {
+                        drawLine(
+                            scanlineColor,
+                            Offset(0f, y),
+                            Offset(size.width, y),
+                            0.5.dp.toPx()
+                        )
+                        y += scanlineSpacing
+                    }
+                }
+                .clickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    onClick = onClick
+                )
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Tune,
+                    contentDescription = null,
+                    tint = StudioEntryTeal,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "Studio",
+                    style = MaterialTheme.typography.labelLarge.copy(
+                        fontWeight = FontWeight.Bold,
+                        shadow = glowShadow
+                    ),
+                    color = StudioEntryTeal
+                )
+            }
+        }
+    }
 }

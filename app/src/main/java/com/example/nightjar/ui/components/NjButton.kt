@@ -369,8 +369,8 @@ private fun MomentaryModeButton(
         contentAlignment = Alignment.Center
     ) {
         if (icon != null) {
-            // Neon glow: radial gradient behind the icon in the text/accent color
-            val glowColor = textColor ?: if (isActive) activeAccent else Color.Transparent
+            // Neon glow: radial gradient behind the icon -- only when active
+            val glowColor = if (isActive) (textColor ?: activeAccent) else Color.Transparent
             Icon(
                 imageVector = icon,
                 contentDescription = text.ifEmpty { null },
