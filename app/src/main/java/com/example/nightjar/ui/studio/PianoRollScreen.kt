@@ -199,7 +199,7 @@ fun PianoRollScreen(
                     text = "Restart",
                     icon = Icons.Filled.SkipPrevious,
                     onClick = { viewModel.onAction(PianoRollAction.SeekTo(0L)) },
-                    textColor = NjStudioGreen,
+                    textColor = NjStudioGreen.copy(alpha = 0.5f),
                 )
                 Spacer(Modifier.width(4.dp))
                 NjButton(

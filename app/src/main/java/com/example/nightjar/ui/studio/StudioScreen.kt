@@ -480,7 +480,7 @@ private fun TransportAndControls(
                     icon = Icons.Filled.SkipPrevious,
                     onClick = { if (hasTracksAndNotRecording) onAction(StudioAction.RestartPlayback) },
                     modifier = Modifier.alpha(if (hasTracksAndNotRecording) 1f else 0.35f),
-                    textColor = NjStudioGreen,
+                    textColor = NjStudioGreen.copy(alpha = 0.5f),
                 )
 
                 // Play / Pause -- always visible, dimmed when no tracks or recording
