@@ -2,6 +2,9 @@ package com.example.nightjar.ui.studio
 
 import com.example.nightjar.ui.components.NjButton
 import android.view.HapticFeedbackConstants
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.PressInteraction
@@ -152,6 +155,7 @@ fun TrackDrawerPanel(
                 ) {
                     NjButton(
                         text = "Rename",
+                        icon = Icons.Filled.Edit,
                         onClick = {
                             onAction(
                                 StudioAction.RequestRenameTrack(
@@ -165,6 +169,7 @@ fun TrackDrawerPanel(
                     Spacer(Modifier.width(8.dp))
                     NjButton(
                         text = "Delete",
+                        icon = Icons.Filled.Delete,
                         onClick = {
                             onAction(StudioAction.ConfirmDeleteTrack(track.id))
                         },
@@ -239,6 +244,7 @@ fun TrackDrawerPanel(
                 ) {
                     NjButton(
                         text = "Rename",
+                        icon = Icons.Filled.Edit,
                         onClick = {
                             onAction(
                                 StudioAction.RequestRenameTrack(
@@ -251,6 +257,7 @@ fun TrackDrawerPanel(
                     )
                     NjButton(
                         text = "Delete",
+                        icon = Icons.Filled.Delete,
                         onClick = {
                             onAction(StudioAction.ConfirmDeleteTrack(track.id))
                         },
@@ -284,7 +291,7 @@ fun DrawerToggleButton(
         else -> lerp(RaisedBodyColor, PressedBodyColor, depth * 2f)
     }
     val visuallyActive = toggleState.isVisuallyActive
-    val textColor = if (visuallyActive) ledColor else NjMuted2
+    val textColor = if (visuallyActive) ledColor else ledColor.copy(alpha = 0.5f)
 
     // Haptics -- fire on raw press/release events.
     LaunchedEffect(toggleState.interactionSource) {

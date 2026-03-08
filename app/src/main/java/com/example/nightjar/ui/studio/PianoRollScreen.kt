@@ -20,6 +20,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.SkipPrevious
+import com.example.nightjar.ui.components.NjIcons
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -186,14 +188,22 @@ fun PianoRollScreen(
             },
             actions = {
                 NjButton(
-                    text = if (state.isSnapEnabled) "Snap" else "Free",
+                    text = "Snap",
                     onClick = { viewModel.onAction(PianoRollAction.ToggleSnap) },
                     isActive = state.isSnapEnabled,
                     ledColor = NjStudioAccent
                 )
                 Spacer(Modifier.width(4.dp))
                 NjButton(
-                    text = if (state.isPlaying) "Stop" else "Play",
+                    text = "Restart",
+                    icon = Icons.Filled.SkipPrevious,
+                    onClick = { viewModel.onAction(PianoRollAction.SeekTo(0L)) },
+                    textColor = NjStudioGreen.copy(alpha = 0.5f),
+                )
+                Spacer(Modifier.width(4.dp))
+                NjButton(
+                    text = "Play",
+                    icon = NjIcons.PlayPause,
                     onClick = {
                         if (state.isPlaying) viewModel.onAction(PianoRollAction.Pause)
                         else viewModel.onAction(PianoRollAction.Play)

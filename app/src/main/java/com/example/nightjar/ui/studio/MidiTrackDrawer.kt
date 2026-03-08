@@ -1,9 +1,14 @@
 package com.example.nightjar.ui.studio
 
 import com.example.nightjar.ui.components.NjButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Piano
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -29,14 +34,12 @@ import com.example.nightjar.ui.theme.NjStudioTeal
 import com.example.nightjar.ui.theme.NjStudioYellow
 import com.example.nightjar.ui.theme.NjSurface2
 
-private val NARROW_BREAKPOINT = 320.dp
-
 /**
  * Inline track drawer for MIDI instrument tracks.
  *
- * Shows: Volume knob, Solo/Mute toggles, instrument name + change button,
- * edit notes button (opens piano roll), rename, delete.
- * No arm toggle (MIDI tracks are edited via piano roll, not recorded live).
+ * Two-row layout:
+ *   Row 1: Volume knob, S/M toggles, Inst button, Edit button
+ *   Row 2: Instrument name, Rename button, Delete button
  */
 @Composable
 fun MidiTrackDrawer(
@@ -48,7 +51,7 @@ fun MidiTrackDrawer(
 ) {
     val goldBorderColor = NjStudioAccent.copy(alpha = 0.5f)
 
-    BoxWithConstraints(
+    Column(
         modifier = modifier
             .fillMaxWidth()
             .drawBehind {
@@ -60,138 +63,89 @@ fun MidiTrackDrawer(
                 )
             }
             .background(NjSurface2)
-            .padding(horizontal = 12.dp)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        val isNarrow = maxWidth < NARROW_BREAKPOINT
+        // Row 1: Volume + S/M toggles + Inst/Edit
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            NjKnob(
+                value = track.volume,
+                onValueChange = { vol ->
+                    onAction(StudioAction.SetTrackVolume(track.id, vol))
+                },
+                knobSize = 36.dp,
+                label = "${(track.volume * 100).toInt()}%"
+            )
+            Spacer(Modifier.width(12.dp))
 
-        if (isNarrow) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                // Row 1: Volume + S/M toggles
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    NjKnob(
-                        value = track.volume,
-                        onValueChange = { vol ->
-                            onAction(StudioAction.SetTrackVolume(track.id, vol))
-                        },
-                        knobSize = 36.dp,
-                        label = "${(track.volume * 100).toInt()}%"
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    ToggleButtons(track, isSoloed, onAction)
-                }
-
-                // Row 2: Instrument + Edit + Rename + Delete
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Text(
-                        text = instrumentName,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = NjMuted,
-                        maxLines = 1,
-                        modifier = Modifier.weight(1f)
-                    )
-                    ActionButtons(track, onAction)
-                }
-            }
-        } else {
-            // Wide single-row layout
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                NjKnob(
-                    value = track.volume,
-                    onValueChange = { vol ->
-                        onAction(StudioAction.SetTrackVolume(track.id, vol))
-                    },
-                    knobSize = 36.dp,
-                    label = "${(track.volume * 100).toInt()}%"
+                NjButton(
+                    text = "S",
+                    onClick = { onAction(StudioAction.ToggleSolo(track.id)) },
+                    isActive = isSoloed,
+                    ledColor = NjStudioTeal
                 )
-                Spacer(Modifier.width(12.dp))
-                ToggleButtons(track, isSoloed, onAction)
-                Spacer(Modifier.width(8.dp))
+                NjButton(
+                    text = "M",
+                    onClick = { onAction(StudioAction.SetTrackMuted(track.id, !track.isMuted)) },
+                    isActive = track.isMuted,
+                    ledColor = NjStudioYellow
+                )
+            }
 
-                Text(
-                    text = instrumentName,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = NjMuted,
-                    maxLines = 1,
-                    modifier = Modifier.weight(1f)
+            Spacer(Modifier.width(8.dp))
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                NjButton(
+                    text = "Inst",
+                    icon = Icons.Filled.Piano,
+                    onClick = { onAction(StudioAction.ShowInstrumentPicker(track.id)) },
+                    textColor = NjAccent
                 )
-                Spacer(Modifier.width(4.dp))
-                ActionButtons(track, onAction)
+                NjButton(
+                    text = "Edit",
+                    icon = Icons.Filled.MusicNote,
+                    onClick = { onAction(StudioAction.OpenPianoRoll(track.id)) },
+                    textColor = NjAccent
+                )
             }
         }
-    }
-}
 
-@Composable
-private fun ToggleButtons(
-    track: TrackEntity,
-    isSoloed: Boolean,
-    onAction: (StudioAction) -> Unit
-) {
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        NjButton(
-            text = "S",
-            onClick = { onAction(StudioAction.ToggleSolo(track.id)) },
-            isActive = isSoloed,
-            ledColor = NjStudioTeal
-        )
-        NjButton(
-            text = "M",
-            onClick = { onAction(StudioAction.SetTrackMuted(track.id, !track.isMuted)) },
-            isActive = track.isMuted,
-            ledColor = NjStudioYellow
-        )
-    }
-}
-
-@Composable
-private fun ActionButtons(
-    track: TrackEntity,
-    onAction: (StudioAction) -> Unit
-) {
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        NjButton(
-            text = "Inst",
-            onClick = { onAction(StudioAction.ShowInstrumentPicker(track.id)) },
-            ledColor = NjAccent
-        )
-        NjButton(
-            text = "Edit",
-            onClick = { onAction(StudioAction.OpenPianoRoll(track.id)) },
-            ledColor = NjAccent
-        )
-        NjButton(
-            text = "Ren",
-            onClick = {
-                onAction(StudioAction.RequestRenameTrack(track.id, track.displayName))
-            }
-        )
-        NjButton(
-            text = "Del",
-            onClick = { onAction(StudioAction.ConfirmDeleteTrack(track.id)) },
-            ledColor = NjError
-        )
+        // Row 2: Instrument name + Rename/Delete
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = instrumentName,
+                style = MaterialTheme.typography.labelSmall,
+                color = NjMuted,
+                maxLines = 1,
+                modifier = Modifier.weight(1f)
+            )
+            NjButton(
+                text = "Ren",
+                icon = Icons.Filled.Edit,
+                onClick = {
+                    onAction(StudioAction.RequestRenameTrack(track.id, track.displayName))
+                }
+            )
+            NjButton(
+                text = "Del",
+                icon = Icons.Filled.Delete,
+                onClick = { onAction(StudioAction.ConfirmDeleteTrack(track.id)) },
+                textColor = NjError
+            )
+        }
     }
 }
