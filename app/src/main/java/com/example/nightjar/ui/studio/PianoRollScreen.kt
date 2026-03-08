@@ -20,9 +20,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipPrevious
+import com.example.nightjar.ui.components.NjIcons
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -203,8 +202,8 @@ fun PianoRollScreen(
                 )
                 Spacer(Modifier.width(4.dp))
                 NjButton(
-                    text = if (state.isPlaying) "Stop" else "Play",
-                    icon = if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    text = "Play",
+                    icon = NjIcons.PlayPause,
                     onClick = {
                         if (state.isPlaying) viewModel.onAction(PianoRollAction.Pause)
                         else viewModel.onAction(PianoRollAction.Play)

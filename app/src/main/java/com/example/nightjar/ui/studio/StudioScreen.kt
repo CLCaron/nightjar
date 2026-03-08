@@ -72,9 +72,8 @@ import com.example.nightjar.ui.theme.NjOutline
 import com.example.nightjar.ui.theme.NjStudioWaveform
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FiberManualRecord
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipPrevious
+import com.example.nightjar.ui.components.NjIcons
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Repeat
 import kotlinx.coroutines.flow.collectLatest
@@ -485,8 +484,8 @@ private fun TransportAndControls(
 
                 // Play / Pause -- always visible, dimmed when no tracks or recording
                 NjButton(
-                    text = if (state.isPlaying) "Pause" else "Play",
-                    icon = if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    text = "Play",
+                    icon = NjIcons.PlayPause,
                     onClick = {
                         if (hasTracksAndNotRecording) {
                             if (state.isPlaying) {
