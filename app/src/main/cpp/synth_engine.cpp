@@ -156,6 +156,11 @@ void SynthEngine::updateDrumPattern(int stepsPerBar, int bars, int64_t offsetFra
                              hits, clipOffsetFrames, beatsPerBar);
 }
 
+void SynthEngine::updateDrumPatternClips(float volume, bool muted,
+                                         const std::vector<StepSequencer::ClipSlot>& clips) {
+    sequencer_.updatePattern(volume, muted, clips);
+}
+
 void SynthEngine::setSequencerEnabled(bool enabled) {
     sequencerEnabled_.store(enabled, std::memory_order_release);
     if (!enabled) {

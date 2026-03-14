@@ -6,6 +6,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import com.example.nightjar.data.db.dao.DrumPatternDao
 import com.example.nightjar.data.db.dao.IdeaDao
+import com.example.nightjar.data.db.dao.MidiClipDao
 import com.example.nightjar.data.db.dao.MidiNoteDao
 import com.example.nightjar.data.db.dao.TagDao
 import com.example.nightjar.data.db.dao.TakeDao
@@ -14,6 +15,7 @@ import com.example.nightjar.data.db.entity.DrumClipEntity
 import com.example.nightjar.data.db.entity.DrumPatternEntity
 import com.example.nightjar.data.db.entity.DrumStepEntity
 import com.example.nightjar.data.db.entity.IdeaEntity
+import com.example.nightjar.data.db.entity.MidiClipEntity
 import com.example.nightjar.data.db.entity.MidiNoteEntity
 import com.example.nightjar.data.db.entity.TagEntity
 import com.example.nightjar.data.db.entity.TakeEntity
@@ -34,6 +36,9 @@ import com.example.nightjar.data.db.entity.TrackEntity
  * - **v8** — Added `timeSignatureNumerator` and `timeSignatureDenominator` to ideas.
  * - **v9** — Added `midiProgram` and `midiChannel` to tracks, `midi_notes` table for
  *            MIDI instrument track support.
+ * - **v10** — Added `gridResolution` to ideas, `midi_clips` table for arrangeable MIDI
+ *             clip blocks, `clipId` FK on `midi_notes`, removed UNIQUE on
+ *             `drum_patterns.trackId` index (allows multiple patterns per track).
  */
 @Database(
     entities = [
@@ -41,9 +46,9 @@ import com.example.nightjar.data.db.entity.TrackEntity
         TrackEntity::class, TakeEntity::class,
         DrumPatternEntity::class, DrumStepEntity::class,
         DrumClipEntity::class,
-        MidiNoteEntity::class
+        MidiClipEntity::class, MidiNoteEntity::class
     ],
-    version = 9,
+    version = 10,
     exportSchema = false
 )
 abstract class NightjarDatabase : RoomDatabase() {
@@ -53,6 +58,7 @@ abstract class NightjarDatabase : RoomDatabase() {
     abstract fun trackDao(): TrackDao
     abstract fun takeDao(): TakeDao
     abstract fun drumPatternDao(): DrumPatternDao
+    abstract fun midiClipDao(): MidiClipDao
     abstract fun midiNoteDao(): MidiNoteDao
 
     companion object {
@@ -326,6 +332,83 @@ abstract class NightjarDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v9 -> v10: MIDI clips, grid resolution, per-clip drum patterns.
+         *
+         * - ideas: add `gridResolution` column (default 16 = sixteenth notes)
+         * - New table: `midi_clips` for arrangeable MIDI note blocks
+         * - midi_notes: add `clipId` FK (recreate table, migrate notes to default clips)
+         * - drum_patterns: drop + recreate trackId index without UNIQUE
+         */
+        private val MIGRATION_9_10 = object : androidx.room.migration.Migration(9, 10) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                // 1. Add gridResolution to ideas
+                db.execSQL(
+                    "ALTER TABLE ideas ADD COLUMN gridResolution INTEGER NOT NULL DEFAULT 16"
+                )
+
+                // 2. Create midi_clips table
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS midi_clips (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        trackId INTEGER NOT NULL,
+                        offsetMs INTEGER NOT NULL DEFAULT 0,
+                        sortIndex INTEGER NOT NULL DEFAULT 0,
+                        FOREIGN KEY(trackId) REFERENCES tracks(id) ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_midi_clips_trackId ON midi_clips(trackId)"
+                )
+
+                // 3. Insert a default clip (offsetMs=0) for every existing MIDI track
+                db.execSQL("""
+                    INSERT INTO midi_clips (trackId, offsetMs, sortIndex)
+                    SELECT id, 0, 0 FROM tracks WHERE trackType = 'midi'
+                """.trimIndent())
+
+                // 4. Recreate midi_notes with clipId column.
+                //    Existing notes get clipId from the default clip created above.
+                //    Since default clips have offsetMs=0, note startMs values are
+                //    already correct as clip-relative positions.
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS midi_notes_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        trackId INTEGER NOT NULL,
+                        clipId INTEGER NOT NULL,
+                        pitch INTEGER NOT NULL,
+                        startMs INTEGER NOT NULL,
+                        durationMs INTEGER NOT NULL,
+                        velocity REAL NOT NULL DEFAULT 0.8,
+                        FOREIGN KEY(trackId) REFERENCES tracks(id) ON DELETE CASCADE,
+                        FOREIGN KEY(clipId) REFERENCES midi_clips(id) ON DELETE CASCADE
+                    )
+                """.trimIndent())
+
+                db.execSQL("""
+                    INSERT INTO midi_notes_new (id, trackId, clipId, pitch, startMs, durationMs, velocity)
+                    SELECT mn.id, mn.trackId, mc.id, mn.pitch, mn.startMs, mn.durationMs, mn.velocity
+                    FROM midi_notes mn
+                    INNER JOIN midi_clips mc ON mc.trackId = mn.trackId
+                """.trimIndent())
+
+                db.execSQL("DROP TABLE midi_notes")
+                db.execSQL("ALTER TABLE midi_notes_new RENAME TO midi_notes")
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_midi_notes_trackId ON midi_notes(trackId)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_midi_notes_clipId ON midi_notes(clipId)"
+                )
+
+                // 5. Drop + recreate drum_patterns trackId index without UNIQUE
+                db.execSQL("DROP INDEX IF EXISTS index_drum_patterns_trackId")
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_drum_patterns_trackId ON drum_patterns(trackId)"
+                )
+            }
+        }
+
         fun getInstance(context: Context): NightjarDatabase {
             return INSTANCE ?: synchronized(this) {
                 val db = Room.databaseBuilder(
@@ -335,7 +418,7 @@ abstract class NightjarDatabase : RoomDatabase() {
                 ).addMigrations(
                     MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4,
                     MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
-                    MIGRATION_7_8, MIGRATION_8_9
+                    MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10
                 ).build()
                 INSTANCE = db
                 db

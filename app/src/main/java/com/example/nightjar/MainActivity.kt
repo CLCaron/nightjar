@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.NavType
 import androidx.navigation.compose.*
 import androidx.navigation.navArgument
+import com.example.nightjar.ui.studio.DrumEditorScreen
 import com.example.nightjar.ui.studio.PianoRollScreen
 import com.example.nightjar.ui.studio.StudioScreen
 import com.example.nightjar.ui.record.RecordScreen
@@ -49,6 +50,7 @@ private object Routes {
     const val OVERVIEW = "overview"
     const val STUDIO = "studio"
     const val PIANO_ROLL = "piano_roll"
+    const val DRUM_EDITOR = "drum_editor"
 }
 
 /** Top-level navigation graph: Record → Library → Overview → Studio. */
@@ -97,19 +99,35 @@ fun NightjarApp() {
             StudioScreen(
                 ideaId = ideaId,
                 onBack = { navController.popBackStack() },
-                onOpenPianoRoll = { trackId ->
-                    navController.navigate("${Routes.PIANO_ROLL}/$trackId/$ideaId")
+                onOpenPianoRoll = { trackId, clipId ->
+                    navController.navigate("${Routes.PIANO_ROLL}/$trackId/$ideaId/$clipId")
+                },
+                onOpenDrumEditor = { trackId, clipId ->
+                    navController.navigate("${Routes.DRUM_EDITOR}/$trackId/$ideaId/$clipId")
                 }
             )
         }
         composable(
-            route = "${Routes.PIANO_ROLL}/{trackId}/{ideaId}",
+            route = "${Routes.PIANO_ROLL}/{trackId}/{ideaId}/{clipId}",
             arguments = listOf(
                 navArgument("trackId") { type = NavType.LongType },
-                navArgument("ideaId") { type = NavType.LongType }
+                navArgument("ideaId") { type = NavType.LongType },
+                navArgument("clipId") { type = NavType.LongType }
             )
         ) {
             PianoRollScreen(
+                onBack = { navController.popBackStack() }
+            )
+        }
+        composable(
+            route = "${Routes.DRUM_EDITOR}/{trackId}/{ideaId}/{clipId}",
+            arguments = listOf(
+                navArgument("trackId") { type = NavType.LongType },
+                navArgument("ideaId") { type = NavType.LongType },
+                navArgument("clipId") { type = NavType.LongType }
+            )
+        ) {
+            DrumEditorScreen(
                 onBack = { navController.popBackStack() }
             )
         }

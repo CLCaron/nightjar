@@ -8,7 +8,7 @@ import androidx.room.PrimaryKey
 /**
  * A drum pattern belonging to a drum [TrackEntity].
  *
- * Each drum track has exactly one pattern (1:1 relationship). The pattern
+ * Each drum track can have multiple patterns (one per clip). The pattern
  * defines the grid dimensions (steps per bar, number of bars). Individual
  * steps are stored in [DrumStepEntity].
  *
@@ -27,7 +27,7 @@ import androidx.room.PrimaryKey
         childColumns = ["trackId"],
         onDelete = ForeignKey.CASCADE
     )],
-    indices = [Index("trackId", unique = true)]
+    indices = [Index("trackId")]
 )
 data class DrumPatternEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0L,

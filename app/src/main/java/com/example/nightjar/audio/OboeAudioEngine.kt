@@ -191,6 +191,27 @@ class OboeAudioEngine @Inject constructor() {
     ) = nativeUpdateDrumPattern(stepsPerBar, bars, offsetMs, volume, muted,
         stepIndices, drumNotes, velocities, clipOffsetsMs, beatsPerBar)
 
+    /**
+     * Replace the drum pattern with per-clip data. Each clip has its own grid dimensions and hits.
+     * Flat arrays: per-clip metadata + concatenated hit arrays.
+     */
+    fun updateDrumPatternClips(
+        volume: Float,
+        muted: Boolean,
+        clipStepsPerBar: IntArray,
+        clipBars: IntArray,
+        clipBeatsPerBar: IntArray,
+        clipOffsetsMs: LongArray,
+        clipHitCounts: IntArray,
+        hitStepIndices: IntArray,
+        hitDrumNotes: IntArray,
+        hitVelocities: FloatArray
+    ) = nativeUpdateDrumPatternClips(
+        volume, muted,
+        clipStepsPerBar, clipBars, clipBeatsPerBar, clipOffsetsMs, clipHitCounts,
+        hitStepIndices, hitDrumNotes, hitVelocities
+    )
+
     fun setBpm(bpm: Double) = nativeSetBpm(bpm)
 
     fun setDrumSequencerEnabled(enabled: Boolean) =
@@ -303,6 +324,14 @@ class OboeAudioEngine @Inject constructor() {
         volume: Float, muted: Boolean,
         stepIndices: IntArray, drumNotes: IntArray, velocities: FloatArray,
         clipOffsetsMs: LongArray, beatsPerBar: Int
+    )
+    private external fun nativeUpdateDrumPatternClips(
+        volume: Float, muted: Boolean,
+        clipStepsPerBar: IntArray, clipBars: IntArray,
+        clipBeatsPerBar: IntArray, clipOffsetsMs: LongArray,
+        clipHitCounts: IntArray,
+        hitStepIndices: IntArray, hitDrumNotes: IntArray,
+        hitVelocities: FloatArray
     )
     private external fun nativeSetBpm(bpm: Double)
     private external fun nativeSetDrumSequencerEnabled(enabled: Boolean)

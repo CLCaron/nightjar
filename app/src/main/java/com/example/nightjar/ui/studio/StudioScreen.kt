@@ -90,7 +90,8 @@ import kotlinx.coroutines.flow.collectLatest
 fun StudioScreen(
     ideaId: Long,
     onBack: () -> Unit,
-    onOpenPianoRoll: (Long) -> Unit = {}
+    onOpenPianoRoll: (trackId: Long, clipId: Long) -> Unit = { _, _ -> },
+    onOpenDrumEditor: (trackId: Long, clipId: Long) -> Unit = { _, _ -> }
 ) {
     val vm: StudioViewModel = hiltViewModel()
     val context = LocalContext.current
@@ -143,7 +144,10 @@ fun StudioScreen(
                     }
                 }
                 is StudioEffect.NavigateToPianoRoll -> {
-                    onOpenPianoRoll(effect.trackId)
+                    onOpenPianoRoll(effect.trackId, effect.clipId)
+                }
+                is StudioEffect.NavigateToDrumEditor -> {
+                    onOpenDrumEditor(effect.trackId, effect.clipId)
                 }
             }
         }
@@ -253,10 +257,13 @@ fun StudioScreen(
                         drumPatterns = state.drumPatterns,
                         midiTracks = state.midiTracks,
                         clipDragState = state.clipDragState,
+                        midiClipDragState = state.midiClipDragState,
+                        expandedClipState = state.expandedClipState,
                         bpm = state.bpm,
                         timeSignatureNumerator = state.timeSignatureNumerator,
                         timeSignatureDenominator = state.timeSignatureDenominator,
                         isSnapEnabled = state.isSnapEnabled,
+                        gridResolution = state.gridResolution,
                         getAudioFile = vm::getAudioFile,
                         onAction = vm::onAction,
                         onScrub = { newMs ->
@@ -524,6 +531,7 @@ private fun TransportAndControls(
                 timeSignatureNumerator = state.timeSignatureNumerator,
                 timeSignatureDenominator = state.timeSignatureDenominator,
                 isSnapEnabled = state.isSnapEnabled,
+                gridResolution = state.gridResolution,
                 globalPositionMs = state.globalPositionMs,
                 onAction = onAction
             )
@@ -748,8 +756,10 @@ private val TIME_SIGNATURE_PRESETS = listOf(
     2 to 4
 )
 
+private val GRID_RESOLUTION_PRESETS = listOf(4, 8, 16, 32)
+
 /**
- * Compact project controls bar: time signature, BPM, snap toggle, position readout.
+ * Compact project controls bar: time signature, BPM, snap toggle, grid resolution, position readout.
  * Sits between the title and the timeline.
  */
 @Composable
@@ -758,6 +768,7 @@ private fun ProjectControlsBar(
     timeSignatureNumerator: Int,
     timeSignatureDenominator: Int,
     isSnapEnabled: Boolean,
+    gridResolution: Int,
     globalPositionMs: Long,
     onAction: (StudioAction) -> Unit
 ) {
@@ -819,6 +830,17 @@ private fun ProjectControlsBar(
             onClick = { onAction(StudioAction.ToggleSnap) },
             isActive = isSnapEnabled,
             ledColor = NjStudioAccent,
+        )
+
+        // Grid resolution picker -- cycle through presets on tap
+        NjButton(
+            text = "1/${gridResolution}",
+            onClick = {
+                val idx = GRID_RESOLUTION_PRESETS.indexOf(gridResolution)
+                val next = GRID_RESOLUTION_PRESETS[(idx + 1) % GRID_RESOLUTION_PRESETS.size]
+                onAction(StudioAction.SetGridResolution(next))
+            },
+            textColor = NjStudioAccent.copy(alpha = 0.8f)
         )
 
         // Push position to the right

@@ -2,8 +2,10 @@ package com.example.nightjar.ui.studio
 
 import com.example.nightjar.ui.components.NjButton
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material3.Icon
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -14,6 +16,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
@@ -27,6 +30,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -36,6 +40,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
@@ -134,10 +139,13 @@ fun TimelinePanel(
     drumPatterns: Map<Long, DrumPatternUiState> = emptyMap(),
     midiTracks: Map<Long, MidiTrackUiState> = emptyMap(),
     clipDragState: ClipDragState? = null,
+    midiClipDragState: MidiClipDragState? = null,
+    expandedClipState: ExpandedClipState? = null,
     bpm: Double = 120.0,
     timeSignatureNumerator: Int = 4,
     timeSignatureDenominator: Int = 4,
     isSnapEnabled: Boolean = true,
+    gridResolution: Int = 16,
     getAudioFile: (String) -> File,
     onAction: (StudioAction) -> Unit,
     onScrub: (Long) -> Unit = {},
@@ -206,7 +214,8 @@ fun TimelinePanel(
                         timelineWidth = timelineWidthDp,
                         bpm = bpm,
                         timeSignatureNumerator = timeSignatureNumerator,
-                        timeSignatureDenominator = timeSignatureDenominator
+                        timeSignatureDenominator = timeSignatureDenominator,
+                        gridResolution = gridResolution
                     )
 
                     // Loop overlay + gesture layer in the ruler
@@ -277,6 +286,7 @@ fun TimelinePanel(
                                 bpm = bpm,
                                 timeSignatureNumerator = timeSignatureNumerator,
                                 timeSignatureDenominator = timeSignatureDenominator,
+                                gridResolution = gridResolution,
                                 timelineWidth = timelineWidthDp,
                                 laneHeight = TRACK_LANE_HEIGHT
                             )
@@ -291,6 +301,7 @@ fun TimelinePanel(
                                     bpm = bpm,
                                     pattern = drumPattern,
                                     clipDragState = clipDragState,
+                                    expandedClipState = expandedClipState,
                                     timelineWidth = timelineWidthDp,
                                     laneHeight = TRACK_LANE_HEIGHT,
                                     effectivelyMuted = effectivelyMuted,
@@ -305,10 +316,16 @@ fun TimelinePanel(
                                     track = track,
                                     trackColor = trackColor,
                                     msPerDp = msPerDp,
-                                    notes = midiState?.notes ?: emptyList(),
+                                    clips = midiState?.clips ?: emptyList(),
+                                    midiClipDragState = midiClipDragState,
+                                    expandedClipState = expandedClipState,
+                                    bpm = bpm,
+                                    timelineWidth = timelineWidthDp,
                                     laneHeight = TRACK_LANE_HEIGHT,
                                     effectivelyMuted = effectivelyMuted,
-                                    onAction = onAction
+                                    onAction = onAction,
+                                    timeSignatureNumerator = timeSignatureNumerator,
+                                    timeSignatureDenominator = timeSignatureDenominator
                                 )
                             }
                             else -> {
@@ -362,15 +379,23 @@ fun TimelinePanel(
                             pattern = drumPattern,
                             bpm = bpm,
                             onAction = onAction,
-                            beatsPerBar = timeSignatureNumerator
+                            beatsPerBar = timeSignatureNumerator,
+                            timeSignatureNumerator = timeSignatureNumerator,
+                            timeSignatureDenominator = timeSignatureDenominator
                         )
                     }
                     track.isMidi -> {
                         val midiState = midiTracks[track.id]
                         MidiTrackDrawer(
                             track = track,
+                            trackIndex = index,
                             isSoloed = isSoloed,
-                            instrumentName = midiState?.instrumentName ?: "Unknown",
+                            midiState = midiState,
+                            bpm = bpm,
+                            timeSignatureNumerator = timeSignatureNumerator,
+                            timeSignatureDenominator = timeSignatureDenominator,
+                            isSnapEnabled = isSnapEnabled,
+                            gridResolution = gridResolution,
                             onAction = onAction
                         )
                     }
@@ -461,7 +486,8 @@ private fun TimeRuler(
     timelineWidth: Dp,
     bpm: Double = 120.0,
     timeSignatureNumerator: Int = 4,
-    timeSignatureDenominator: Int = 4
+    timeSignatureDenominator: Int = 4,
+    gridResolution: Int = 16
 ) {
     val textMeasurer = rememberTextMeasurer()
     val rulerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
@@ -490,7 +516,11 @@ private fun TimeRuler(
         // Calculate pixel spacing for beats to decide density
         val beatPx = msToX(beatMs)
         val showBeatTicks = beatPx >= 4f
-        val showSubBeatTicks = beatPx >= 20f
+
+        // Grid step calculations for sub-beat ticks
+        val gridStepMs = MusicalTimeConverter.msPerGridStep(bpm, gridResolution, timeSignatureDenominator)
+        val gridStepPx = if (gridStepMs > 0.0) msToX(gridStepMs) else 0f
+        val showGridTicks = gridStepPx >= 4f && gridStepMs < beatMs
 
         // Draw measure and beat ticks
         var ms = 0.0
@@ -529,29 +559,26 @@ private fun TimeRuler(
                         end = Offset(beatX, size.height),
                         strokeWidth = 0.5.dp.toPx()
                     )
-
-                    // Sub-beat ticks (halfway between beats)
-                    if (showSubBeatTicks && beat < timeSignatureNumerator) {
-                        val subBeatX = msToX(ms + (beat - 0.5) * beatMs)
-                        drawLine(
-                            color = subBeatColor,
-                            start = Offset(subBeatX, size.height - 3.dp.toPx()),
-                            end = Offset(subBeatX, size.height),
-                            strokeWidth = 0.5.dp.toPx()
-                        )
-                    }
                 }
 
-                // Sub-beat between the last beat of prev measure and first beat
-                if (showSubBeatTicks) {
-                    val lastSubX = msToX(ms + (timeSignatureNumerator - 0.5) * beatMs)
-                    if (lastSubX <= size.width) {
-                        drawLine(
-                            color = subBeatColor,
-                            start = Offset(lastSubX, size.height - 3.dp.toPx()),
-                            end = Offset(lastSubX, size.height),
-                            strokeWidth = 0.5.dp.toPx()
-                        )
+                // Sub-beat ticks at grid resolution within this measure
+                if (showGridTicks) {
+                    var stepMs = gridStepMs
+                    while (stepMs < measureMs - 0.5) {
+                        // Skip positions that fall on beat boundaries
+                        val beatFrac = stepMs / beatMs
+                        val isBeat = (beatFrac - beatFrac.toLong()).let { it < 0.01 || it > 0.99 }
+                        if (!isBeat) {
+                            val stepX = msToX(ms + stepMs)
+                            if (stepX > size.width) break
+                            drawLine(
+                                color = subBeatColor,
+                                start = Offset(stepX, size.height - 3.dp.toPx()),
+                                end = Offset(stepX, size.height),
+                                strokeWidth = 0.5.dp.toPx()
+                            )
+                        }
+                        stepMs += gridStepMs
                     }
                 }
             }
@@ -783,48 +810,197 @@ private fun TimelineTrackLane(
  * Compact MIDI track lane in the timeline. Shows small horizontal bars
  * at pitch-proportional Y positions. Tap to open piano roll.
  */
+/**
+ * MIDI track lane showing clip blocks on the timeline.
+ * Each clip is a rounded rectangle containing mini note bars.
+ * Long-press a clip to drag-to-reposition. Tap to open piano roll.
+ */
 @Composable
 private fun MidiTrackLane(
     track: TrackEntity,
     trackColor: Color,
     msPerDp: Float,
-    notes: List<MidiNoteEntity>,
+    clips: List<MidiClipUiState>,
+    midiClipDragState: MidiClipDragState? = null,
+    expandedClipState: ExpandedClipState? = null,
+    bpm: Double,
+    timelineWidth: Dp,
     laneHeight: Dp,
     effectivelyMuted: Boolean,
-    onAction: (StudioAction) -> Unit
+    onAction: (StudioAction) -> Unit = {},
+    timeSignatureNumerator: Int = 4,
+    timeSignatureDenominator: Int = 4
 ) {
+    val density = LocalDensity.current
     val mutedAlpha = if (effectivelyMuted) 0.35f else 1.0f
+    val bgAlpha = if (effectivelyMuted) 0.25f else 0.5f
 
+    // Minimum clip width = one measure
+    val measureMs = com.example.nightjar.audio.MusicalTimeConverter
+        .msPerMeasure(bpm, timeSignatureNumerator, timeSignatureDenominator).toLong()
+
+    // Faster long-press for clip drag -- 200ms instead of the default 400ms
+    val baseViewConfig = LocalViewConfiguration.current
+    val fastViewConfig = remember(baseViewConfig) {
+        object : ViewConfiguration by baseViewConfig {
+            override val longPressTimeoutMillis: Long get() = FAST_LONG_PRESS_MS
+        }
+    }
+
+    CompositionLocalProvider(LocalViewConfiguration provides fastViewConfig) {
     Box(
         modifier = Modifier
             .height(laneHeight)
-            .fillMaxWidth()
+            .width(timelineWidth)
             .alpha(mutedAlpha)
-            .clickable { onAction(StudioAction.OpenPianoRoll(track.id)) }
     ) {
-        Canvas(modifier = Modifier.matchParentSize()) {
-            if (notes.isEmpty()) return@Canvas
+        for (clip in clips) {
+            val isDragging = midiClipDragState != null &&
+                midiClipDragState.clipId == clip.clipId &&
+                midiClipDragState.trackId == track.id
+            val isExpanded = expandedClipState?.trackId == track.id &&
+                expandedClipState.clipId == clip.clipId
+            val displayOffsetMs = if (isDragging) midiClipDragState!!.previewOffsetMs else clip.offsetMs
 
-            val pitchRange = notes.minOf { it.pitch }..notes.maxOf { it.pitch }
-            val pitchSpan = (pitchRange.last - pitchRange.first).coerceAtLeast(1)
-            val laneH = size.height
-            val barHeight = (laneH / (pitchSpan + 2)).coerceIn(2f, 6f)
+            val clipDurationMs = clip.contentDurationMs.coerceAtLeast(measureMs)
+            val offsetDp = (displayOffsetMs / msPerDp).dp
+            val widthDp = (clipDurationMs / msPerDp).dp.coerceAtLeast(40.dp)
 
-            for (note in notes) {
-                val x = ((note.startMs / msPerDp) * density).toFloat()
-                val w = ((note.durationMs / msPerDp) * density).coerceAtLeast(2f)
-                // Map pitch to Y within lane (higher pitch = higher on screen = lower Y)
-                val normalizedPitch = (note.pitch - pitchRange.first).toFloat() / pitchSpan
-                val y = laneH - (normalizedPitch * (laneH - barHeight)) - barHeight
+            var dragAccumulatedPx by remember { mutableFloatStateOf(0f) }
 
-                drawRect(
-                    color = trackColor,
-                    topLeft = Offset(x, y),
-                    size = Size(w, barHeight)
-                )
+            Box(
+                modifier = Modifier
+                    .offset(x = offsetDp)
+                    .width(widthDp)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(4.dp))
+                    .then(
+                        if (isExpanded) Modifier.border(
+                            width = 1.5.dp,
+                            color = NjStudioAccent,
+                            shape = RoundedCornerShape(4.dp)
+                        ) else Modifier
+                    )
+                    .background(trackColor.copy(alpha = bgAlpha))
+                    .then(
+                        if (isDragging) Modifier
+                            .graphicsLayer { shadowElevation = 8f }
+                            .alpha(0.85f)
+                        else Modifier
+                    )
+                    .pointerInput(track.id, clip.clipId, clip.offsetMs, msPerDp) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            val longPress = awaitLongPressOrCancellation(down.id)
+                            if (longPress != null) {
+                                dragAccumulatedPx = 0f
+                                onAction(StudioAction.StartDragMidiClip(track.id, clip.clipId))
+                                val completed = drag(longPress.id) { change ->
+                                    val delta = change.positionChange()
+                                    change.consume()
+                                    dragAccumulatedPx += delta.x
+                                    val deltaDp = dragAccumulatedPx / density.density
+                                    val newOffsetMs = (clip.offsetMs + (deltaDp * msPerDp).toLong())
+                                        .coerceAtLeast(0L)
+                                    onAction(StudioAction.UpdateDragMidiClip(newOffsetMs))
+                                }
+                                if (completed) {
+                                    val deltaDp = dragAccumulatedPx / density.density
+                                    val newOffsetMs = (clip.offsetMs + (deltaDp * msPerDp).toLong())
+                                        .coerceAtLeast(0L)
+                                    onAction(
+                                        StudioAction.FinishDragMidiClip(track.id, clip.clipId, newOffsetMs)
+                                    )
+                                } else {
+                                    onAction(StudioAction.CancelDragMidiClip)
+                                }
+                                dragAccumulatedPx = 0f
+                            } else {
+                                // Short tap -- toggle clip action panel
+                                onAction(StudioAction.TapClip(track.id, clip.clipId, "midi"))
+                            }
+                        }
+                    }
+                    .padding(vertical = 2.dp)
+            ) {
+                // Draw mini note bars inside the clip
+                Canvas(modifier = Modifier.matchParentSize()) {
+                    val notes = clip.notes
+                    if (notes.isEmpty()) return@Canvas
+
+                    val pitchRange = notes.minOf { it.pitch }..notes.maxOf { it.pitch }
+                    val pitchSpan = (pitchRange.last - pitchRange.first).coerceAtLeast(1)
+                    val laneH = size.height
+                    val clipWidthPx = size.width
+                    val barHeight = (laneH / (pitchSpan + 2)).coerceIn(2f, 5f)
+
+                    val clipContentMs = clipDurationMs.toFloat()
+                    if (clipContentMs <= 0f) return@Canvas
+
+                    for (note in notes) {
+                        val noteX = (note.startMs.toFloat() / clipContentMs) * clipWidthPx
+                        val noteW = ((note.durationMs.toFloat() / clipContentMs) * clipWidthPx)
+                            .coerceAtLeast(2f)
+                        val normalizedPitch = (note.pitch - pitchRange.first).toFloat() / pitchSpan
+                        val y = laneH - (normalizedPitch * (laneH - barHeight)) - barHeight
+
+                        drawRect(
+                            color = trackColor,
+                            topLeft = Offset(noteX, y),
+                            size = Size(noteW, barHeight)
+                        )
+                    }
+                }
+
+                // Clip action buttons (visible when expanded)
+                if (isExpanded) {
+                    ClipActionButtons(
+                        onDuplicate = { onAction(StudioAction.DuplicateMidiClip(track.id, clip.clipId)) },
+                        onDelete = { onAction(StudioAction.DeleteMidiClip(track.id, clip.clipId)) },
+                        onEdit = { onAction(StudioAction.OpenPianoRoll(track.id, clip.clipId)) },
+                        onDismiss = { onAction(StudioAction.DismissClipPanel) }
+                    )
+                }
+            }
+        }
+
+        // "+" buttons in gaps between clips
+        if (clips.isNotEmpty()) {
+            val clipBounds = clips.map { clip ->
+                val dur = clip.contentDurationMs.coerceAtLeast(measureMs)
+                clip.offsetMs to clip.offsetMs + dur
+            }
+            val timelineEndMs = (with(density) { timelineWidth.toPx() } * msPerDp / density.density).toLong()
+            val gaps = computeGaps(clipBounds, timelineEndMs)
+            val minGapDp = 40.dp
+            for ((gapStart, gapEnd) in gaps) {
+                val gapWidthDp = ((gapEnd - gapStart) / msPerDp).dp
+                if (gapWidthDp >= minGapDp) {
+                    val gapOffsetDp = (gapStart / msPerDp).dp
+                    Box(
+                        modifier = Modifier
+                            .offset(x = gapOffsetDp)
+                            .width(gapWidthDp)
+                            .fillMaxHeight()
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                onClick = { onAction(StudioAction.CreateMidiClip(track.id, gapStart)) }
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Add,
+                            contentDescription = "Add clip",
+                            tint = NjMuted2.copy(alpha = 0.25f),
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
             }
         }
     }
+    } // CompositionLocalProvider
 }
 
 /**
@@ -841,6 +1017,7 @@ private fun DrumTrackLane(
     bpm: Double,
     pattern: DrumPatternUiState?,
     clipDragState: ClipDragState? = null,
+    expandedClipState: ExpandedClipState? = null,
     timelineWidth: Dp,
     laneHeight: Dp,
     effectivelyMuted: Boolean,
@@ -849,32 +1026,12 @@ private fun DrumTrackLane(
     timeSignatureDenominator: Int = 4
 ) {
     val density = LocalDensity.current
-    val stepsPerBar = pattern?.stepsPerBar ?: 16
-    val bars = pattern?.bars ?: 1
-    val totalSteps = stepsPerBar * bars
     val beatsPerBar = timeSignatureNumerator
-    val stepsPerBeat = if (beatsPerBar > 0) stepsPerBar / beatsPerBar else 4
-
-    // Compute pattern duration using MusicalTimeConverter
-    val patternDurationMs = (com.example.nightjar.audio.MusicalTimeConverter
-        .msPerMeasure(bpm, timeSignatureNumerator, timeSignatureDenominator) * bars).toLong()
-    val widthDp = (patternDurationMs / msPerDp).dp.coerceAtLeast(40.dp)
-
     val bgAlpha = if (effectivelyMuted) 0.25f else 0.5f
 
-    val steps = pattern?.steps ?: emptyList()
-
-    // Build a map: stepIndex -> list of rowIndex for per-instrument rendering
+    // Build a map: drumNote -> rowIndex for per-instrument rendering
     val noteToRowIndex = remember {
         GM_DRUM_ROWS.withIndex().associate { (idx, row) -> row.note to idx }
-    }
-    val stepHits = remember(steps) {
-        val map = mutableMapOf<Int, MutableList<Int>>()
-        steps.forEach { step ->
-            val rowIdx = noteToRowIndex[step.drumNote] ?: return@forEach
-            map.getOrPut(step.stepIndex) { mutableListOf() }.add(rowIdx)
-        }
-        map
     }
 
     // Use clips if available, otherwise fall back to single clip at track offset
@@ -900,8 +1057,28 @@ private fun DrumTrackLane(
             .height(laneHeight)
     ) {
         clipOffsets.forEach { clip ->
+            // Per-clip pattern data
+            val clipStepsPerBar = clip.stepsPerBar
+            val clipBars = clip.bars
+            val clipTotalSteps = clipStepsPerBar * clipBars
+            val clipStepsPerBeat = if (beatsPerBar > 0) clipStepsPerBar / beatsPerBar else 4
+            val clipPatternDurationMs = com.example.nightjar.audio.MusicalTimeConverter
+                .msPerMeasure(bpm, timeSignatureNumerator, timeSignatureDenominator) * clipBars
+            val clipWidthDp = (clipPatternDurationMs / msPerDp).dp.coerceAtLeast(40.dp)
+
+            val clipStepHits = remember(clip.steps) {
+                val map = mutableMapOf<Int, MutableList<Int>>()
+                clip.steps.forEach { step ->
+                    val rowIdx = noteToRowIndex[step.drumNote] ?: return@forEach
+                    map.getOrPut(step.stepIndex) { mutableListOf() }.add(rowIdx)
+                }
+                map
+            }
+
             val isDragging = clipDragState?.trackId == track.id &&
                     clipDragState.clipId == clip.clipId
+            val isExpanded = expandedClipState?.trackId == track.id &&
+                    expandedClipState.clipId == clip.clipId
             val effectiveOffsetMs = if (isDragging) {
                 clipDragState!!.previewOffsetMs
             } else {
@@ -914,9 +1091,16 @@ private fun DrumTrackLane(
             Box(
                 modifier = Modifier
                     .offset(x = offsetDp)
-                    .width(widthDp)
+                    .width(clipWidthDp)
                     .fillMaxHeight()
                     .clip(RoundedCornerShape(6.dp))
+                    .then(
+                        if (isExpanded) Modifier.border(
+                            width = 1.5.dp,
+                            color = NjStudioAccent,
+                            shape = RoundedCornerShape(6.dp)
+                        ) else Modifier
+                    )
                     .background(NjStudioLane.copy(alpha = if (isDragging) 0.8f else bgAlpha))
                     .then(
                         if (isDragging) Modifier
@@ -951,23 +1135,26 @@ private fun DrumTrackLane(
                                     onAction(StudioAction.CancelDragClip)
                                 }
                                 dragAccumulatedPx = 0f
+                            } else {
+                                // Short tap -- toggle clip action panel
+                                onAction(StudioAction.TapClip(track.id, clip.clipId, "drum"))
                             }
                         }
                     }
-                    .padding(vertical = 4.dp, horizontal = 4.dp)
+                    .padding(vertical = 4.dp)
             ) {
                 // Mini step grid -- per-instrument colored dots
                 Canvas(modifier = Modifier.matchParentSize()) {
                     val canvasW = size.width
                     val canvasH = size.height
                     val numRows = GM_DRUM_ROWS.size
-                    val stepW = canvasW / totalSteps.coerceAtLeast(1)
+                    val stepW = canvasW / clipTotalSteps.coerceAtLeast(1)
                     val rowH = canvasH / numRows
                     val dotRadius = minOf(rowH, stepW) * 0.35f
 
                     // Draw active hits as colored dots
-                    for ((stepIdx, rowIndices) in stepHits) {
-                        if (stepIdx >= totalSteps) continue
+                    for ((stepIdx, rowIndices) in clipStepHits) {
+                        if (stepIdx >= clipTotalSteps) continue
                         val cx = stepIdx * stepW + stepW / 2f
                         rowIndices.forEach { rowIdx ->
                             val cy = rowIdx * rowH + rowH / 2f
@@ -985,11 +1172,11 @@ private fun DrumTrackLane(
                     }
 
                     // Beat dividers (every stepsPerBeat steps)
-                    val dividerStep = stepsPerBeat.coerceAtLeast(1)
-                    for (s in 0..totalSteps step dividerStep) {
+                    val dividerStep = clipStepsPerBeat.coerceAtLeast(1)
+                    for (s in 0..clipTotalSteps step dividerStep) {
                         if (s == 0) continue
                         val x = s * stepW
-                        val isBar = s % stepsPerBar == 0
+                        val isBar = s % clipStepsPerBar == 0
                         drawLine(
                             color = NjStudioWaveform.copy(
                                 alpha = if (isBar) 0.3f else 0.12f
@@ -1000,10 +1187,117 @@ private fun DrumTrackLane(
                         )
                     }
                 }
+
+                // Clip action buttons (visible when expanded)
+                if (isExpanded) {
+                    ClipActionButtons(
+                        onDuplicate = { onAction(StudioAction.DuplicateClip(track.id, clip.clipId)) },
+                        onDelete = { onAction(StudioAction.DeleteClip(track.id, clip.clipId)) },
+                        onEdit = { onAction(StudioAction.OpenDrumEditor(track.id, clip.clipId)) },
+                        onDismiss = { onAction(StudioAction.DismissClipPanel) }
+                    )
+                }
+            }
+        }
+
+        // "+" buttons in gaps between clips
+        if (clips.isNotEmpty()) {
+            val clipBounds = clipOffsets.map { clip ->
+                val dur = com.example.nightjar.audio.MusicalTimeConverter
+                    .msPerMeasure(bpm, timeSignatureNumerator, timeSignatureDenominator) * clip.bars
+                clip.offsetMs to clip.offsetMs + dur.toLong()
+            }
+            val timelineEndMs = (with(density) { timelineWidth.toPx() } * msPerDp / density.density).toLong()
+            val gaps = computeGaps(clipBounds, timelineEndMs)
+            val minGapDp = 40.dp
+            for ((gapStart, gapEnd) in gaps) {
+                val gapWidthDp = ((gapEnd - gapStart) / msPerDp).dp
+                if (gapWidthDp >= minGapDp) {
+                    val gapOffsetDp = (gapStart / msPerDp).dp
+                    Box(
+                        modifier = Modifier
+                            .offset(x = gapOffsetDp)
+                            .width(gapWidthDp)
+                            .fillMaxHeight()
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                onClick = { onAction(StudioAction.CreateDrumClip(track.id, gapStart)) }
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Add,
+                            contentDescription = "Add clip",
+                            tint = NjMuted2.copy(alpha = 0.25f),
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
             }
         }
     }
     } // CompositionLocalProvider
+}
+
+/**
+ * Compute gaps between clips where a "+" button can be placed.
+ * Returns a list of (gapStartMs, gapEndMs) pairs.
+ */
+private fun computeGaps(
+    clipBounds: List<Pair<Long, Long>>,
+    timelineEndMs: Long
+): List<Pair<Long, Long>> {
+    val sorted = clipBounds.sortedBy { it.first }
+    val gaps = mutableListOf<Pair<Long, Long>>()
+    var cursor = 0L
+    for ((start, end) in sorted) {
+        if (start > cursor) gaps.add(cursor to start)
+        cursor = maxOf(cursor, end)
+    }
+    if (cursor < timelineEndMs) gaps.add(cursor to timelineEndMs)
+    return gaps
+}
+
+/**
+ * Compact row of action buttons displayed over an expanded clip.
+ * Buttons: Duplicate, Delete, and optionally Edit (for MIDI clips).
+ */
+@Composable
+private fun ClipActionButtons(
+    onDuplicate: () -> Unit,
+    onDelete: () -> Unit,
+    onEdit: (() -> Unit)? = null,
+    onDismiss: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.55f))
+            .padding(horizontal = 4.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        NjButton(
+            text = "Dup",
+            onClick = { onDuplicate(); onDismiss() },
+            textColor = NjStudioAccent.copy(alpha = 0.9f)
+        )
+        Spacer(Modifier.width(4.dp))
+        if (onEdit != null) {
+            NjButton(
+                text = "Edit",
+                onClick = { onEdit(); onDismiss() },
+                textColor = NjStudioWaveform.copy(alpha = 0.9f)
+            )
+            Spacer(Modifier.width(4.dp))
+        }
+        NjButton(
+            text = "Del",
+            onClick = { onDelete(); onDismiss() },
+            textColor = NjError.copy(alpha = 0.9f)
+        )
+    }
 }
 
 /**
@@ -1017,9 +1311,11 @@ private fun BeatGridOverlay(
     bpm: Double,
     timeSignatureNumerator: Int,
     timeSignatureDenominator: Int,
+    gridResolution: Int = 16,
     timelineWidth: Dp,
     laneHeight: Dp
 ) {
+    val subBeatGridColor = Color.White.copy(alpha = 0.025f)
     val gridColor = Color.White.copy(alpha = 0.04f)
     val measureGridColor = Color.White.copy(alpha = 0.08f)
 
@@ -1039,6 +1335,7 @@ private fun BeatGridOverlay(
         val beatPx = msToX(beatMs)
         if (beatPx < 4f) return@Canvas // Too dense, skip
 
+        // Draw beat and measure lines
         var ms = 0.0
         while (ms <= totalDurationMs) {
             val x = msToX(ms)
@@ -1056,6 +1353,31 @@ private fun BeatGridOverlay(
             )
 
             ms += beatMs
+        }
+
+        // Draw sub-beat grid lines at grid resolution
+        val gridStepMs = MusicalTimeConverter.msPerGridStep(bpm, gridResolution, timeSignatureDenominator)
+        if (gridStepMs > 0.0 && gridStepMs < beatMs) {
+            val gridStepPx = msToX(gridStepMs)
+            if (gridStepPx >= 4f) {
+                var stepMs = 0.0
+                while (stepMs <= totalDurationMs) {
+                    // Skip positions on beat boundaries (already drawn)
+                    val beatFrac = stepMs / beatMs
+                    val isBeat = (beatFrac - beatFrac.toLong()).let { it < 0.01 || it > 0.99 }
+                    if (!isBeat) {
+                        val x = msToX(stepMs)
+                        if (x > size.width) break
+                        drawLine(
+                            color = subBeatGridColor,
+                            start = Offset(x, 0f),
+                            end = Offset(x, size.height),
+                            strokeWidth = 0.5.dp.toPx()
+                        )
+                    }
+                    stepMs += gridStepMs
+                }
+            }
         }
     }
 }

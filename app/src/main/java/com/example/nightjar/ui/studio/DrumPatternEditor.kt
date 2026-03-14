@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.border
 import com.example.nightjar.ui.theme.NjMuted2
+import com.example.nightjar.ui.theme.NjOutline
 import com.example.nightjar.ui.theme.NjStudioLane
 
 /** GM drum instruments shown in the pattern editor, ordered top to bottom. */
@@ -122,14 +123,14 @@ fun DrumPatternEditor(
                     GM_DRUM_ROWS.forEachIndexed { rowIndex, drumRow ->
                         val isActive = (step to drumRow.note) in activeSteps
                         val cellColor = if (isActive) {
-                            DRUM_ROW_COLORS[rowIndex].copy(alpha = 0.85f)
+                            DRUM_ROW_COLORS[rowIndex].copy(alpha = 0.8f)
                         } else {
                             val bgAlpha = when {
-                                isBarStart -> 0.22f
-                                isBeatStart -> 0.15f
-                                else -> 0.10f
+                                isBarStart -> 0.18f
+                                isBeatStart -> 0.12f
+                                else -> 0.07f
                             }
-                            Color.White.copy(alpha = bgAlpha)
+                            NjStudioLane.copy(alpha = bgAlpha)
                         }
 
                         Box(
@@ -139,7 +140,7 @@ fun DrumPatternEditor(
                                 .clip(RoundedCornerShape(3.dp))
                                 .border(
                                     width = 0.5.dp,
-                                    color = Color.White.copy(alpha = 0.12f),
+                                    color = NjOutline.copy(alpha = 0.25f),
                                     shape = RoundedCornerShape(3.dp)
                                 )
                                 .background(cellColor)

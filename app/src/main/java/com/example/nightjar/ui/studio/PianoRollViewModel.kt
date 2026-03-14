@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.nightjar.audio.MusicalTimeConverter
 import com.example.nightjar.audio.OboeAudioEngine
+import com.example.nightjar.data.db.entity.MidiClipEntity
 import com.example.nightjar.data.db.entity.MidiNoteEntity
 import com.example.nightjar.data.repository.IdeaRepository
 import com.example.nightjar.data.repository.MidiRepository
@@ -21,6 +22,13 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+/** Clip boundary info for rendering in the piano roll. */
+data class PianoRollClipInfo(
+    val clipId: Long,
+    val offsetMs: Long,
+    val endMs: Long
+)
+
 /** UI state for the piano roll editor. */
 data class PianoRollState(
     val trackId: Long = 0L,
@@ -30,6 +38,8 @@ data class PianoRollState(
     val midiProgram: Int = 0,
     val midiChannel: Int = 0,
     val notes: List<MidiNoteEntity> = emptyList(),
+    val clips: List<PianoRollClipInfo> = emptyList(),
+    val highlightClipId: Long = 0L,
     val selectedNoteId: Long? = null,
     val isPlaying: Boolean = false,
     val positionMs: Long = 0L,
@@ -37,6 +47,7 @@ data class PianoRollState(
     val bpm: Double = 120.0,
     val timeSignatureNumerator: Int = 4,
     val timeSignatureDenominator: Int = 4,
+    val gridResolution: Int = 16,
     val isSnapEnabled: Boolean = true,
     val isLoading: Boolean = true
 )
@@ -51,6 +62,7 @@ sealed interface PianoRollAction {
     data class SelectNote(val noteId: Long?) : PianoRollAction
     data class PreviewPitch(val pitch: Int) : PianoRollAction
     data object ToggleSnap : PianoRollAction
+    data object CycleGridResolution : PianoRollAction
     data object Play : PianoRollAction
     data object Pause : PianoRollAction
     data class SeekTo(val positionMs: Long) : PianoRollAction
@@ -75,6 +87,7 @@ class PianoRollViewModel @Inject constructor(
 
     private val trackId: Long = savedStateHandle["trackId"] ?: 0L
     private val ideaId: Long = savedStateHandle["ideaId"] ?: 0L
+    private val navClipId: Long = savedStateHandle["clipId"] ?: 0L
 
     companion object {
         private const val TAG = "PianoRollVM"
@@ -91,6 +104,15 @@ class PianoRollViewModel @Inject constructor(
     private var observeJob: Job? = null
     private var previewNoteOffJob: Job? = null
 
+    /**
+     * Maps noteId -> (clipId, clipOffsetMs) for converting between
+     * absolute (display) positions and clip-relative (storage) positions.
+     */
+    private var noteClipMap = mapOf<Long, Pair<Long, Long>>()
+
+    /** Cached clip entities for resolving note placement. */
+    private var clipEntities = listOf<MidiClipEntity>()
+
     init {
         load()
         startTick()
@@ -100,38 +122,98 @@ class PianoRollViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val idea = ideaRepo.getIdeaById(ideaId)
-                val track = midiRepo.run {
-                    // Get track info from DAO via repository's internal trackDao
-                    getNotesForTrack(trackId) // warm up
-                    null // We need the track entity
+
+                val clips = midiRepo.ensureClipExists(trackId)
+                clipEntities = clips
+
+                val bpm = idea?.bpm ?: 120.0
+                val numerator = idea?.timeSignatureNumerator ?: 4
+                val denominator = idea?.timeSignatureDenominator ?: 4
+                val measureMs = MusicalTimeConverter.msPerMeasure(bpm, numerator, denominator)
+
+                // Build absolute notes from all clips
+                val absoluteNotes = mutableListOf<MidiNoteEntity>()
+                val clipMap = mutableMapOf<Long, Pair<Long, Long>>()
+                val clipInfos = mutableListOf<PianoRollClipInfo>()
+
+                for (clip in clips) {
+                    val clipNotes = midiRepo.getNotesForClip(clip.id)
+                    val contentEndMs = clipNotes.maxOfOrNull { it.startMs + it.durationMs } ?: 0L
+                    val clipEndMs = clip.offsetMs + maxOf(contentEndMs, measureMs.toLong())
+
+                    clipInfos.add(PianoRollClipInfo(clip.id, clip.offsetMs, clipEndMs))
+
+                    for (note in clipNotes) {
+                        // Shift to absolute position
+                        val absNote = note.copy(startMs = clip.offsetMs + note.startMs)
+                        absoluteNotes.add(absNote)
+                        clipMap[note.id] = clip.id to clip.offsetMs
+                    }
                 }
 
-                // Fetch track info via the notes DAO path -- we need track metadata
-                // Use idea to get bpm and time signature
-                val notes = midiRepo.getNotesForTrack(trackId)
+                noteClipMap = clipMap
 
                 _state.update {
                     it.copy(
                         trackId = trackId,
                         ideaId = ideaId,
-                        notes = notes,
-                        bpm = idea?.bpm ?: 120.0,
-                        timeSignatureNumerator = idea?.timeSignatureNumerator ?: 4,
-                        timeSignatureDenominator = idea?.timeSignatureDenominator ?: 4,
+                        notes = absoluteNotes,
+                        clips = clipInfos,
+                        highlightClipId = navClipId,
+                        bpm = bpm,
+                        timeSignatureNumerator = numerator,
+                        timeSignatureDenominator = denominator,
+                        gridResolution = idea?.gridResolution ?: 16,
                         isLoading = false
                     )
                 }
 
-                // Start observing notes
+                // Observe all notes for this track (any clip changes trigger rebuild)
                 observeJob = viewModelScope.launch {
-                    midiRepo.observeNotes(trackId).collect { updatedNotes ->
-                        _state.update { it.copy(notes = updatedNotes) }
+                    midiRepo.observeNotes(trackId).collect {
+                        rebuildNotesFromClips()
                     }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to load piano roll", e)
                 _effects.emit(PianoRollEffect.ShowError(e.message ?: "Failed to load"))
             }
+        }
+    }
+
+    /** Rebuild the absolute note list and clip map from current DB state. */
+    private suspend fun rebuildNotesFromClips() {
+        try {
+            val clips = midiRepo.getClipsForTrack(trackId)
+            clipEntities = clips
+
+            val st = _state.value
+            val measureMs = MusicalTimeConverter.msPerMeasure(
+                st.bpm, st.timeSignatureNumerator, st.timeSignatureDenominator
+            )
+
+            val absoluteNotes = mutableListOf<MidiNoteEntity>()
+            val clipMap = mutableMapOf<Long, Pair<Long, Long>>()
+            val clipInfos = mutableListOf<PianoRollClipInfo>()
+
+            for (clip in clips) {
+                val clipNotes = midiRepo.getNotesForClip(clip.id)
+                val contentEndMs = clipNotes.maxOfOrNull { it.startMs + it.durationMs } ?: 0L
+                val clipEndMs = clip.offsetMs + maxOf(contentEndMs, measureMs.toLong())
+
+                clipInfos.add(PianoRollClipInfo(clip.id, clip.offsetMs, clipEndMs))
+
+                for (note in clipNotes) {
+                    val absNote = note.copy(startMs = clip.offsetMs + note.startMs)
+                    absoluteNotes.add(absNote)
+                    clipMap[note.id] = clip.id to clip.offsetMs
+                }
+            }
+
+            noteClipMap = clipMap
+            _state.update { it.copy(notes = absoluteNotes, clips = clipInfos) }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to rebuild notes", e)
         }
     }
 
@@ -162,16 +244,43 @@ class PianoRollViewModel @Inject constructor(
             is PianoRollAction.SelectNote -> _state.update { it.copy(selectedNoteId = action.noteId) }
             is PianoRollAction.PreviewPitch -> previewPitch(action.pitch)
             PianoRollAction.ToggleSnap -> _state.update { it.copy(isSnapEnabled = !it.isSnapEnabled) }
+            PianoRollAction.CycleGridResolution -> cycleGridResolution()
             PianoRollAction.Play -> audioEngine.play()
             PianoRollAction.Pause -> audioEngine.pause()
             is PianoRollAction.SeekTo -> audioEngine.seekTo(action.positionMs)
         }
     }
 
-    private fun placeNote(pitch: Int, startMs: Long, durationMs: Long) {
+    /**
+     * Find which clip contains the given absolute position.
+     * Falls back to the first clip if no match.
+     */
+    private fun findClipForPosition(absoluteMs: Long): MidiClipEntity {
+        val st = _state.value
+        val measureMs = MusicalTimeConverter.msPerMeasure(
+            st.bpm, st.timeSignatureNumerator, st.timeSignatureDenominator
+        ).toLong().coerceAtLeast(1L)
+
+        // Check existing clips
+        for (clip in clipEntities) {
+            val clipInfo = st.clips.find { it.clipId == clip.id }
+            val clipEnd = clipInfo?.endMs ?: (clip.offsetMs + measureMs)
+            if (absoluteMs >= clip.offsetMs && absoluteMs < clipEnd) {
+                return clip
+            }
+        }
+
+        // Fallback: use the first clip
+        return clipEntities.firstOrNull()
+            ?: MidiClipEntity(id = 0L, trackId = trackId, offsetMs = 0L)
+    }
+
+    private fun placeNote(pitch: Int, absoluteStartMs: Long, durationMs: Long) {
         viewModelScope.launch {
             try {
-                val noteId = midiRepo.addNote(trackId, pitch, startMs, durationMs)
+                val clip = findClipForPosition(absoluteStartMs)
+                val clipRelativeMs = absoluteStartMs - clip.offsetMs
+                val noteId = midiRepo.addNote(clip.id, trackId, pitch, clipRelativeMs, durationMs)
                 midiRepo.recomputeTrackDuration(trackId)
                 previewPitch(pitch)
                 _state.update { it.copy(selectedNoteId = noteId) }
@@ -181,11 +290,13 @@ class PianoRollViewModel @Inject constructor(
         }
     }
 
-    private fun moveNote(noteId: Long, newStartMs: Long) {
+    private fun moveNote(noteId: Long, newAbsoluteStartMs: Long) {
         viewModelScope.launch {
             try {
                 val note = _state.value.notes.find { it.id == noteId } ?: return@launch
-                midiRepo.updateNoteTiming(noteId, newStartMs, note.durationMs)
+                val (clipId, clipOffset) = noteClipMap[noteId] ?: return@launch
+                val clipRelativeMs = newAbsoluteStartMs - clipOffset
+                midiRepo.updateNoteTiming(noteId, clipRelativeMs, note.durationMs)
                 midiRepo.recomputeTrackDuration(trackId)
             } catch (e: Exception) {
                 _effects.emit(PianoRollEffect.ShowError("Failed to move note"))
@@ -197,8 +308,10 @@ class PianoRollViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val note = _state.value.notes.find { it.id == noteId } ?: return@launch
-                val clamped = newDurationMs.coerceAtLeast(50L) // minimum 50ms
-                midiRepo.updateNoteTiming(noteId, note.startMs, clamped)
+                val (_, clipOffset) = noteClipMap[noteId] ?: return@launch
+                val clipRelativeMs = note.startMs - clipOffset
+                val clamped = newDurationMs.coerceAtLeast(50L)
+                midiRepo.updateNoteTiming(noteId, clipRelativeMs, clamped)
                 midiRepo.recomputeTrackDuration(trackId)
             } catch (e: Exception) {
                 _effects.emit(PianoRollEffect.ShowError("Failed to resize note"))
@@ -232,9 +345,15 @@ class PianoRollViewModel @Inject constructor(
         }
     }
 
+    private fun cycleGridResolution() {
+        val presets = listOf(4, 8, 16, 32)
+        val current = _state.value.gridResolution
+        val nextIndex = (presets.indexOf(current) + 1) % presets.size
+        _state.update { it.copy(gridResolution = presets[nextIndex]) }
+    }
+
     private fun previewPitch(pitch: Int) {
         previewNoteOffJob?.cancel()
-        // Use the track's program on the preview channel
         val program = _state.value.midiProgram
         audioEngine.synthNoteOn(PREVIEW_CHANNEL, pitch, PREVIEW_VELOCITY)
 

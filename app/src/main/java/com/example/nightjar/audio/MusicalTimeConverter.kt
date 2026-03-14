@@ -104,6 +104,47 @@ object MusicalTimeConverter {
     }
 
     /**
+     * Duration of one grid step in milliseconds.
+     *
+     * Grid resolution subdivides a whole note:
+     * - gridResolution=4: quarter notes
+     * - gridResolution=8: eighth notes
+     * - gridResolution=16: sixteenth notes
+     * - gridResolution=32: thirty-second notes
+     *
+     * Formula: (msPerBeat * 4.0) / gridResolution
+     * (multiply by 4 because gridResolution is relative to a whole note)
+     */
+    fun msPerGridStep(bpm: Double, gridResolution: Int, denominator: Int = 4): Double {
+        if (gridResolution <= 0) return 0.0
+        return (msPerBeat(bpm, denominator) * 4.0) / gridResolution
+    }
+
+    /**
+     * Snap a millisecond position to the nearest grid step boundary.
+     */
+    fun snapToGrid(ms: Long, bpm: Double, gridResolution: Int, denominator: Int = 4): Long {
+        val stepMs = msPerGridStep(bpm, gridResolution, denominator)
+        if (stepMs <= 0.0) return ms
+        return (Math.round(ms.toDouble() / stepMs) * stepMs).toLong()
+    }
+
+    /**
+     * Calculate the number of sequencer steps per bar for a given grid resolution
+     * and time signature. Used when creating drum patterns.
+     *
+     * Examples:
+     * - 4/4 at 1/16: (16/4) * 4 = 16
+     * - 3/4 at 1/16: (16/4) * 3 = 12
+     * - 6/8 at 1/16: (16/8) * 6 = 12
+     * - 4/4 at 1/32: (32/4) * 4 = 32
+     */
+    fun stepsPerBar(gridResolution: Int, numerator: Int, denominator: Int): Int {
+        if (gridResolution <= 0 || denominator <= 0) return 16
+        return (gridResolution / denominator) * numerator
+    }
+
+    /**
      * Snap a millisecond position to the nearest measure boundary.
      */
     fun snapToMeasure(

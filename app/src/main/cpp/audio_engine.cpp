@@ -304,6 +304,50 @@ void AudioEngine::updateDrumPattern(int stepsPerBar, int bars, int64_t offsetMs,
     }
 }
 
+void AudioEngine::updateDrumPatternClips(float volume, bool muted,
+                                          const int* clipStepsPerBar, const int* clipBars,
+                                          const int* clipBeatsPerBar, const int64_t* clipOffsetsMs,
+                                          const int* clipHitCounts, int clipCount,
+                                          const int* hitStepIndices, const int* hitDrumNotes,
+                                          const float* hitVelocities) {
+    if (!synthEngine_) return;
+
+    std::vector<StepSequencer::ClipSlot> clips;
+    clips.reserve(clipCount);
+    int hitOffset = 0;
+
+    for (int c = 0; c < clipCount; ++c) {
+        StepSequencer::ClipSlot slot;
+        slot.stepsPerBar = clipStepsPerBar[c];
+        slot.bars = clipBars[c];
+        slot.beatsPerBar = clipBeatsPerBar[c] > 0 ? clipBeatsPerBar[c] : 4;
+        slot.offsetFrames = msToFrames(clipOffsetsMs[c]);
+
+        int hc = clipHitCounts[c];
+        slot.hits.reserve(hc);
+        for (int h = 0; h < hc; ++h) {
+            int idx = hitOffset + h;
+            slot.hits.push_back({
+                hitStepIndices[idx],
+                hitDrumNotes[idx],
+                static_cast<int>(hitVelocities[idx] * 127.0f)
+            });
+        }
+        hitOffset += hc;
+
+        clips.push_back(std::move(slot));
+    }
+
+    synthEngine_->updateDrumPatternClips(volume, muted, clips);
+
+    if (transport_) {
+        double bpm = transport_->bpm.load(std::memory_order_relaxed);
+        int64_t drumEnd = synthEngine_->getSequencerMaxEndFrame(bpm);
+        drumEndFrames_.store(drumEnd, std::memory_order_relaxed);
+        recomputeTotalFrames();
+    }
+}
+
 void AudioEngine::setBpm(double bpm) {
     if (transport_) {
         transport_->bpm.store(bpm, std::memory_order_relaxed);

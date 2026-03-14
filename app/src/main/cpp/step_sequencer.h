@@ -24,24 +24,42 @@ struct NoteEvent {
 /**
  * Step sequencer that plays drum patterns in sync with the timeline.
  *
+ * Each clip slot has its own pattern (stepsPerBar, bars, hits) and timeline
+ * offset, with independent step tracking so clips play correctly even when
+ * overlapping.
+ *
  * Pattern data is double-buffered (same strategy as TrackMixer):
  * UI writes to the inactive buffer under a mutex, then atomically swaps.
  * The render thread reads lock-free from the active buffer.
  *
  * tick() is called from SynthEngine's render thread between render chunks.
- * It returns a list of NoteEvent to fire into FluidSynth. The caller handles
- * the actual fluid_synth_noteon() calls, keeping FluidSynth dependency out
- * of this header.
+ * It returns a list of NoteEvent to fire into FluidSynth.
  */
 class StepSequencer {
 public:
     StepSequencer();
 
+    /** A single clip with its own pattern data and timeline position. */
+    struct ClipSlot {
+        int stepsPerBar = 16;
+        int bars = 1;
+        int beatsPerBar = 4;
+        int64_t offsetFrames = 0;
+        std::vector<DrumHit> hits;
+
+        int totalSteps() const { return stepsPerBar * bars; }
+    };
+
     /**
-     * Replace the entire pattern. Called from UI thread (JNI).
+     * Replace the entire pattern with per-clip data. Called from UI thread (JNI).
      * Mutex-protected, writes to inactive buffer, then swaps.
-     *
-     * @param beatsPerBar  Beats per measure from time signature numerator (default 4).
+     */
+    void updatePattern(float volume, bool muted,
+                       const std::vector<ClipSlot>& clips);
+
+    /**
+     * Legacy updatePattern for backwards compatibility.
+     * Wraps the single-pattern data into a single ClipSlot.
      */
     void updatePattern(int stepsPerBar, int bars, int64_t offsetFrames,
                        float volume, bool muted,
@@ -52,11 +70,6 @@ public:
     /**
      * Advance the sequencer and return note events for this chunk.
      * Called from the render thread -- lock-free read of active pattern.
-     *
-     * @param renderPos   Current render position in frames (global timeline).
-     * @param chunkFrames Number of frames in this render chunk.
-     * @param bpm         Current tempo from transport.
-     * @return Reference to internal event buffer (valid until next tick).
      */
     const std::vector<NoteEvent>& tick(int64_t renderPos, int32_t chunkFrames, double bpm);
 
@@ -64,31 +77,24 @@ public:
     void reset();
 
     /**
-     * Compute the maximum end frame across all clip placements of the pattern.
+     * Compute the maximum end frame across all clip placements.
      * Used by AudioEngine to determine total timeline length.
-     * Must be called under editMutex_ or after the pattern has been committed.
      */
     int64_t getMaxEndFrame(double bpm) const;
 
 private:
     struct Pattern {
-        int stepsPerBar = 16;
-        int bars = 1;
-        int beatsPerBar = 4;  // from time signature numerator
-        int64_t offsetFrames = 0;
         float volume = 1.0f;
         bool muted = false;
-        std::vector<DrumHit> hits;
-        std::vector<int64_t> clipOffsetFrames;   // timeline offsets for each clip
-
-        int totalSteps() const { return stepsPerBar * bars; }
+        std::vector<ClipSlot> clips;
     };
 
     Pattern patternA_, patternB_;
     std::atomic<Pattern*> activePattern_{&patternA_};
     std::mutex editMutex_;
 
-    int lastStepIndex_ = -1;
+    // Per-clip step tracking (indexed by clip slot position)
+    std::vector<int> lastStepIndices_;
     std::vector<NoteEvent> pendingEvents_;
 
     void commitToActive();

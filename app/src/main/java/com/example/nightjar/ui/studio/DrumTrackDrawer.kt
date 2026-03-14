@@ -47,7 +47,9 @@ fun DrumTrackDrawer(
     bpm: Double,
     onAction: (StudioAction) -> Unit,
     modifier: Modifier = Modifier,
-    beatsPerBar: Int = 4
+    beatsPerBar: Int = 4,
+    timeSignatureNumerator: Int = 4,
+    timeSignatureDenominator: Int = 4
 ) {
     val goldBorderColor = NjStudioAccent.copy(alpha = 0.5f)
 
@@ -111,6 +113,56 @@ fun DrumTrackDrawer(
                     if (pattern != null) {
                         Spacer(Modifier.width(12.dp))
 
+                        // Resolution picker
+                        val resPresets = listOf(8, 16, 32)
+                        val currentRes = if (timeSignatureNumerator > 0) {
+                            (pattern.stepsPerBar * timeSignatureDenominator) / timeSignatureNumerator
+                        } else 16
+                        val resIndex = resPresets.indexOf(currentRes)
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            NjButton(
+                                text = "-",
+                                onClick = {
+                                    val prevIdx = (resIndex - 1).coerceAtLeast(0)
+                                    if (prevIdx != resIndex) {
+                                        onAction(StudioAction.SetPatternResolution(track.id, resPresets[prevIdx]))
+                                    }
+                                },
+                                textColor = if (resIndex > 0) {
+                                    NjStudioAccent.copy(alpha = 0.7f)
+                                } else {
+                                    NjMuted2.copy(alpha = 0.3f)
+                                }
+                            )
+                            Text(
+                                text = "1/$currentRes",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = NjStudioAccent.copy(alpha = 0.7f),
+                                modifier = Modifier.padding(horizontal = 4.dp)
+                            )
+                            NjButton(
+                                text = "+",
+                                onClick = {
+                                    val nextIdx = (resIndex + 1).coerceAtMost(resPresets.size - 1)
+                                    if (nextIdx != resIndex) {
+                                        onAction(StudioAction.SetPatternResolution(track.id, resPresets[nextIdx]))
+                                    }
+                                },
+                                textColor = if (resIndex < resPresets.size - 1) {
+                                    NjStudioAccent.copy(alpha = 0.7f)
+                                } else {
+                                    NjMuted2.copy(alpha = 0.3f)
+                                }
+                            )
+                        }
+
+                        Spacer(Modifier.width(8.dp))
+
+                        // Bar count controls
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(2.dp)
@@ -151,15 +203,23 @@ fun DrumTrackDrawer(
                     }
                 }
 
-                // Row 2: Rename + Delete (right-aligned)
+                // Row 2: Edit + Rename + Delete (right-aligned)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     NjButton(
-                        text = "Rename",
+                        text = "Edit",
                         icon = Icons.Filled.Edit,
+                        onClick = {
+                            onAction(StudioAction.OpenDrumEditor(track.id))
+                        },
+                        textColor = NjStudioAccent.copy(alpha = 0.8f)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    NjButton(
+                        text = "Rename",
                         onClick = {
                             onAction(
                                 StudioAction.RequestRenameTrack(
@@ -219,8 +279,58 @@ fun DrumTrackDrawer(
 
                     Spacer(Modifier.width(12.dp))
 
-                    // Bar count controls
+                    // Resolution + Bar count controls
                     if (pattern != null) {
+                        // Resolution picker
+                        val resPresets = listOf(8, 16, 32)
+                        val currentRes = if (timeSignatureNumerator > 0) {
+                            (pattern.stepsPerBar * timeSignatureDenominator) / timeSignatureNumerator
+                        } else 16
+                        val resIndex = resPresets.indexOf(currentRes)
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            NjButton(
+                                text = "-",
+                                onClick = {
+                                    val prevIdx = (resIndex - 1).coerceAtLeast(0)
+                                    if (prevIdx != resIndex) {
+                                        onAction(StudioAction.SetPatternResolution(track.id, resPresets[prevIdx]))
+                                    }
+                                },
+                                textColor = if (resIndex > 0) {
+                                    NjStudioAccent.copy(alpha = 0.7f)
+                                } else {
+                                    NjMuted2.copy(alpha = 0.3f)
+                                }
+                            )
+                            Text(
+                                text = "1/$currentRes",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = NjStudioAccent.copy(alpha = 0.7f),
+                                modifier = Modifier.padding(horizontal = 4.dp)
+                            )
+                            NjButton(
+                                text = "+",
+                                onClick = {
+                                    val nextIdx = (resIndex + 1).coerceAtMost(resPresets.size - 1)
+                                    if (nextIdx != resIndex) {
+                                        onAction(StudioAction.SetPatternResolution(track.id, resPresets[nextIdx]))
+                                    }
+                                },
+                                textColor = if (resIndex < resPresets.size - 1) {
+                                    NjStudioAccent.copy(alpha = 0.7f)
+                                } else {
+                                    NjMuted2.copy(alpha = 0.3f)
+                                }
+                            )
+                        }
+
+                        Spacer(Modifier.width(8.dp))
+
+                        // Bar count controls
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(2.dp)
@@ -270,8 +380,15 @@ fun DrumTrackDrawer(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         NjButton(
-                            text = "Rename",
+                            text = "Edit",
                             icon = Icons.Filled.Edit,
+                            onClick = {
+                                onAction(StudioAction.OpenDrumEditor(track.id))
+                            },
+                            textColor = NjStudioAccent.copy(alpha = 0.8f)
+                        )
+                        NjButton(
+                            text = "Rename",
                             onClick = {
                                 onAction(
                                     StudioAction.RequestRenameTrack(
