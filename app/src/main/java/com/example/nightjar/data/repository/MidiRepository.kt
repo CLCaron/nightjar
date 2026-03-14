@@ -5,6 +5,7 @@ import com.example.nightjar.data.db.dao.MidiNoteDao
 import com.example.nightjar.data.db.dao.TrackDao
 import com.example.nightjar.data.db.entity.MidiClipEntity
 import com.example.nightjar.data.db.entity.MidiNoteEntity
+import com.example.nightjar.data.db.entity.TrackEntity
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -19,6 +20,11 @@ class MidiRepository(
     private val midiNoteDao: MidiNoteDao,
     private val trackDao: TrackDao
 ) {
+
+    // -- Tracks --
+
+    suspend fun getTrackById(trackId: Long): TrackEntity? =
+        trackDao.getTrackById(trackId)
 
     // -- Clips --
 

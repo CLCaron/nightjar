@@ -137,7 +137,7 @@ fun PianoRollScreen(
     val textMeasurer = rememberTextMeasurer()
 
     // Track color for notes
-    val noteColor = NjTrackColors[0] // Will be parameterized by track sortIndex
+    val noteColor = NjTrackColors[state.trackSortIndex % NjTrackColors.size]
 
     val view = LocalView.current
 
