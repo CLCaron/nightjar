@@ -1,6 +1,5 @@
 package com.example.nightjar.ui.studio
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -22,12 +21,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.border
+import androidx.compose.ui.unit.sp
 import com.example.nightjar.ui.theme.NjMuted2
-import com.example.nightjar.ui.theme.NjOutline
-import com.example.nightjar.ui.theme.NjStudioLane
+import com.example.nightjar.ui.theme.NjStudioAccent
 
 /** GM drum instruments shown in the pattern editor, ordered top to bottom. */
 val GM_DRUM_ROWS = listOf(
@@ -86,13 +88,24 @@ fun DrumPatternEditor(
 
     val scrollState = rememberScrollState()
 
+    // Beat step colors: downbeat (first step of each beat) is lighter
+    val downbeatColor = Color(0xFF211C2C)  // first step of beat -- lighter, stands out
+    val offbeatColor = Color(0xFF16131E)   // remaining steps -- darker base
+
     Row(modifier = modifier.padding(vertical = 4.dp)) {
-        // Instrument labels (fixed left column)
+        // Instrument labels (fixed left column) with header spacer
         Column(
-            modifier = Modifier.width(LABEL_WIDTH),
-            verticalArrangement = Arrangement.spacedBy(CELL_GAP)
+            modifier = Modifier.width(LABEL_WIDTH)
         ) {
-            GM_DRUM_ROWS.forEachIndexed { _, row ->
+            // Header spacer to align with beat numbers
+            Box(
+                modifier = Modifier
+                    .height(16.dp)
+                    .width(LABEL_WIDTH)
+            )
+            Spacer(Modifier.height(CELL_GAP))
+            GM_DRUM_ROWS.forEachIndexed { index, row ->
+                if (index > 0) Spacer(Modifier.height(CELL_GAP))
                 Box(
                     modifier = Modifier
                         .height(CELL_SIZE)
@@ -109,54 +122,94 @@ fun DrumPatternEditor(
             }
         }
 
-        // Scrollable step grid
+        // Scrollable step grid grouped by beat
+        val totalBeats = if (stepsPerBeat > 0) totalSteps / stepsPerBeat else totalSteps
         Row(
             modifier = Modifier.horizontalScroll(scrollState)
         ) {
-            for (step in 0 until totalSteps) {
-                val isBeatStart = stepsPerBeat > 0 && step % stepsPerBeat == 0
-                val isBarStart = step % pattern.stepsPerBar == 0
+            for (beatIndex in 0 until totalBeats) {
+                // Beat gap between groups
+                if (beatIndex > 0) {
+                    Spacer(Modifier.width(3.dp))
+                }
 
+                // Each beat is a column: header + step cells
                 Column(
-                    verticalArrangement = Arrangement.spacedBy(CELL_GAP)
+                    horizontalAlignment = Alignment.Start
                 ) {
-                    GM_DRUM_ROWS.forEachIndexed { rowIndex, drumRow ->
-                        val isActive = (step to drumRow.note) in activeSteps
-                        val cellColor = if (isActive) {
-                            DRUM_ROW_COLORS[rowIndex].copy(alpha = 0.8f)
-                        } else {
-                            val bgAlpha = when {
-                                isBarStart -> 0.18f
-                                isBeatStart -> 0.12f
-                                else -> 0.07f
-                            }
-                            NjStudioLane.copy(alpha = bgAlpha)
-                        }
+                    // Beat number header left-aligned over the downbeat
+                    val beatInBar = (beatIndex % beatsPerBar) + 1
+                    Text(
+                        text = "$beatInBar",
+                        fontSize = 10.sp,
+                        color = NjStudioAccent.copy(alpha = 0.5f),
+                        modifier = Modifier.height(16.dp).padding(start = 2.dp)
+                    )
+                    Spacer(Modifier.height(CELL_GAP))
 
-                        Box(
-                            modifier = Modifier
-                                .size(CELL_SIZE)
-                                .padding(start = if (isBeatStart && step > 0) 2.dp else 0.dp)
-                                .clip(RoundedCornerShape(3.dp))
-                                .border(
-                                    width = 0.5.dp,
-                                    color = NjOutline.copy(alpha = 0.25f),
-                                    shape = RoundedCornerShape(3.dp)
-                                )
-                                .background(cellColor)
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null
-                                ) {
-                                    onAction(
-                                        StudioAction.ToggleDrumStep(
-                                            trackId = trackId,
-                                            stepIndex = step,
-                                            drumNote = drumRow.note
-                                        )
+                    // Steps within this beat as a row of cell columns
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(CELL_GAP)
+                    ) {
+                        val firstStep = beatIndex * stepsPerBeat
+                        for (s in 0 until stepsPerBeat) {
+                            val step = firstStep + s
+                            if (step >= totalSteps) break
+                            val isDownbeat = s == 0
+
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(CELL_GAP)
+                            ) {
+                                GM_DRUM_ROWS.forEachIndexed { rowIndex, drumRow ->
+                                    val isActive = (step to drumRow.note) in activeSteps
+                                    val fillColor = if (isActive) {
+                                        DRUM_ROW_COLORS[rowIndex].copy(alpha = 0.85f)
+                                    } else if (isDownbeat) {
+                                        downbeatColor
+                                    } else {
+                                        offbeatColor
+                                    }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .size(CELL_SIZE)
+                                            .clip(RoundedCornerShape(3.dp))
+                                            .drawBehind {
+                                                val cr = CornerRadius(3.dp.toPx())
+                                                // Main fill
+                                                drawRoundRect(color = fillColor, cornerRadius = cr)
+                                                // Bevel edges
+                                                val bw = 1.dp.toPx()
+                                                if (isActive) {
+                                                    // Pressed in: dark top/left, light bottom/right
+                                                    drawLine(Color.Black.copy(alpha = 0.3f), Offset(bw, bw), Offset(size.width - bw, bw), bw)
+                                                    drawLine(Color.Black.copy(alpha = 0.25f), Offset(bw, bw), Offset(bw, size.height - bw), bw)
+                                                    drawLine(Color.White.copy(alpha = 0.08f), Offset(bw, size.height - bw), Offset(size.width - bw, size.height - bw), bw)
+                                                    drawLine(Color.White.copy(alpha = 0.06f), Offset(size.width - bw, bw), Offset(size.width - bw, size.height - bw), bw)
+                                                } else {
+                                                    // Raised: light top/left, dark bottom/right
+                                                    drawLine(Color.White.copy(alpha = 0.12f), Offset(bw, bw), Offset(size.width - bw, bw), bw)
+                                                    drawLine(Color.White.copy(alpha = 0.08f), Offset(bw, bw), Offset(bw, size.height - bw), bw)
+                                                    drawLine(Color.Black.copy(alpha = 0.25f), Offset(bw, size.height - bw), Offset(size.width - bw, size.height - bw), bw)
+                                                    drawLine(Color.Black.copy(alpha = 0.2f), Offset(size.width - bw, bw), Offset(size.width - bw, size.height - bw), bw)
+                                                }
+                                            }
+                                            .clickable(
+                                                interactionSource = remember { MutableInteractionSource() },
+                                                indication = null
+                                            ) {
+                                                onAction(
+                                                    StudioAction.ToggleDrumStep(
+                                                        trackId = trackId,
+                                                        stepIndex = step,
+                                                        drumNote = drumRow.note
+                                                    )
+                                                )
+                                            }
                                     )
                                 }
-                        )
+                            }
+                        }
                     }
                 }
             }

@@ -37,6 +37,7 @@ data class PianoRollState(
     val instrumentName: String = "",
     val midiProgram: Int = 0,
     val midiChannel: Int = 0,
+    val trackSortIndex: Int = 0,
     val notes: List<MidiNoteEntity> = emptyList(),
     val clips: List<PianoRollClipInfo> = emptyList(),
     val highlightClipId: Long = 0L,
@@ -122,6 +123,7 @@ class PianoRollViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val idea = ideaRepo.getIdeaById(ideaId)
+                val track = midiRepo.getTrackById(trackId)
 
                 val clips = midiRepo.ensureClipExists(trackId)
                 clipEntities = clips
@@ -157,6 +159,11 @@ class PianoRollViewModel @Inject constructor(
                     it.copy(
                         trackId = trackId,
                         ideaId = ideaId,
+                        trackName = track?.displayName ?: "",
+                        instrumentName = track?.let { t -> gmInstrumentName(t.midiProgram) } ?: "",
+                        midiProgram = track?.midiProgram ?: 0,
+                        midiChannel = track?.midiChannel ?: 0,
+                        trackSortIndex = track?.sortIndex ?: 0,
                         notes = absoluteNotes,
                         clips = clipInfos,
                         highlightClipId = navClipId,
