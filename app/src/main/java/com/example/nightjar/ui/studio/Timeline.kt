@@ -3,11 +3,13 @@ package com.example.nightjar.ui.studio
 import com.example.nightjar.ui.components.NjButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.Icon
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
@@ -16,11 +18,11 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.gestures.horizontalDrag
 import androidx.compose.foundation.horizontalScroll
@@ -277,7 +279,15 @@ fun TimelinePanel(
                         .weight(1f)
                         .horizontalScroll(scrollState)
                 ) {
-                    Box(Modifier.width(timelineWidthDp)) {
+                    Box(
+                        Modifier
+                            .width(timelineWidthDp)
+                            .pointerInput(Unit) {
+                                detectTapGestures {
+                                    onAction(StudioAction.DismissClipPanel)
+                                }
+                            }
+                    ) {
                         // Beat grid lines (behind track content)
                         if (isSnapEnabled) {
                             BeatGridOverlay(
@@ -337,6 +347,7 @@ fun TimelinePanel(
                                     laneHeight = TRACK_LANE_HEIGHT,
                                     dragState = dragState,
                                     trimState = trimState,
+                                    expandedClipState = expandedClipState,
                                     effectivelyMuted = effectivelyMuted,
                                     getAudioFile = getAudioFile,
                                     onAction = onAction
@@ -602,12 +613,15 @@ private fun TimelineTrackLane(
     laneHeight: Dp,
     dragState: TrackDragState?,
     trimState: TrackTrimState?,
+    expandedClipState: ExpandedClipState?,
     effectivelyMuted: Boolean,
     getAudioFile: (String) -> File,
     onAction: (StudioAction) -> Unit
 ) {
     val isDragging = dragState?.trackId == track.id
     val isTrimming = trimState?.trackId == track.id
+    val isExpanded = expandedClipState?.trackId == track.id &&
+        expandedClipState.clipId == track.id
     val density = LocalDensity.current
 
     val effectiveOffsetMs = if (isDragging) {
@@ -660,7 +674,7 @@ private fun TimelineTrackLane(
             .width(timelineWidth)
             .height(laneHeight)
     ) {
-        // Waveform block — unified gesture: edges → trim, center → long-press drag
+        // Waveform block — unified gesture: edges → trim, center → long-press drag / short tap
         Box(
             modifier = Modifier
                 .offset(x = offsetDp)
@@ -743,7 +757,7 @@ private fun TimelineTrackLane(
                                 }
                             }
 
-                            // ── Center — long-press to reposition ──
+                            // ── Center — short tap to select, long-press to reposition ──
                             else -> {
                                 // Don't consume down — lets horizontalScroll handle quick swipes
                                 val longPress = awaitLongPressOrCancellation(down.id)
@@ -768,6 +782,13 @@ private fun TimelineTrackLane(
                                         onAction(StudioAction.CancelDrag)
                                     }
                                     dragAccumulatedPx = 0f
+                                } else {
+                                    // Short tap -- only if finger didn't travel (wasn't a scroll)
+                                    val upChange = currentEvent.changes.firstOrNull { it.id == down.id }
+                                    val dist = upChange?.let { (it.position - down.position).getDistance() } ?: 0f
+                                    if (dist < viewConfiguration.touchSlop) {
+                                        onAction(StudioAction.TapClip(track.id, track.id, "audio"))
+                                    }
                                 }
                             }
                         }
@@ -787,20 +808,37 @@ private fun TimelineTrackLane(
             val endFrac = if (track.durationMs > 0)
                 1f - effectiveTrimEndMs.toFloat() / track.durationMs else 1f
 
-            if (track.audioFileName != null) {
-                NjWaveform(
-                    audioFile = getAudioFile(track.audioFileName),
-                    modifier = Modifier.fillMaxWidth(),
-                    barColor = barColor,
-                    height = laneHeight - 8.dp,
-                    startFraction = startFrac,
-                    endFraction = endFrac
-                )
-            }
+            FlippableClip(
+                isFlipped = isExpanded,
+                modifier = Modifier.matchParentSize(),
+                front = {
+                    Box(Modifier.fillMaxSize()) {
+                        if (track.audioFileName != null) {
+                            NjWaveform(
+                                audioFile = getAudioFile(track.audioFileName),
+                                modifier = Modifier.fillMaxWidth(),
+                                barColor = barColor,
+                                height = laneHeight - 8.dp,
+                                startFraction = startFrac,
+                                endFraction = endFrac
+                            )
+                        }
 
-            // Visual-only trim handles at each edge
-            TrimHandle(modifier = Modifier.align(Alignment.CenterStart))
-            TrimHandle(modifier = Modifier.align(Alignment.CenterEnd))
+                        // Visual-only trim handles at each edge
+                        TrimHandle(modifier = Modifier.align(Alignment.CenterStart))
+                        TrimHandle(modifier = Modifier.align(Alignment.CenterEnd))
+                    }
+                },
+                back = {
+                    ClipActionButtons(
+                        onDuplicate = { /* no duplicate for audio tracks yet */ },
+                        onDelete = {
+                            onAction(StudioAction.ConfirmDeleteTrack(track.id))
+                        },
+                        onDismiss = { onAction(StudioAction.DismissClipPanel) }
+                    )
+                }
+            )
         }
     }
     } // CompositionLocalProvider
@@ -874,13 +912,6 @@ private fun MidiTrackLane(
                     .width(widthDp)
                     .fillMaxHeight()
                     .clip(RoundedCornerShape(4.dp))
-                    .then(
-                        if (isExpanded) Modifier.border(
-                            width = 1.5.dp,
-                            color = NjStudioAccent,
-                            shape = RoundedCornerShape(4.dp)
-                        ) else Modifier
-                    )
                     .background(trackColor.copy(alpha = bgAlpha))
                     .then(
                         if (isDragging) Modifier
@@ -916,51 +947,59 @@ private fun MidiTrackLane(
                                 }
                                 dragAccumulatedPx = 0f
                             } else {
-                                // Short tap -- toggle clip action panel
-                                onAction(StudioAction.TapClip(track.id, clip.clipId, "midi"))
+                                // Short tap -- only if finger didn't travel (wasn't a scroll)
+                                val upChange = currentEvent.changes.firstOrNull { it.id == down.id }
+                                val dist = upChange?.let { (it.position - down.position).getDistance() } ?: 0f
+                                if (dist < viewConfiguration.touchSlop) {
+                                    onAction(StudioAction.TapClip(track.id, clip.clipId, "midi"))
+                                }
                             }
                         }
                     }
                     .padding(vertical = 2.dp)
             ) {
-                // Draw mini note bars inside the clip
-                Canvas(modifier = Modifier.matchParentSize()) {
-                    val notes = clip.notes
-                    if (notes.isEmpty()) return@Canvas
+                FlippableClip(
+                    isFlipped = isExpanded,
+                    modifier = Modifier.matchParentSize(),
+                    front = {
+                        // Draw mini note bars inside the clip
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            val notes = clip.notes
+                            if (notes.isEmpty()) return@Canvas
 
-                    val pitchRange = notes.minOf { it.pitch }..notes.maxOf { it.pitch }
-                    val pitchSpan = (pitchRange.last - pitchRange.first).coerceAtLeast(1)
-                    val laneH = size.height
-                    val clipWidthPx = size.width
-                    val barHeight = (laneH / (pitchSpan + 2)).coerceIn(2f, 5f)
+                            val pitchRange = notes.minOf { it.pitch }..notes.maxOf { it.pitch }
+                            val pitchSpan = (pitchRange.last - pitchRange.first).coerceAtLeast(1)
+                            val laneH = size.height
+                            val clipWidthPx = size.width
+                            val barHeight = (laneH / (pitchSpan + 2)).coerceIn(2f, 5f)
 
-                    val clipContentMs = clipDurationMs.toFloat()
-                    if (clipContentMs <= 0f) return@Canvas
+                            val clipContentMs = clipDurationMs.toFloat()
+                            if (clipContentMs <= 0f) return@Canvas
 
-                    for (note in notes) {
-                        val noteX = (note.startMs.toFloat() / clipContentMs) * clipWidthPx
-                        val noteW = ((note.durationMs.toFloat() / clipContentMs) * clipWidthPx)
-                            .coerceAtLeast(2f)
-                        val normalizedPitch = (note.pitch - pitchRange.first).toFloat() / pitchSpan
-                        val y = laneH - (normalizedPitch * (laneH - barHeight)) - barHeight
+                            for (note in notes) {
+                                val noteX = (note.startMs.toFloat() / clipContentMs) * clipWidthPx
+                                val noteW = ((note.durationMs.toFloat() / clipContentMs) * clipWidthPx)
+                                    .coerceAtLeast(2f)
+                                val normalizedPitch = (note.pitch - pitchRange.first).toFloat() / pitchSpan
+                                val y = laneH - (normalizedPitch * (laneH - barHeight)) - barHeight
 
-                        drawRect(
-                            color = trackColor,
-                            topLeft = Offset(noteX, y),
-                            size = Size(noteW, barHeight)
+                                drawRect(
+                                    color = trackColor,
+                                    topLeft = Offset(noteX, y),
+                                    size = Size(noteW, barHeight)
+                                )
+                            }
+                        }
+                    },
+                    back = {
+                        ClipActionButtons(
+                            onDuplicate = { onAction(StudioAction.DuplicateMidiClip(track.id, clip.clipId)) },
+                            onDelete = { onAction(StudioAction.DeleteMidiClip(track.id, clip.clipId)) },
+                            onEdit = { onAction(StudioAction.OpenPianoRoll(track.id, clip.clipId)) },
+                            onDismiss = { onAction(StudioAction.DismissClipPanel) }
                         )
                     }
-                }
-
-                // Clip action buttons (visible when expanded)
-                if (isExpanded) {
-                    ClipActionButtons(
-                        onDuplicate = { onAction(StudioAction.DuplicateMidiClip(track.id, clip.clipId)) },
-                        onDelete = { onAction(StudioAction.DeleteMidiClip(track.id, clip.clipId)) },
-                        onEdit = { onAction(StudioAction.OpenPianoRoll(track.id, clip.clipId)) },
-                        onDismiss = { onAction(StudioAction.DismissClipPanel) }
-                    )
-                }
+                )
             }
         }
 
@@ -1094,13 +1133,6 @@ private fun DrumTrackLane(
                     .width(clipWidthDp)
                     .fillMaxHeight()
                     .clip(RoundedCornerShape(6.dp))
-                    .then(
-                        if (isExpanded) Modifier.border(
-                            width = 1.5.dp,
-                            color = NjStudioAccent,
-                            shape = RoundedCornerShape(6.dp)
-                        ) else Modifier
-                    )
                     .background(NjStudioLane.copy(alpha = if (isDragging) 0.8f else bgAlpha))
                     .then(
                         if (isDragging) Modifier
@@ -1136,67 +1168,75 @@ private fun DrumTrackLane(
                                 }
                                 dragAccumulatedPx = 0f
                             } else {
-                                // Short tap -- toggle clip action panel
-                                onAction(StudioAction.TapClip(track.id, clip.clipId, "drum"))
+                                // Short tap -- only if finger didn't travel (wasn't a scroll)
+                                val upChange = currentEvent.changes.firstOrNull { it.id == down.id }
+                                val dist = upChange?.let { (it.position - down.position).getDistance() } ?: 0f
+                                if (dist < viewConfiguration.touchSlop) {
+                                    onAction(StudioAction.TapClip(track.id, clip.clipId, "drum"))
+                                }
                             }
                         }
                     }
                     .padding(vertical = 4.dp)
             ) {
-                // Mini step grid -- per-instrument colored dots
-                Canvas(modifier = Modifier.matchParentSize()) {
-                    val canvasW = size.width
-                    val canvasH = size.height
-                    val numRows = GM_DRUM_ROWS.size
-                    val stepW = canvasW / clipTotalSteps.coerceAtLeast(1)
-                    val rowH = canvasH / numRows
-                    val dotRadius = minOf(rowH, stepW) * 0.35f
+                FlippableClip(
+                    isFlipped = isExpanded,
+                    modifier = Modifier.matchParentSize(),
+                    front = {
+                        // Mini step grid -- per-instrument colored dots
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            val canvasW = size.width
+                            val canvasH = size.height
+                            val numRows = GM_DRUM_ROWS.size
+                            val stepW = canvasW / clipTotalSteps.coerceAtLeast(1)
+                            val rowH = canvasH / numRows
+                            val dotRadius = minOf(rowH, stepW) * 0.35f
 
-                    // Draw active hits as colored dots
-                    for ((stepIdx, rowIndices) in clipStepHits) {
-                        if (stepIdx >= clipTotalSteps) continue
-                        val cx = stepIdx * stepW + stepW / 2f
-                        rowIndices.forEach { rowIdx ->
-                            val cy = rowIdx * rowH + rowH / 2f
-                            val dotColor = if (effectivelyMuted) {
-                                DRUM_ROW_COLORS[rowIdx].copy(alpha = 0.3f)
-                            } else {
-                                DRUM_ROW_COLORS[rowIdx].copy(alpha = 0.9f)
+                            // Draw active hits as colored dots
+                            for ((stepIdx, rowIndices) in clipStepHits) {
+                                if (stepIdx >= clipTotalSteps) continue
+                                val cx = stepIdx * stepW + stepW / 2f
+                                rowIndices.forEach { rowIdx ->
+                                    val cy = rowIdx * rowH + rowH / 2f
+                                    val dotColor = if (effectivelyMuted) {
+                                        DRUM_ROW_COLORS[rowIdx].copy(alpha = 0.3f)
+                                    } else {
+                                        DRUM_ROW_COLORS[rowIdx].copy(alpha = 0.9f)
+                                    }
+                                    drawCircle(
+                                        color = dotColor,
+                                        radius = dotRadius,
+                                        center = Offset(cx, cy)
+                                    )
+                                }
                             }
-                            drawCircle(
-                                color = dotColor,
-                                radius = dotRadius,
-                                center = Offset(cx, cy)
-                            )
-                        }
-                    }
 
-                    // Beat dividers (every stepsPerBeat steps)
-                    val dividerStep = clipStepsPerBeat.coerceAtLeast(1)
-                    for (s in 0..clipTotalSteps step dividerStep) {
-                        if (s == 0) continue
-                        val x = s * stepW
-                        val isBar = s % clipStepsPerBar == 0
-                        drawLine(
-                            color = NjStudioWaveform.copy(
-                                alpha = if (isBar) 0.3f else 0.12f
-                            ),
-                            start = Offset(x, 0f),
-                            end = Offset(x, canvasH),
-                            strokeWidth = if (isBar) 1.dp.toPx() else 0.5.dp.toPx()
+                            // Beat dividers (every stepsPerBeat steps)
+                            val dividerStep = clipStepsPerBeat.coerceAtLeast(1)
+                            for (s in 0..clipTotalSteps step dividerStep) {
+                                if (s == 0) continue
+                                val x = s * stepW
+                                val isBar = s % clipStepsPerBar == 0
+                                drawLine(
+                                    color = NjStudioWaveform.copy(
+                                        alpha = if (isBar) 0.3f else 0.12f
+                                    ),
+                                    start = Offset(x, 0f),
+                                    end = Offset(x, canvasH),
+                                    strokeWidth = if (isBar) 1.dp.toPx() else 0.5.dp.toPx()
+                                )
+                            }
+                        }
+                    },
+                    back = {
+                        ClipActionButtons(
+                            onDuplicate = { onAction(StudioAction.DuplicateClip(track.id, clip.clipId)) },
+                            onDelete = { onAction(StudioAction.DeleteClip(track.id, clip.clipId)) },
+                            onEdit = { onAction(StudioAction.OpenDrumEditor(track.id, clip.clipId)) },
+                            onDismiss = { onAction(StudioAction.DismissClipPanel) }
                         )
                     }
-                }
-
-                // Clip action buttons (visible when expanded)
-                if (isExpanded) {
-                    ClipActionButtons(
-                        onDuplicate = { onAction(StudioAction.DuplicateClip(track.id, clip.clipId)) },
-                        onDelete = { onAction(StudioAction.DeleteClip(track.id, clip.clipId)) },
-                        onEdit = { onAction(StudioAction.OpenDrumEditor(track.id, clip.clipId)) },
-                        onDismiss = { onAction(StudioAction.DismissClipPanel) }
-                    )
-                }
+                )
             }
         }
 
@@ -1260,8 +1300,40 @@ private fun computeGaps(
 }
 
 /**
- * Compact row of action buttons displayed over an expanded clip.
- * Buttons: Duplicate, Delete, and optionally Edit (for MIDI clips).
+ * X-axis card-flip animation wrapper. Front content rotates away (top
+ * tilts back), revealing icon action buttons on the back face.
+ */
+@Composable
+private fun FlippableClip(
+    isFlipped: Boolean,
+    modifier: Modifier = Modifier,
+    front: @Composable () -> Unit,
+    back: @Composable () -> Unit
+) {
+    val angle by animateFloatAsState(
+        targetValue = if (isFlipped) 180f else 0f,
+        animationSpec = tween(300),
+        label = "clipFlip"
+    )
+    Box(
+        modifier = modifier.graphicsLayer {
+            rotationX = angle
+            cameraDistance = 12f * density
+        }
+    ) {
+        if (angle < 90f) {
+            front()
+        } else {
+            Box(Modifier.graphicsLayer { rotationX = 180f }) {
+                back()
+            }
+        }
+    }
+}
+
+/**
+ * Icon-only action buttons shown on the back face of a flipped clip.
+ * Duplicate (amber), optional Edit (silver), Delete (red).
  */
 @Composable
 private fun ClipActionButtons(
@@ -1274,26 +1346,34 @@ private fun ClipActionButtons(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black.copy(alpha = 0.55f))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onDismiss
+            )
             .padding(horizontal = 4.dp),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
         NjButton(
-            text = "Dup",
+            text = "",
+            icon = Icons.Filled.ContentCopy,
             onClick = { onDuplicate(); onDismiss() },
             textColor = NjStudioAccent.copy(alpha = 0.9f)
         )
-        Spacer(Modifier.width(4.dp))
+        Spacer(Modifier.width(12.dp))
         if (onEdit != null) {
             NjButton(
-                text = "Edit",
+                text = "",
+                icon = Icons.Filled.Edit,
                 onClick = { onEdit(); onDismiss() },
                 textColor = NjStudioWaveform.copy(alpha = 0.9f)
             )
-            Spacer(Modifier.width(4.dp))
+            Spacer(Modifier.width(12.dp))
         }
         NjButton(
-            text = "Del",
+            text = "",
+            icon = Icons.Filled.Delete,
             onClick = { onDelete(); onDismiss() },
             textColor = NjError.copy(alpha = 0.9f)
         )
