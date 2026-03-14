@@ -55,15 +55,19 @@ import com.example.nightjar.ui.theme.NjOnBg
 import com.example.nightjar.ui.theme.NjOutline
 import com.example.nightjar.ui.theme.NjStudioAccent
 import com.example.nightjar.ui.theme.NjStudioGreen
-import com.example.nightjar.ui.theme.NjStudioLane
+
 import com.example.nightjar.ui.theme.NjSurface
 
-/** Height of each instrument row in dp. */
-private const val ROW_HEIGHT_DP = 32f
+/** Square cell size in dp (each cell is CELL_SIZE x CELL_SIZE). */
+private const val CELL_SIZE_DP = 32f
+/** Gap between cells in dp. */
+private const val CELL_GAP_DP = 2f
+/** Row height = cell + gap. */
+private const val ROW_HEIGHT_DP = CELL_SIZE_DP + CELL_GAP_DP
 /** Width of the instrument label panel in dp. */
 private const val LABELS_WIDTH_DP = 48f
-/** Pixels per millisecond at default zoom. */
-private const val PX_PER_MS = 0.2f
+/** Fallback dp-per-ms when no clips exist. */
+private const val DEFAULT_PX_PER_MS = 0.2f
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -75,6 +79,8 @@ fun DrumEditorScreen(
     val density = LocalDensity.current
 
     val rowHeightPx = with(density) { ROW_HEIGHT_DP.dp.toPx() }
+    val cellSizePx = with(density) { CELL_SIZE_DP.dp.toPx() }
+    val cellGapPx = with(density) { CELL_GAP_DP.dp.toPx() }
     val totalGridHeight = (GM_DRUM_ROWS.size * ROW_HEIGHT_DP).dp
 
     // Compute grid width from content
@@ -90,7 +96,13 @@ fun DrumEditorScreen(
         clip.offsetMs + clipDurationMs.toLong()
     } ?: 0L
     val contentMs = maxOf(maxClipEndMs + paddingMs, state.totalDurationMs + paddingMs, minContentMs)
-    val gridWidthDp = (contentMs * PX_PER_MS).dp
+
+    // Compute dp-per-ms so cells are square: step_width_dp = ROW_HEIGHT_DP
+    val maxStepsPerBar = state.clips.maxOfOrNull { it.stepsPerBar } ?: 16
+    val stepMs = measureMs.toDouble() / maxStepsPerBar
+    val pxPerMsDp = if (stepMs > 0) ROW_HEIGHT_DP / stepMs else DEFAULT_PX_PER_MS.toDouble()
+    val pxPerMs = (pxPerMsDp * density.density).toFloat()
+    val gridWidthDp = (contentMs * pxPerMsDp).toFloat().dp
 
     val verticalScrollState = rememberScrollState()
     val horizontalScrollState = rememberScrollState()
@@ -158,6 +170,33 @@ fun DrumEditorScreen(
             )
         )
 
+        // Beat number header row (pinned at top, scrolls horizontally with grid)
+        val beatHeaderHeight = 18.dp
+        Row {
+            Spacer(Modifier.width(LABELS_WIDTH_DP.dp))
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(beatHeaderHeight)
+                    .horizontalScroll(horizontalScrollState)
+            ) {
+                Canvas(
+                    modifier = Modifier
+                        .width(gridWidthDp)
+                        .height(beatHeaderHeight)
+                ) {
+                    drawBeatHeaders(
+                        pxPerMs = pxPerMs,
+                        bpm = state.bpm,
+                        beatsPerBar = state.timeSignatureNumerator,
+                        timeSignatureDenominator = state.timeSignatureDenominator,
+                        contentMs = contentMs,
+                        textMeasurer = textMeasurer
+                    )
+                }
+            }
+        }
+
         // Labels + Grid
         Row(modifier = Modifier.fillMaxSize()) {
             // Instrument labels (scrolls vertically with the grid)
@@ -188,9 +227,7 @@ fun DrumEditorScreen(
                     modifier = Modifier
                         .width(gridWidthDp)
                         .height(totalGridHeight)
-                        .pointerInput(state.clips, state.bpm) {
-                            val pxPerMs = PX_PER_MS * density.density
-
+                        .pointerInput(state.clips, state.bpm, pxPerMs) {
                             awaitEachGesture {
                                 val down = awaitFirstDown(requireUnconsumed = false)
                                 val up = waitForUpOrCancellation()
@@ -227,7 +264,9 @@ fun DrumEditorScreen(
                 ) {
                     drawDrumGrid(
                         rowHeightPx = rowHeightPx,
-                        pxPerMs = PX_PER_MS * density.density,
+                        cellSizePx = cellSizePx,
+                        cellGapPx = cellGapPx,
+                        pxPerMs = pxPerMs,
                         clips = state.clips,
                         highlightClipId = state.highlightClipId,
                         bpm = state.bpm,
@@ -299,9 +338,49 @@ private fun DrawScope.drawDrumLabels(
     }
 }
 
+/** Draw beat number labels in the pinned header row. */
+private fun DrawScope.drawBeatHeaders(
+    pxPerMs: Float,
+    bpm: Double,
+    beatsPerBar: Int,
+    timeSignatureDenominator: Int,
+    contentMs: Long,
+    textMeasurer: TextMeasurer
+) {
+    val beatMs = MusicalTimeConverter.msPerBeat(bpm, timeSignatureDenominator)
+    if (beatMs <= 0.0) return
+
+    var beatIdx = 0
+    var ms = 0.0
+    while (ms <= contentMs) {
+        val x = (ms * pxPerMs).toFloat()
+        if (x > size.width) break
+
+        val beatInBar = (beatIdx % beatsPerBar) + 1
+        val isMeasureStart = beatInBar == 1
+        val labelResult = textMeasurer.measure(
+            text = "$beatInBar",
+            style = TextStyle(
+                color = NjStudioAccent.copy(alpha = if (isMeasureStart) 0.6f else 0.35f),
+                fontSize = 10.sp
+            )
+        )
+        // Left-aligned over the downbeat column
+        drawText(
+            textLayoutResult = labelResult,
+            topLeft = Offset(x + 3f, (size.height - labelResult.size.height) / 2f)
+        )
+
+        ms += beatMs
+        beatIdx++
+    }
+}
+
 /** Draw the full drum grid with all clips, beat lines, step cells, and playhead. */
 private fun DrawScope.drawDrumGrid(
     rowHeightPx: Float,
+    cellSizePx: Float,
+    cellGapPx: Float,
     pxPerMs: Float,
     clips: List<DrumEditorClip>,
     highlightClipId: Long = 0L,
@@ -318,16 +397,12 @@ private fun DrawScope.drawDrumGrid(
     val beatMs = MusicalTimeConverter.msPerBeat(bpm, timeSignatureDenominator)
     val measureMs = MusicalTimeConverter.msPerMeasure(bpm, timeSignatureNumerator, timeSignatureDenominator)
 
-    // Row backgrounds
+    // Base background
+    drawRect(color = Color(0xFF0D0B14), topLeft = Offset.Zero, size = Size(size.width, totalHeight))
+
+    // Row separators (horizontal lines between instruments)
     for (rowIndex in 0 until numRows) {
         val y = rowIndex * rowHeightPx
-        val bgColor = if (rowIndex % 2 == 0) Color(0xFF0D0B14) else Color(0xFF110F18)
-        drawRect(
-            color = bgColor,
-            topLeft = Offset(0f, y),
-            size = Size(size.width, rowHeightPx)
-        )
-        // Row separator
         drawLine(
             color = NjOutline.copy(alpha = 0.2f),
             start = Offset(0f, y),
@@ -344,7 +419,7 @@ private fun DrawScope.drawDrumGrid(
             if (x > size.width) break
 
             val isMeasure = (ms % measureMs).let { it < 1.0 || (measureMs - it) < 1.0 }
-            val alpha = if (isMeasure) 0.3f else 0.12f
+            val alpha = if (isMeasure) 0.35f else 0.15f
             val strokeWidth = if (isMeasure) 1.5f else 0.5f
 
             drawLine(
@@ -353,6 +428,7 @@ private fun DrawScope.drawDrumGrid(
                 end = Offset(x, totalHeight),
                 strokeWidth = strokeWidth
             )
+
             ms += beatMs
         }
     }
@@ -363,13 +439,6 @@ private fun DrawScope.drawDrumGrid(
         val clipStartPx = clip.offsetMs * pxPerMs
         val clipWidthPx = (clipDurationMs * pxPerMs).toFloat()
         val isHighlighted = highlightClipId != 0L && clip.clipId == highlightClipId
-
-        // Clip background tint (slightly brighter for highlighted clip)
-        drawRect(
-            color = NjStudioLane.copy(alpha = if (isHighlighted) 0.14f else 0.08f),
-            topLeft = Offset(clipStartPx, 0f),
-            size = Size(clipWidthPx, totalHeight)
-        )
 
         // Clip boundary lines
         val borderColor = if (isHighlighted) NjStudioAccent.copy(alpha = 0.5f)
@@ -408,46 +477,56 @@ private fun DrawScope.drawDrumGrid(
         // Build active steps set for this clip
         val activeSteps = clip.steps.map { it.stepIndex to it.drumNote }.toSet()
 
-        // Draw step cells within the clip
+        // Draw step cells within the clip (square cells with gaps)
         val stepsPerBeat = if (beatsPerBar > 0) clip.stepsPerBar / beatsPerBar else 4
-        val cellWidthPx = clipWidthPx / clip.totalSteps.coerceAtLeast(1)
-        val cellPadding = 1f
+        val stepWidthPx = clipWidthPx / clip.totalSteps.coerceAtLeast(1)
+        val halfGap = cellGapPx / 2f
+
+        // Downbeat vs offbeat cell colors
+        val downbeatCellColor = Color(0xFF211C2C) // first step of beat -- lighter
+        val offbeatCellColor = Color(0xFF16131E)  // remaining steps -- darker base
 
         for (step in 0 until clip.totalSteps) {
-            val isBeatStart = stepsPerBeat > 0 && step % stepsPerBeat == 0
-            val isBarStart = step % clip.stepsPerBar == 0
+            val stepInBeat = if (stepsPerBeat > 0) step % stepsPerBeat else step
+            val isDownbeat = stepInBeat == 0
 
             for (rowIndex in 0 until numRows) {
                 val drumNote = GM_DRUM_ROWS[rowIndex].note
-                val isActive = (step to drumNote) in activeSteps
+                val isActive = (step to drumNote) in activeStepsT
 
-                val x = clipStartPx + step * cellWidthPx + cellPadding
-                val y = rowIndex * rowHeightPx + cellPadding
-                val w = cellWidthPx - cellPadding * 2
-                val h = rowHeightPx - cellPadding * 2
+                // Center the square cell within the step column and row
+                val stepX = clipStartPx + step * stepWidthPx
+                val x = stepX + halfGap
+                val y = rowIndex * rowHeightPx + halfGap
+                val w = cellSizePx
+                val h = cellSizePx
 
-                if (isActive) {
-                    // Active step: instrument color
-                    val color = DRUM_ROW_COLORS[rowIndex].copy(alpha = 0.8f)
-                    drawRoundRect(
-                        color = color,
-                        topLeft = Offset(x, y),
-                        size = Size(w, h),
-                        cornerRadius = CornerRadius(3f, 3f)
-                    )
+                val fillColor = if (isActive) {
+                    DRUM_ROW_COLORS[rowIndex].copy(alpha = 0.85f)
+                } else if (isDownbeat) {
+                    downbeatCellColor
                 } else {
-                    // Empty step: subtle background
-                    val bgAlpha = when {
-                        isBarStart -> 0.14f
-                        isBeatStart -> 0.09f
-                        else -> 0.05f
-                    }
-                    drawRoundRect(
-                        color = NjStudioLane.copy(alpha = bgAlpha),
-                        topLeft = Offset(x, y),
-                        size = Size(w, h),
-                        cornerRadius = CornerRadius(2f, 2f)
-                    )
+                    offbeatCellColor
+                }
+                val cr = CornerRadius(3f, 3f)
+                val bw = 1f
+
+                // Main fill
+                drawRoundRect(color = fillColor, topLeft = Offset(x, y), size = Size(w, h), cornerRadius = cr)
+
+                // Bevel edges
+                if (isActive) {
+                    // Pressed in: dark top/left, light bottom/right
+                    drawLine(Color.Black.copy(alpha = 0.3f), Offset(x + bw, y + bw), Offset(x + w - bw, y + bw), bw)
+                    drawLine(Color.Black.copy(alpha = 0.25f), Offset(x + bw, y + bw), Offset(x + bw, y + h - bw), bw)
+                    drawLine(Color.White.copy(alpha = 0.08f), Offset(x + bw, y + h - bw), Offset(x + w - bw, y + h - bw), bw)
+                    drawLine(Color.White.copy(alpha = 0.06f), Offset(x + w - bw, y + bw), Offset(x + w - bw, y + h - bw), bw)
+                } else {
+                    // Raised: light top/left, dark bottom/right
+                    drawLine(Color.White.copy(alpha = 0.12f), Offset(x + bw, y + bw), Offset(x + w - bw, y + bw), bw)
+                    drawLine(Color.White.copy(alpha = 0.08f), Offset(x + bw, y + bw), Offset(x + bw, y + h - bw), bw)
+                    drawLine(Color.Black.copy(alpha = 0.25f), Offset(x + bw, y + h - bw), Offset(x + w - bw, y + h - bw), bw)
+                    drawLine(Color.Black.copy(alpha = 0.2f), Offset(x + w - bw, y + bw), Offset(x + w - bw, y + h - bw), bw)
                 }
             }
         }
