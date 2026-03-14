@@ -90,12 +90,16 @@ public:
 
     // ── Step sequencer control ──────────────────────────────────────────
 
-    /** Replace the drum pattern. Called from UI thread via JNI. */
+    /** Replace the drum pattern (legacy single-pattern). Called from UI thread via JNI. */
     void updateDrumPattern(int stepsPerBar, int bars, int64_t offsetFrames,
                            float volume, bool muted,
                            const std::vector<DrumHit>& hits,
                            const std::vector<int64_t>& clipOffsetFrames = {},
                            int beatsPerBar = 4);
+
+    /** Replace the drum pattern with per-clip data. Called from UI thread via JNI. */
+    void updateDrumPatternClips(float volume, bool muted,
+                                const std::vector<StepSequencer::ClipSlot>& clips);
 
     /** Enable/disable the step sequencer. */
     void setSequencerEnabled(bool enabled);

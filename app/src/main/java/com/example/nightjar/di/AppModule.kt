@@ -4,6 +4,7 @@ import android.content.Context
 import com.example.nightjar.data.db.NightjarDatabase
 import com.example.nightjar.data.db.dao.DrumPatternDao
 import com.example.nightjar.data.db.dao.IdeaDao
+import com.example.nightjar.data.db.dao.MidiClipDao
 import com.example.nightjar.data.db.dao.MidiNoteDao
 import com.example.nightjar.data.db.dao.TagDao
 import com.example.nightjar.data.db.dao.TakeDao
@@ -74,14 +75,18 @@ abstract class AppModule {
         ): DrumRepository = DrumRepository(drumPatternDao)
 
         @Provides
+        fun provideMidiClipDao(db: NightjarDatabase): MidiClipDao = db.midiClipDao()
+
+        @Provides
         fun provideMidiNoteDao(db: NightjarDatabase): MidiNoteDao = db.midiNoteDao()
 
         @Provides
         @Singleton
         fun provideMidiRepository(
+            midiClipDao: MidiClipDao,
             midiNoteDao: MidiNoteDao,
             trackDao: TrackDao
-        ): MidiRepository = MidiRepository(midiNoteDao, trackDao)
+        ): MidiRepository = MidiRepository(midiClipDao, midiNoteDao, trackDao)
 
     }
 }

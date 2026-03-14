@@ -19,6 +19,12 @@ interface MidiNoteDao {
     @Query("SELECT * FROM midi_notes WHERE trackId = :trackId ORDER BY startMs, pitch")
     fun observeNotesForTrack(trackId: Long): Flow<List<MidiNoteEntity>>
 
+    @Query("SELECT * FROM midi_notes WHERE clipId = :clipId ORDER BY startMs, pitch")
+    suspend fun getNotesForClip(clipId: Long): List<MidiNoteEntity>
+
+    @Query("SELECT * FROM midi_notes WHERE clipId = :clipId ORDER BY startMs, pitch")
+    fun observeNotesForClip(clipId: Long): Flow<List<MidiNoteEntity>>
+
     @Query("SELECT * FROM midi_notes WHERE id = :noteId")
     suspend fun getNoteById(noteId: Long): MidiNoteEntity?
 
@@ -37,8 +43,14 @@ interface MidiNoteDao {
     @Query("DELETE FROM midi_notes WHERE trackId = :trackId")
     suspend fun deleteAllNotesForTrack(trackId: Long)
 
+    @Query("DELETE FROM midi_notes WHERE clipId = :clipId")
+    suspend fun deleteAllNotesForClip(clipId: Long)
+
     @Query("SELECT COUNT(*) FROM midi_notes WHERE trackId = :trackId")
     suspend fun getNoteCount(trackId: Long): Int
+
+    @Query("SELECT COUNT(*) FROM midi_notes WHERE clipId = :clipId")
+    suspend fun getNoteCountForClip(clipId: Long): Int
 
     @Query("""
         UPDATE midi_notes

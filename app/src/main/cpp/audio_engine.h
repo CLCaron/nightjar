@@ -83,6 +83,17 @@ public:
                            const int64_t* clipOffsetsMs = nullptr,
                            int clipCount = 0,
                            int beatsPerBar = 4);
+
+    /**
+     * Per-clip drum pattern update. Each clip has its own grid dimensions and hits.
+     * Flat arrays: per-clip metadata + concatenated hit arrays.
+     */
+    void updateDrumPatternClips(float volume, bool muted,
+                                const int* clipStepsPerBar, const int* clipBars,
+                                const int* clipBeatsPerBar, const int64_t* clipOffsetsMs,
+                                const int* clipHitCounts, int clipCount,
+                                const int* hitStepIndices, const int* hitDrumNotes,
+                                const float* hitVelocities);
     void setBpm(double bpm);
     void setDrumSequencerEnabled(bool enabled);
 

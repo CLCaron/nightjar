@@ -9,35 +9,58 @@ StepSequencer::StepSequencer() {
     pendingEvents_.reserve(16);
 }
 
+void StepSequencer::updatePattern(float volume, bool muted,
+                                   const std::vector<ClipSlot>& clips) {
+    std::lock_guard<std::mutex> lock(editMutex_);
+    Pattern* active = activePattern_.load(std::memory_order_acquire);
+    Pattern* inactive = (active == &patternA_) ? &patternB_ : &patternA_;
+
+    inactive->volume = volume;
+    inactive->muted = muted;
+    inactive->clips = clips;
+
+    commitToActive();
+
+    // Resize step tracking to match clip count
+    if (lastStepIndices_.size() != clips.size()) {
+        lastStepIndices_.assign(clips.size(), -1);
+    }
+}
+
 void StepSequencer::updatePattern(int stepsPerBar, int bars, int64_t offsetFrames,
                                    float volume, bool muted,
                                    const std::vector<DrumHit>& hits,
                                    const std::vector<int64_t>& clipOffsetFrames,
                                    int beatsPerBar) {
-    std::lock_guard<std::mutex> lock(editMutex_);
-    Pattern* active = activePattern_.load(std::memory_order_acquire);
-    Pattern* inactive = (active == &patternA_) ? &patternB_ : &patternA_;
+    // Convert legacy single-pattern call to per-clip format
+    std::vector<ClipSlot> clips;
+    int bpb = beatsPerBar > 0 ? beatsPerBar : 4;
 
-    inactive->stepsPerBar = stepsPerBar;
-    inactive->bars = bars;
-    inactive->beatsPerBar = beatsPerBar > 0 ? beatsPerBar : 4;
-    inactive->offsetFrames = offsetFrames;
-    inactive->volume = volume;
-    inactive->muted = muted;
-    inactive->hits = hits;
-
-    // If clip offsets provided, use them; otherwise fall back to single clip at offsetFrames
     if (clipOffsetFrames.empty()) {
-        inactive->clipOffsetFrames = {offsetFrames};
+        ClipSlot slot;
+        slot.stepsPerBar = stepsPerBar;
+        slot.bars = bars;
+        slot.beatsPerBar = bpb;
+        slot.offsetFrames = offsetFrames;
+        slot.hits = hits;
+        clips.push_back(std::move(slot));
     } else {
-        inactive->clipOffsetFrames = clipOffsetFrames;
+        for (int64_t clipOffset : clipOffsetFrames) {
+            ClipSlot slot;
+            slot.stepsPerBar = stepsPerBar;
+            slot.bars = bars;
+            slot.beatsPerBar = bpb;
+            slot.offsetFrames = clipOffset;
+            slot.hits = hits;
+            clips.push_back(std::move(slot));
+        }
     }
 
-    commitToActive();
+    updatePattern(volume, muted, clips);
 }
 
 void StepSequencer::reset() {
-    lastStepIndex_ = -1;
+    std::fill(lastStepIndices_.begin(), lastStepIndices_.end(), -1);
     pendingEvents_.clear();
 }
 
@@ -46,24 +69,28 @@ const std::vector<NoteEvent>& StepSequencer::tick(
     pendingEvents_.clear();
 
     Pattern* pat = activePattern_.load(std::memory_order_acquire);
-    if (!pat || pat->muted || pat->hits.empty() || bpm <= 0.0) {
+    if (!pat || pat->muted || pat->clips.empty() || bpm <= 0.0) {
         return pendingEvents_;
     }
 
-    int totalSteps = pat->totalSteps();
-    if (totalSteps <= 0) return pendingEvents_;
+    // Ensure step tracking vector matches clip count
+    if (lastStepIndices_.size() != pat->clips.size()) {
+        lastStepIndices_.assign(pat->clips.size(), -1);
+    }
 
-    // Calculate frame positions for steps.
-    // stepsPerBeat = stepsPerBar / beatsPerBar (accounts for time signature)
-    double stepsPerBeat = pat->stepsPerBar / static_cast<double>(pat->beatsPerBar);
-    double framesPerStep = (static_cast<double>(kSampleRate) * 60.0) / (bpm * stepsPerBeat);
-    double totalPatternFrames = framesPerStep * totalSteps;
+    // Process each clip independently with its own step tracking
+    for (size_t ci = 0; ci < pat->clips.size(); ++ci) {
+        const auto& clip = pat->clips[ci];
+        int totalSteps = clip.totalSteps();
+        if (totalSteps <= 0 || clip.hits.empty()) continue;
 
-    if (totalPatternFrames <= 0.0) return pendingEvents_;
+        double stepsPerBeat = clip.stepsPerBar / static_cast<double>(clip.beatsPerBar);
+        double framesPerStep = (static_cast<double>(kSampleRate) * 60.0) / (bpm * stepsPerBeat);
+        double totalPatternFrames = framesPerStep * totalSteps;
 
-    // Iterate over each clip placement and fire notes for any clip in range
-    for (int64_t clipOffset : pat->clipOffsetFrames) {
-        int64_t localPos = renderPos - clipOffset;
+        if (totalPatternFrames <= 0.0) continue;
+
+        int64_t localPos = renderPos - clip.offsetFrames;
 
         // Clip hasn't started yet
         if (localPos + chunkFrames <= 0) continue;
@@ -74,23 +101,20 @@ const std::vector<NoteEvent>& StepSequencer::tick(
         // Clamp to clip start
         if (localPos < 0) localPos = 0;
 
-        // Current step at this render position (no wrapping -- one-shot)
         int currentStep = static_cast<int>(std::floor(
             static_cast<double>(localPos) / framesPerStep));
         currentStep = std::min(currentStep, totalSteps - 1);
 
-        // For multi-clip, we track step per-clip using a simple approach:
-        // Since clips don't overlap in typical use, we use the shared lastStepIndex_.
-        // For overlapping clips, this could miss steps, but that's an edge case
-        // we'll handle if needed. For now, fire events for the current step.
-        if (currentStep != lastStepIndex_) {
+        int& lastStep = lastStepIndices_[ci];
+
+        if (currentStep != lastStep) {
             int stepsToProcess;
-            if (lastStepIndex_ < 0) {
+            if (lastStep < 0) {
                 stepsToProcess = 1;
             } else {
-                stepsToProcess = currentStep - lastStepIndex_;
+                stepsToProcess = currentStep - lastStep;
                 if (stepsToProcess <= 0) {
-                    // We've moved to a new clip -- reset and trigger current step
+                    // Jumped backwards (seek) -- reset and trigger current step
                     stepsToProcess = 1;
                 }
                 stepsToProcess = std::min(stepsToProcess, totalSteps);
@@ -98,14 +122,14 @@ const std::vector<NoteEvent>& StepSequencer::tick(
 
             for (int i = 0; i < stepsToProcess; ++i) {
                 int step;
-                if (lastStepIndex_ < 0 || stepsToProcess == 1) {
+                if (lastStep < 0 || stepsToProcess == 1) {
                     step = currentStep;
                 } else {
-                    step = lastStepIndex_ + 1 + i;
+                    step = lastStep + 1 + i;
                     if (step >= totalSteps) break;  // one-shot: don't wrap
                 }
 
-                for (const auto& hit : pat->hits) {
+                for (const auto& hit : clip.hits) {
                     if (hit.stepIndex == step) {
                         int vel = static_cast<int>(
                             static_cast<float>(hit.velocity) * pat->volume);
@@ -117,7 +141,7 @@ const std::vector<NoteEvent>& StepSequencer::tick(
                 }
             }
 
-            lastStepIndex_ = currentStep;
+            lastStep = currentStep;
         }
     }
 
@@ -125,20 +149,19 @@ const std::vector<NoteEvent>& StepSequencer::tick(
 }
 
 int64_t StepSequencer::getMaxEndFrame(double bpm) const {
-    // Read from whichever buffer was last committed (called from UI thread after update)
     Pattern* pat = activePattern_.load(std::memory_order_acquire);
     if (!pat || bpm <= 0.0) return 0;
 
-    int totalSteps = pat->totalSteps();
-    if (totalSteps <= 0) return 0;
-
-    double stepsPerBeat = pat->stepsPerBar / static_cast<double>(pat->beatsPerBar);
-    double framesPerStep = (static_cast<double>(kSampleRate) * 60.0) / (bpm * stepsPerBeat);
-    auto totalPatternFrames = static_cast<int64_t>(framesPerStep * totalSteps);
-
     int64_t maxEnd = 0;
-    for (int64_t clipOffset : pat->clipOffsetFrames) {
-        int64_t end = clipOffset + totalPatternFrames;
+    for (const auto& clip : pat->clips) {
+        int totalSteps = clip.totalSteps();
+        if (totalSteps <= 0) continue;
+
+        double stepsPerBeat = clip.stepsPerBar / static_cast<double>(clip.beatsPerBar);
+        double framesPerStep = (static_cast<double>(kSampleRate) * 60.0) / (bpm * stepsPerBeat);
+        auto totalPatternFrames = static_cast<int64_t>(framesPerStep * totalSteps);
+
+        int64_t end = clip.offsetFrames + totalPatternFrames;
         if (end > maxEnd) maxEnd = end;
     }
 

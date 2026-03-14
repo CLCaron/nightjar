@@ -39,6 +39,9 @@ interface IdeaDao {
     """)
     suspend fun updateTimeSignature(id: Long, numerator: Int, denominator: Int)
 
+    @Query("UPDATE ideas SET gridResolution = :gridResolution WHERE id = :id")
+    suspend fun updateGridResolution(id: Long, gridResolution: Int)
+
     @Query("DELETE FROM ideas WHERE id = :id")
     suspend fun deleteIdeaById(id: Long)
 

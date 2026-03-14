@@ -17,6 +17,8 @@ import androidx.room.PrimaryKey
  *                         Used by drum sequencer, metronome, snap-to-grid, and MIDI tracks.
  * @property timeSignatureNumerator Beats per measure (top number of time signature, default 4).
  * @property timeSignatureDenominator Beat unit (bottom number of time signature, default 4).
+ * @property gridResolution Sub-beat grid density for snap and editing (default 16 = sixteenth notes).
+ *                          Valid values: 4 (quarter), 8 (eighth), 16 (sixteenth), 32 (thirty-second).
  * @property createdAtEpochMs Unix timestamp of when the idea was first recorded.
  */
 @Entity(tableName = "ideas")
@@ -28,5 +30,6 @@ data class IdeaEntity(
     val bpm: Double = 120.0,
     val timeSignatureNumerator: Int = 4,
     val timeSignatureDenominator: Int = 4,
+    val gridResolution: Int = 16,
     val createdAtEpochMs: Long = System.currentTimeMillis()
 )

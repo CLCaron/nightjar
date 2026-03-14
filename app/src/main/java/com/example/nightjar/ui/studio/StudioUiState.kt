@@ -6,13 +6,19 @@ import com.example.nightjar.data.db.entity.MidiNoteEntity
 import com.example.nightjar.data.db.entity.TakeEntity
 import com.example.nightjar.data.db.entity.TrackEntity
 
-/** Snapshot of a drum clip for UI rendering. */
+/** Snapshot of a drum clip for UI rendering, including its own pattern data. */
 data class DrumClipUiState(
     val clipId: Long,
-    val offsetMs: Long
-)
+    val offsetMs: Long,
+    val patternId: Long = 0L,
+    val stepsPerBar: Int = 16,
+    val bars: Int = 1,
+    val steps: List<DrumStepEntity> = emptyList()
+) {
+    val totalSteps: Int get() = stepsPerBar * bars
+}
 
-/** Transient state while the user is long-press-dragging a drum clip to reposition it. */
+/** Transient state while the user is long-press-dragging a clip to reposition it. */
 data class ClipDragState(
     val trackId: Long,
     val clipId: Long,
@@ -20,22 +26,56 @@ data class ClipDragState(
     val previewOffsetMs: Long
 )
 
-/** Snapshot of a drum pattern for UI rendering, keyed by track ID. */
+/** State for the expanded clip action panel (tap a clip to show inline buttons). */
+data class ExpandedClipState(
+    val trackId: Long,
+    val clipId: Long,
+    val clipType: String  // "drum" or "midi"
+)
+
+/** Transient state while the user is long-press-dragging a MIDI clip to reposition it. */
+data class MidiClipDragState(
+    val trackId: Long,
+    val clipId: Long,
+    val originalOffsetMs: Long,
+    val previewOffsetMs: Long
+)
+
+/** Snapshot of a drum pattern for UI rendering, keyed by track ID. Per-clip data model. */
 data class DrumPatternUiState(
-    val patternId: Long = 0L,
-    val stepsPerBar: Int = 16,
-    val bars: Int = 1,
-    val steps: List<DrumStepEntity> = emptyList(),
-    val clips: List<DrumClipUiState> = emptyList()
+    val clips: List<DrumClipUiState> = emptyList(),
+    val selectedClipIndex: Int = 0
 ) {
+    /** The currently selected clip (for editing). */
+    val selectedClip: DrumClipUiState?
+        get() = clips.getOrNull(selectedClipIndex)
+
+    // Backward compatibility: these delegate to the selected clip's data
+    val patternId: Long get() = selectedClip?.patternId ?: 0L
+    val stepsPerBar: Int get() = selectedClip?.stepsPerBar ?: 16
+    val bars: Int get() = selectedClip?.bars ?: 1
+    val steps: List<DrumStepEntity> get() = selectedClip?.steps ?: emptyList()
     val totalSteps: Int get() = stepsPerBar * bars
+}
+
+/** Snapshot of a single MIDI clip for UI rendering. */
+data class MidiClipUiState(
+    val clipId: Long,
+    val offsetMs: Long,
+    val notes: List<MidiNoteEntity> = emptyList()
+) {
+    /** Duration of the clip content (max note end). */
+    val contentDurationMs: Long
+        get() = notes.maxOfOrNull { it.startMs + it.durationMs } ?: 0L
 }
 
 /** Snapshot of MIDI track data for UI rendering, keyed by track ID. */
 data class MidiTrackUiState(
     val notes: List<MidiNoteEntity> = emptyList(),
+    val clips: List<MidiClipUiState> = emptyList(),
     val midiProgram: Int = 0,
-    val instrumentName: String = "Acoustic Grand Piano"
+    val instrumentName: String = "Acoustic Grand Piano",
+    val selectedClipId: Long? = null
 )
 
 /** UI state for the Studio (multi-track workspace) screen. */
@@ -80,9 +120,12 @@ data class StudioUiState(
     val timeSignatureNumerator: Int = 4,
     val timeSignatureDenominator: Int = 4,
     val isSnapEnabled: Boolean = true,
+    val gridResolution: Int = 16,
     val drumPatterns: Map<Long, DrumPatternUiState> = emptyMap(),
     val clipDragState: ClipDragState? = null,
     val midiTracks: Map<Long, MidiTrackUiState> = emptyMap(),
+    val midiClipDragState: MidiClipDragState? = null,
+    val expandedClipState: ExpandedClipState? = null,
     val showInstrumentPickerForTrackId: Long? = null
 ) {
     val hasLoopRegion: Boolean get() = loopStartMs != null && loopEndMs != null
@@ -130,9 +173,12 @@ data class StudioUiState(
                 timeSignatureNumerator == other.timeSignatureNumerator &&
                 timeSignatureDenominator == other.timeSignatureDenominator &&
                 isSnapEnabled == other.isSnapEnabled &&
+                gridResolution == other.gridResolution &&
                 drumPatterns == other.drumPatterns &&
                 clipDragState == other.clipDragState &&
                 midiTracks == other.midiTracks &&
+                midiClipDragState == other.midiClipDragState &&
+                expandedClipState == other.expandedClipState &&
                 showInstrumentPickerForTrackId == other.showInstrumentPickerForTrackId
     }
 
@@ -177,9 +223,12 @@ data class StudioUiState(
         result = 31 * result + timeSignatureNumerator.hashCode()
         result = 31 * result + timeSignatureDenominator.hashCode()
         result = 31 * result + isSnapEnabled.hashCode()
+        result = 31 * result + gridResolution.hashCode()
         result = 31 * result + drumPatterns.hashCode()
         result = 31 * result + (clipDragState?.hashCode() ?: 0)
         result = 31 * result + midiTracks.hashCode()
+        result = 31 * result + (midiClipDragState?.hashCode() ?: 0)
+        result = 31 * result + (expandedClipState?.hashCode() ?: 0)
         result = 31 * result + (showInstrumentPickerForTrackId?.hashCode() ?: 0)
         return result
     }
@@ -265,9 +314,10 @@ sealed interface StudioAction {
     data object DismissDeleteTake : StudioAction
     data object ExecuteDeleteTake : StudioAction
 
-    // Time signature / Snap
+    // Time signature / Snap / Grid
     data class SetTimeSignature(val numerator: Int, val denominator: Int) : StudioAction
     data object ToggleSnap : StudioAction
+    data class SetGridResolution(val resolution: Int) : StudioAction
 
     // Drum sequencer
     data class ToggleDrumStep(
@@ -277,6 +327,12 @@ sealed interface StudioAction {
     ) : StudioAction
     data class SetBpm(val bpm: Double) : StudioAction
     data class SetPatternBars(val trackId: Long, val bars: Int) : StudioAction
+    data class SetPatternResolution(val trackId: Long, val resolution: Int) : StudioAction
+    data class SelectDrumClip(val trackId: Long, val clipIndex: Int) : StudioAction
+
+    // Clip creation
+    data class CreateDrumClip(val trackId: Long, val offsetMs: Long) : StudioAction
+    data class CreateMidiClip(val trackId: Long, val offsetMs: Long) : StudioAction
 
     // Drum clips
     data class DuplicateClip(val trackId: Long, val clipId: Long) : StudioAction
@@ -289,12 +345,33 @@ sealed interface StudioAction {
     data class FinishDragClip(val trackId: Long, val clipId: Long, val newOffsetMs: Long) : StudioAction
     data object CancelDragClip : StudioAction
 
-    // MIDI instrument tracks
-    data class OpenPianoRoll(val trackId: Long) : StudioAction
+    // Full-screen editors
+    data class OpenDrumEditor(val trackId: Long, val clipId: Long? = null) : StudioAction
+    data class OpenPianoRoll(val trackId: Long, val clipId: Long? = null) : StudioAction
     data class ShowInstrumentPicker(val trackId: Long) : StudioAction
     data object DismissInstrumentPicker : StudioAction
     data class SetMidiInstrument(val trackId: Long, val program: Int) : StudioAction
     data class PreviewInstrument(val program: Int) : StudioAction
+
+    // MIDI clips
+    data class DuplicateMidiClip(val trackId: Long, val clipId: Long) : StudioAction
+    data class MoveMidiClip(val trackId: Long, val clipId: Long, val newOffsetMs: Long) : StudioAction
+    data class DeleteMidiClip(val trackId: Long, val clipId: Long) : StudioAction
+    // Clip action panel (tap-to-expand)
+    data class TapClip(val trackId: Long, val clipId: Long, val clipType: String) : StudioAction
+    data object DismissClipPanel : StudioAction
+
+    data class StartDragMidiClip(val trackId: Long, val clipId: Long) : StudioAction
+    data class UpdateDragMidiClip(val previewOffsetMs: Long) : StudioAction
+    data class FinishDragMidiClip(val trackId: Long, val clipId: Long, val newOffsetMs: Long) : StudioAction
+    data object CancelDragMidiClip : StudioAction
+
+    // Inline MiniPianoRoll
+    data class SelectMidiClip(val trackId: Long, val clipId: Long) : StudioAction
+    data class InlinePlaceNote(val trackId: Long, val clipId: Long, val pitch: Int, val startMs: Long, val durationMs: Long) : StudioAction
+    data class InlineMoveNote(val trackId: Long, val noteId: Long, val newStartMs: Long, val newPitch: Int) : StudioAction
+    data class InlineResizeNote(val trackId: Long, val noteId: Long, val newDurationMs: Long) : StudioAction
+    data class InlineDeleteNote(val trackId: Long, val noteId: Long) : StudioAction
 }
 
 /** One-shot side effects emitted by [StudioViewModel]. */
@@ -302,7 +379,8 @@ sealed interface StudioEffect {
     data object NavigateBack : StudioEffect
     data class ShowError(val message: String) : StudioEffect
     data object RequestMicPermission : StudioEffect
-    data class NavigateToPianoRoll(val trackId: Long) : StudioEffect
+    data class NavigateToPianoRoll(val trackId: Long, val clipId: Long) : StudioEffect
+    data class NavigateToDrumEditor(val trackId: Long, val clipId: Long = 0L) : StudioEffect
 }
 
 /** Available track types for the "Add Track" bottom sheet. */

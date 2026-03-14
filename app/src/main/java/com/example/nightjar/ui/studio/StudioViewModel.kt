@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
 import kotlin.math.roundToLong
 import java.io.File
 import java.text.SimpleDateFormat
@@ -335,6 +336,7 @@ class StudioViewModel @Inject constructor(
             StudioAction.ToggleSnap -> {
                 _state.update { it.copy(isSnapEnabled = !it.isSnapEnabled) }
             }
+            is StudioAction.SetGridResolution -> setGridResolution(action.resolution)
 
             // Drum sequencer
             is StudioAction.ToggleDrumStep -> toggleDrumStep(
@@ -342,6 +344,12 @@ class StudioViewModel @Inject constructor(
             )
             is StudioAction.SetBpm -> setBpm(action.bpm)
             is StudioAction.SetPatternBars -> setPatternBars(action.trackId, action.bars)
+            is StudioAction.SetPatternResolution -> setPatternResolution(action.trackId, action.resolution)
+            is StudioAction.SelectDrumClip -> selectDrumClip(action.trackId, action.clipIndex)
+
+            // Clip creation
+            is StudioAction.CreateDrumClip -> createDrumClip(action.trackId, action.offsetMs)
+            is StudioAction.CreateMidiClip -> createMidiClip(action.trackId, action.offsetMs)
 
             // Drum clips
             is StudioAction.DuplicateClip -> duplicateClip(action.trackId, action.clipId)
@@ -354,12 +362,9 @@ class StudioViewModel @Inject constructor(
             is StudioAction.FinishDragClip -> finishDragClip(action.trackId, action.clipId, action.newOffsetMs)
             StudioAction.CancelDragClip -> cancelDragClip()
 
-            // MIDI instrument tracks
-            is StudioAction.OpenPianoRoll -> {
-                viewModelScope.launch {
-                    _effects.emit(StudioEffect.NavigateToPianoRoll(action.trackId))
-                }
-            }
+            // Full-screen editors
+            is StudioAction.OpenDrumEditor -> openDrumEditor(action.trackId, action.clipId)
+            is StudioAction.OpenPianoRoll -> openPianoRoll(action.trackId, action.clipId)
             is StudioAction.ShowInstrumentPicker -> {
                 _state.update { it.copy(showInstrumentPickerForTrackId = action.trackId) }
             }
@@ -368,6 +373,26 @@ class StudioViewModel @Inject constructor(
             }
             is StudioAction.SetMidiInstrument -> setMidiInstrument(action.trackId, action.program)
             is StudioAction.PreviewInstrument -> previewInstrument(action.program)
+
+            // MIDI clips
+            is StudioAction.DuplicateMidiClip -> duplicateMidiClip(action.trackId, action.clipId)
+            is StudioAction.MoveMidiClip -> moveMidiClip(action.trackId, action.clipId, action.newOffsetMs)
+            is StudioAction.DeleteMidiClip -> deleteMidiClip(action.trackId, action.clipId)
+            is StudioAction.StartDragMidiClip -> startDragMidiClip(action.trackId, action.clipId)
+            is StudioAction.UpdateDragMidiClip -> updateDragMidiClip(action.previewOffsetMs)
+            is StudioAction.FinishDragMidiClip -> finishDragMidiClip(action.trackId, action.clipId, action.newOffsetMs)
+            StudioAction.CancelDragMidiClip -> cancelDragMidiClip()
+
+            // Clip action panel
+            is StudioAction.TapClip -> tapClip(action.trackId, action.clipId, action.clipType)
+            StudioAction.DismissClipPanel -> dismissClipPanel()
+
+            // Inline MiniPianoRoll
+            is StudioAction.SelectMidiClip -> selectMidiClip(action.trackId, action.clipId)
+            is StudioAction.InlinePlaceNote -> inlinePlaceNote(action.trackId, action.clipId, action.pitch, action.startMs, action.durationMs)
+            is StudioAction.InlineMoveNote -> inlineMoveNote(action.trackId, action.noteId, action.newStartMs, action.newPitch)
+            is StudioAction.InlineResizeNote -> inlineResizeNote(action.trackId, action.noteId, action.newDurationMs)
+            is StudioAction.InlineDeleteNote -> inlineDeleteNote(action.trackId, action.noteId)
         }
     }
 
@@ -395,7 +420,8 @@ class StudioViewModel @Inject constructor(
                         errorMessage = null,
                         bpm = idea.bpm,
                         timeSignatureNumerator = idea.timeSignatureNumerator,
-                        timeSignatureDenominator = idea.timeSignatureDenominator
+                        timeSignatureDenominator = idea.timeSignatureDenominator,
+                        gridResolution = idea.gridResolution
                     )
                 }
 
@@ -944,11 +970,13 @@ class StudioViewModel @Inject constructor(
 
     // ── Snap helper ─────────────────────────────────────────────────────
 
-    /** Snap a ms value to the nearest beat if snap is enabled. */
+    /** Snap a ms value to the nearest grid step if snap is enabled. */
     private fun snapIfEnabled(ms: Long): Long {
         val st = _state.value
         if (!st.isSnapEnabled) return ms
-        return MusicalTimeConverter.snapToBeat(ms, st.bpm, st.timeSignatureDenominator)
+        return MusicalTimeConverter.snapToGrid(
+            ms, st.bpm, st.gridResolution, st.timeSignatureDenominator
+        )
     }
 
     // ── Drag-to-reposition ────────────────────────────────────────────────
@@ -1094,13 +1122,7 @@ class StudioViewModel @Inject constructor(
             } else if (track.isDrum) {
                 // Re-push pattern with updated mute state
                 val pattern = st.drumPatterns[track.id] ?: continue
-                pushDrumPatternToEngine(
-                    track.copy(isMuted = trackMuted),
-                    pattern.stepsPerBar,
-                    pattern.bars,
-                    pattern.steps,
-                    pattern.clips.map { it.offsetMs }
-                )
+                pushDrumClipsToEngine(track.copy(isMuted = trackMuted), pattern)
             }
         }
         // Re-push all MIDI tracks with effective mute state (bulk operation)
@@ -1116,11 +1138,7 @@ class StudioViewModel @Inject constructor(
             // Re-push pattern with updated volume
             val pattern = _state.value.drumPatterns[trackId]
             if (pattern != null) {
-                pushDrumPatternToEngine(
-                    track.copy(volume = clamped),
-                    pattern.stepsPerBar, pattern.bars, pattern.steps,
-                    pattern.clips.map { it.offsetMs }
-                )
+                pushDrumClipsToEngine(track.copy(volume = clamped), pattern)
             }
         } else {
             // Update native engine immediately for instant feedback
@@ -1265,16 +1283,26 @@ class StudioViewModel @Inject constructor(
                 if (!ensureSoundFontLoaded()) return@launch
 
                 val trackId = studioRepo.addDrumTrack(ideaId)
-                val pattern = drumRepo.ensurePatternExists(trackId)
-                val clips = drumRepo.ensureClipsExist(pattern.id)
-                val clipUiStates = clips.map { DrumClipUiState(clipId = it.id, offsetMs = it.offsetMs) }
+                val st = _state.value
+                // Always default to 1/16 resolution (industry standard)
+                val defaultRes = 16
+                val stepsPerBar = MusicalTimeConverter.stepsPerBar(
+                    defaultRes, st.timeSignatureNumerator, st.timeSignatureDenominator
+                )
+                val pattern = drumRepo.ensurePatternExists(trackId, stepsPerBar)
+                val clipEntities = drumRepo.ensureClipsExist(pattern.id)
+                val clipUiStates = clipEntities.map {
+                    DrumClipUiState(
+                        clipId = it.id, offsetMs = it.offsetMs,
+                        patternId = pattern.id,
+                        stepsPerBar = pattern.stepsPerBar,
+                        bars = pattern.bars
+                    )
+                }
 
                 _state.update {
                     it.copy(
                         drumPatterns = it.drumPatterns + (trackId to DrumPatternUiState(
-                            patternId = pattern.id,
-                            stepsPerBar = pattern.stepsPerBar,
-                            bars = pattern.bars,
                             clips = clipUiStates
                         ))
                     )
@@ -1293,7 +1321,8 @@ class StudioViewModel @Inject constructor(
 
     /**
      * Load drum patterns for all drum tracks. Called once during [load].
-     * Starts Flow observation for each pattern so step changes push to the engine.
+     * Loads per-clip pattern data and starts Flow observation for each track's
+     * selected clip so step changes push to the engine.
      */
     private suspend fun loadDrumPatterns(
         tracks: List<com.example.nightjar.data.db.entity.TrackEntity>
@@ -1305,87 +1334,117 @@ class StudioViewModel @Inject constructor(
 
         val patterns = mutableMapOf<Long, DrumPatternUiState>()
         for (track in drumTracks) {
-            val pattern = drumRepo.ensurePatternExists(track.id)
-            val steps = drumRepo.getSteps(pattern.id)
-            val clips = drumRepo.ensureClipsExist(pattern.id)
-            val clipUiStates = clips.map { DrumClipUiState(clipId = it.id, offsetMs = it.offsetMs) }
-            val clipOffsetsMs = clipUiStates.map { it.offsetMs }
+            // Load all clips for this track (across all patterns)
+            val clipEntities = drumRepo.getClipsForTrack(track.id)
+            val clipUiStates = if (clipEntities.isEmpty()) {
+                // Ensure at least one pattern + clip exists
+                val pattern = drumRepo.ensurePatternExists(track.id)
+                val clips = drumRepo.ensureClipsExist(pattern.id)
+                val steps = drumRepo.getSteps(pattern.id)
+                clips.map {
+                    DrumClipUiState(
+                        clipId = it.id, offsetMs = it.offsetMs,
+                        patternId = pattern.id,
+                        stepsPerBar = pattern.stepsPerBar,
+                        bars = pattern.bars, steps = steps
+                    )
+                }
+            } else {
+                // Load each clip with its own pattern and steps
+                clipEntities.map { clip ->
+                    val pat = drumRepo.getPatternById(clip.patternId)
+                    val steps = drumRepo.getSteps(clip.patternId)
+                    DrumClipUiState(
+                        clipId = clip.id, offsetMs = clip.offsetMs,
+                        patternId = clip.patternId,
+                        stepsPerBar = pat?.stepsPerBar ?: 16,
+                        bars = pat?.bars ?: 1, steps = steps
+                    )
+                }
+            }
 
-            patterns[track.id] = DrumPatternUiState(
-                patternId = pattern.id,
-                stepsPerBar = pattern.stepsPerBar,
-                bars = pattern.bars,
-                steps = steps,
-                clips = clipUiStates
-            )
-            pushDrumPatternToEngine(track, pattern.stepsPerBar, pattern.bars, steps, clipOffsetsMs)
-            observeDrumPattern(track.id, pattern.id)
+            val drumState = DrumPatternUiState(clips = clipUiStates)
+            patterns[track.id] = drumState
+            pushDrumClipsToEngine(track, drumState)
+            // Observe the first clip's pattern for step changes
+            if (clipUiStates.isNotEmpty()) {
+                observeDrumPattern(track.id, clipUiStates.first().patternId)
+            }
         }
 
         _state.update { it.copy(drumPatterns = it.drumPatterns + patterns) }
         audioEngine.setDrumSequencerEnabled(true)
     }
 
-    /** Start observing a drum pattern's steps via Flow. */
+    /** Start observing the selected clip's pattern steps via Flow. */
     private fun observeDrumPattern(trackId: Long, patternId: Long) {
         drumPatternJobs[trackId]?.cancel()
         drumPatternJobs[trackId] = viewModelScope.launch {
             drumRepo.observeSteps(patternId).collect { steps ->
-                val pattern = _state.value.drumPatterns[trackId] ?: return@collect
+                val drumState = _state.value.drumPatterns[trackId] ?: return@collect
+                val selectedIdx = drumState.selectedClipIndex
+                val updatedClips = drumState.clips.toMutableList()
+                if (selectedIdx in updatedClips.indices &&
+                    updatedClips[selectedIdx].patternId == patternId) {
+                    updatedClips[selectedIdx] = updatedClips[selectedIdx].copy(steps = steps)
+                }
                 _state.update {
                     it.copy(
-                        drumPatterns = it.drumPatterns + (trackId to pattern.copy(steps = steps))
+                        drumPatterns = it.drumPatterns + (trackId to drumState.copy(clips = updatedClips))
                     )
                 }
                 val track = _state.value.tracks.find { it.id == trackId } ?: return@collect
-                val clipOffsetsMs = pattern.clips.map { it.offsetMs }
-                pushDrumPatternToEngine(track, pattern.stepsPerBar, pattern.bars, steps, clipOffsetsMs)
+                pushDrumClipsToEngine(track, _state.value.drumPatterns[trackId]!!)
             }
         }
     }
 
-    /** Push drum pattern data to the C++ step sequencer. */
-    private fun pushDrumPatternToEngine(
+    /** Push per-clip drum pattern data to the C++ step sequencer. */
+    private fun pushDrumClipsToEngine(
         track: com.example.nightjar.data.db.entity.TrackEntity,
-        stepsPerBar: Int,
-        bars: Int,
-        steps: List<com.example.nightjar.data.db.entity.DrumStepEntity>,
-        clipOffsetsMs: List<Long> = emptyList()
+        drumState: DrumPatternUiState
     ) {
-        val stepIndices: IntArray
-        val drumNotes: IntArray
-        val velocities: FloatArray
+        val clips = drumState.clips
+        if (clips.isEmpty()) return
 
-        if (steps.isEmpty()) {
-            stepIndices = IntArray(0)
-            drumNotes = IntArray(0)
-            velocities = FloatArray(0)
-        } else {
-            stepIndices = IntArray(steps.size)
-            drumNotes = IntArray(steps.size)
-            velocities = FloatArray(steps.size)
-            for (i in steps.indices) {
-                stepIndices[i] = steps[i].stepIndex
-                drumNotes[i] = steps[i].drumNote
-                velocities[i] = steps[i].velocity
+        val clipStepsPerBar = IntArray(clips.size)
+        val clipBars = IntArray(clips.size)
+        val clipBeatsPerBar = IntArray(clips.size)
+        val clipOffsetsMs = LongArray(clips.size)
+        val clipHitCounts = IntArray(clips.size)
+
+        val allStepIndices = mutableListOf<Int>()
+        val allDrumNotes = mutableListOf<Int>()
+        val allVelocities = mutableListOf<Float>()
+
+        val beatsPerBar = _state.value.timeSignatureNumerator
+
+        for (i in clips.indices) {
+            val clip = clips[i]
+            clipStepsPerBar[i] = clip.stepsPerBar
+            clipBars[i] = clip.bars
+            clipBeatsPerBar[i] = beatsPerBar
+            clipOffsetsMs[i] = clip.offsetMs
+            clipHitCounts[i] = clip.steps.size
+
+            for (step in clip.steps) {
+                allStepIndices.add(step.stepIndex)
+                allDrumNotes.add(step.drumNote)
+                allVelocities.add(step.velocity)
             }
         }
 
-        audioEngine.updateDrumPattern(
-            stepsPerBar = stepsPerBar,
-            bars = bars,
-            offsetMs = track.offsetMs,
+        audioEngine.updateDrumPatternClips(
             volume = track.volume,
             muted = track.isMuted,
-            stepIndices = stepIndices,
-            drumNotes = drumNotes,
-            velocities = velocities,
-            clipOffsetsMs = if (clipOffsetsMs.isNotEmpty()) {
-                clipOffsetsMs.toLongArray()
-            } else {
-                LongArray(0)
-            },
-            beatsPerBar = _state.value.timeSignatureNumerator
+            clipStepsPerBar = clipStepsPerBar,
+            clipBars = clipBars,
+            clipBeatsPerBar = clipBeatsPerBar,
+            clipOffsetsMs = clipOffsetsMs,
+            clipHitCounts = clipHitCounts,
+            hitStepIndices = allStepIndices.toIntArray(),
+            hitDrumNotes = allDrumNotes.toIntArray(),
+            hitVelocities = allVelocities.toFloatArray()
         )
     }
 
@@ -1403,6 +1462,10 @@ class StudioViewModel @Inject constructor(
 
     /** Update project time signature on the idea and push to drum sequencer. */
     private fun setTimeSignature(numerator: Int, denominator: Int) {
+        val st = _state.value
+        val oldNum = st.timeSignatureNumerator
+        val oldDen = st.timeSignatureDenominator
+
         _state.update {
             it.copy(
                 timeSignatureNumerator = numerator,
@@ -1413,17 +1476,47 @@ class StudioViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 ideaRepo.updateTimeSignature(ideaId, numerator, denominator)
+
+                // Derive each pattern's conceptual resolution from its current stepsPerBar,
+                // then recalculate for the new time signature
+                val updatedPatterns = mutableMapOf<Long, DrumPatternUiState>()
+                for ((trackId, drumState) in st.drumPatterns) {
+                    val updatedClips = drumState.clips.map { clip ->
+                        val conceptualRes = if (oldNum > 0) {
+                            (clip.stepsPerBar * oldDen) / oldNum
+                        } else 16
+                        val newStepsPerBar = MusicalTimeConverter.stepsPerBar(
+                            conceptualRes, numerator, denominator
+                        )
+                        drumRepo.updatePatternGrid(clip.patternId, newStepsPerBar, clip.bars)
+                        clip.copy(stepsPerBar = newStepsPerBar)
+                    }
+                    updatedPatterns[trackId] = drumState.copy(clips = updatedClips)
+                }
+                _state.update { it.copy(drumPatterns = it.drumPatterns + updatedPatterns) }
+
                 // Re-push all drum patterns with new beatsPerBar
-                val st = _state.value
-                for ((trackId, pattern) in st.drumPatterns) {
-                    val track = st.tracks.find { it.id == trackId } ?: continue
-                    pushDrumPatternToEngine(
-                        track, pattern.stepsPerBar, pattern.bars,
-                        pattern.steps, pattern.clips.map { it.offsetMs }
-                    )
+                val latest = _state.value
+                for ((trackId, drumState) in latest.drumPatterns) {
+                    val track = latest.tracks.find { it.id == trackId } ?: continue
+                    pushDrumClipsToEngine(track, drumState)
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to persist time signature: ${e.message}")
+            }
+        }
+    }
+
+    /** Update project grid resolution (sub-beat density for snap). */
+    private fun setGridResolution(resolution: Int) {
+        val clamped = resolution.coerceIn(4, 32)
+        _state.update { it.copy(gridResolution = clamped) }
+        val ideaId = currentIdeaId ?: return
+        viewModelScope.launch {
+            try {
+                ideaRepo.updateGridResolution(ideaId, clamped)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to persist grid resolution: ${e.message}")
             }
         }
     }
@@ -1464,27 +1557,112 @@ class StudioViewModel @Inject constructor(
         }
     }
 
-    /** Change the number of bars for a drum pattern. */
+    /** Change the number of bars for the selected clip's pattern. */
     private fun setPatternBars(trackId: Long, bars: Int) {
         val clamped = bars.coerceIn(1, 8)
-        val patternState = _state.value.drumPatterns[trackId] ?: return
+        val drumState = _state.value.drumPatterns[trackId] ?: return
+        val selectedClip = drumState.selectedClip ?: return
         viewModelScope.launch {
             try {
-                drumRepo.updatePatternGrid(patternState.patternId, patternState.stepsPerBar, clamped)
+                drumRepo.updatePatternGrid(selectedClip.patternId, selectedClip.stepsPerBar, clamped)
                 // Update local state immediately
+                val updatedClips = drumState.clips.toMutableList()
+                val idx = drumState.selectedClipIndex
+                if (idx in updatedClips.indices) {
+                    updatedClips[idx] = updatedClips[idx].copy(bars = clamped)
+                }
                 _state.update {
                     it.copy(
-                        drumPatterns = it.drumPatterns + (trackId to patternState.copy(bars = clamped))
+                        drumPatterns = it.drumPatterns + (trackId to drumState.copy(clips = updatedClips))
                     )
                 }
                 // Re-push to engine with new bar count
                 val track = _state.value.tracks.find { it.id == trackId } ?: return@launch
-                val updatedPattern = _state.value.drumPatterns[trackId]
-                val steps = updatedPattern?.steps ?: emptyList()
-                val clipOffsetsMs = updatedPattern?.clips?.map { it.offsetMs } ?: emptyList()
-                pushDrumPatternToEngine(track, patternState.stepsPerBar, clamped, steps, clipOffsetsMs)
+                pushDrumClipsToEngine(track, _state.value.drumPatterns[trackId]!!)
             } catch (e: Exception) {
                 _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to update bar count."))
+            }
+        }
+    }
+
+    /** Change the resolution (note subdivision) for the selected clip's pattern. */
+    private fun setPatternResolution(trackId: Long, resolution: Int) {
+        val st = _state.value
+        val drumState = st.drumPatterns[trackId] ?: return
+        val selectedClip = drumState.selectedClip ?: return
+        val oldStepsPerBar = selectedClip.stepsPerBar
+        val newStepsPerBar = MusicalTimeConverter.stepsPerBar(
+            resolution, st.timeSignatureNumerator, st.timeSignatureDenominator
+        )
+        if (newStepsPerBar == oldStepsPerBar) return
+
+        viewModelScope.launch {
+            try {
+                drumRepo.remapPatternResolution(
+                    selectedClip.patternId, oldStepsPerBar, newStepsPerBar, selectedClip.bars
+                )
+                // Update UI state
+                val updatedClips = drumState.clips.toMutableList()
+                val idx = drumState.selectedClipIndex
+                if (idx in updatedClips.indices) {
+                    updatedClips[idx] = updatedClips[idx].copy(stepsPerBar = newStepsPerBar)
+                }
+                _state.update {
+                    it.copy(
+                        drumPatterns = it.drumPatterns + (trackId to drumState.copy(clips = updatedClips))
+                    )
+                }
+                // Re-push to engine
+                val track = _state.value.tracks.find { it.id == trackId } ?: return@launch
+                pushDrumClipsToEngine(track, _state.value.drumPatterns[trackId]!!)
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to change resolution."))
+            }
+        }
+    }
+
+    /** Switch the selected drum clip for a track and re-observe its pattern. */
+    private fun selectDrumClip(trackId: Long, clipIndex: Int) {
+        val drumState = _state.value.drumPatterns[trackId] ?: return
+        val clamped = clipIndex.coerceIn(0, (drumState.clips.size - 1).coerceAtLeast(0))
+        _state.update {
+            it.copy(
+                drumPatterns = it.drumPatterns + (trackId to drumState.copy(selectedClipIndex = clamped))
+            )
+        }
+        val selectedClip = drumState.clips.getOrNull(clamped) ?: return
+        observeDrumPattern(trackId, selectedClip.patternId)
+    }
+
+    // ── Clip creation ────────────────────────────────────────────────────
+
+    private fun createDrumClip(trackId: Long, offsetMs: Long) {
+        viewModelScope.launch {
+            try {
+                val snapped = snapIfEnabled(offsetMs).coerceAtLeast(0L)
+                drumRepo.createEmptyClip(trackId, snapped)
+                reloadClipsForTrack(trackId)
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to create clip"))
+            }
+        }
+    }
+
+    private fun createMidiClip(trackId: Long, offsetMs: Long) {
+        viewModelScope.launch {
+            try {
+                val snapped = snapIfEnabled(offsetMs).coerceAtLeast(0L)
+                midiRepo.insertClip(
+                    com.example.nightjar.data.db.entity.MidiClipEntity(
+                        trackId = trackId,
+                        offsetMs = snapped,
+                        sortIndex = (_state.value.midiTracks[trackId]?.clips?.size ?: 0)
+                    )
+                )
+                midiRepo.recomputeTrackDuration(trackId)
+                reloadMidiTrackState(trackId)
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to create clip"))
             }
         }
     }
@@ -1494,13 +1672,14 @@ class StudioViewModel @Inject constructor(
     private fun duplicateClip(trackId: Long, clipId: Long) {
         viewModelScope.launch {
             try {
-                val patternState = _state.value.drumPatterns[trackId]
+                val drumState = _state.value.drumPatterns[trackId]
+                val clip = drumState?.clips?.find { it.clipId == clipId }
                 val st = _state.value
-                val bars = patternState?.bars ?: 1
+                val bars = clip?.bars ?: 1
                 val patternDurationMs = com.example.nightjar.audio.MusicalTimeConverter
                     .msPerMeasure(st.bpm, st.timeSignatureNumerator, st.timeSignatureDenominator)
                     .toLong() * bars
-                drumRepo.duplicateClip(clipId, patternDurationMs)
+                drumRepo.duplicateClipWithPattern(clipId, patternDurationMs)
                 reloadClipsForTrack(trackId)
             } catch (e: Exception) {
                 _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to duplicate clip."))
@@ -1545,37 +1724,108 @@ class StudioViewModel @Inject constructor(
         _state.update { st ->
             st.clipDragState?.let { drag ->
                 val snapped = snapIfEnabled(previewOffsetMs).coerceAtLeast(0L)
-                st.copy(clipDragState = drag.copy(previewOffsetMs = snapped))
+                val drumState = st.drumPatterns[drag.trackId]
+                val clamped = if (drumState != null) {
+                    val clip = drumState.clips.find { it.clipId == drag.clipId }
+                    val clipDurationMs = MusicalTimeConverter
+                        .msPerMeasure(st.bpm, st.timeSignatureNumerator, st.timeSignatureDenominator)
+                        .toLong() * (clip?.bars ?: 1)
+                    val siblings = drumState.clips
+                        .filter { it.clipId != drag.clipId }
+                        .map { sib ->
+                            val sibDur = MusicalTimeConverter
+                                .msPerMeasure(st.bpm, st.timeSignatureNumerator, st.timeSignatureDenominator)
+                                .toLong() * sib.bars
+                            sib.offsetMs to sib.offsetMs + sibDur
+                        }
+                    clampToNoOverlap(drag.clipId, snapped, clipDurationMs, siblings)
+                } else snapped
+                st.copy(clipDragState = drag.copy(previewOffsetMs = clamped))
             } ?: st
         }
     }
 
     private fun finishDragClip(trackId: Long, clipId: Long, newOffsetMs: Long) {
+        val st = _state.value
+        val drumState = st.drumPatterns[trackId]
+        val finalOffset = if (drumState != null) {
+            val snapped = snapIfEnabled(newOffsetMs).coerceAtLeast(0L)
+            val clip = drumState.clips.find { it.clipId == clipId }
+            val clipDurationMs = MusicalTimeConverter
+                .msPerMeasure(st.bpm, st.timeSignatureNumerator, st.timeSignatureDenominator)
+                .toLong() * (clip?.bars ?: 1)
+            val siblings = drumState.clips
+                .filter { it.clipId != clipId }
+                .map { sib ->
+                    val sibDur = MusicalTimeConverter
+                        .msPerMeasure(st.bpm, st.timeSignatureNumerator, st.timeSignatureDenominator)
+                        .toLong() * sib.bars
+                    sib.offsetMs to sib.offsetMs + sibDur
+                }
+            clampToNoOverlap(clipId, snapped, clipDurationMs, siblings)
+        } else newOffsetMs
         _state.update { it.copy(clipDragState = null) }
-        moveClip(trackId, clipId, newOffsetMs)
+        moveClip(trackId, clipId, finalOffset)
     }
 
     private fun cancelDragClip() {
         _state.update { it.copy(clipDragState = null) }
     }
 
-    /** Reload clips for a drum track and re-push pattern to engine. */
-    private suspend fun reloadClipsForTrack(trackId: Long) {
-        val patternState = _state.value.drumPatterns[trackId] ?: return
-        val clips = drumRepo.getClips(patternState.patternId)
-        val clipUiStates = clips.map { DrumClipUiState(clipId = it.id, offsetMs = it.offsetMs) }
+    /**
+     * Clamp a proposed offset so the dragged clip never overlaps its siblings.
+     * Snaps to the nearest gap edge when an overlap would occur.
+     */
+    private fun clampToNoOverlap(
+        draggedClipId: Long,
+        proposedOffsetMs: Long,
+        draggedDurationMs: Long,
+        siblingBounds: List<Pair<Long, Long>>
+    ): Long {
+        var clamped = proposedOffsetMs.coerceAtLeast(0L)
+        val draggedEnd = clamped + draggedDurationMs
+        for ((sibStart, sibEnd) in siblingBounds.sortedBy { it.first }) {
+            if (clamped < sibEnd && draggedEnd > sibStart) {
+                val snapBefore = sibStart - draggedDurationMs
+                val snapAfter = sibEnd
+                clamped = if (abs(clamped - snapBefore) < abs(clamped - snapAfter))
+                    snapBefore.coerceAtLeast(0L) else snapAfter
+            }
+        }
+        return clamped
+    }
 
-        _state.update {
-            it.copy(
-                drumPatterns = it.drumPatterns + (trackId to patternState.copy(clips = clipUiStates))
+    /** Reload all clips for a drum track (per-clip pattern data) and re-push to engine. */
+    private suspend fun reloadClipsForTrack(trackId: Long) {
+        val clipEntities = drumRepo.getClipsForTrack(trackId)
+        val clipUiStates = clipEntities.map { clip ->
+            val pat = drumRepo.getPatternById(clip.patternId)
+            val steps = drumRepo.getSteps(clip.patternId)
+            DrumClipUiState(
+                clipId = clip.id, offsetMs = clip.offsetMs,
+                patternId = clip.patternId,
+                stepsPerBar = pat?.stepsPerBar ?: 16,
+                bars = pat?.bars ?: 1, steps = steps
             )
         }
 
-        // Re-push to engine with updated clip offsets
+        val oldState = _state.value.drumPatterns[trackId]
+        val selectedIdx = (oldState?.selectedClipIndex ?: 0)
+            .coerceIn(0, (clipUiStates.size - 1).coerceAtLeast(0))
+
+        val newDrumState = DrumPatternUiState(clips = clipUiStates, selectedClipIndex = selectedIdx)
+        _state.update {
+            it.copy(drumPatterns = it.drumPatterns + (trackId to newDrumState))
+        }
+
+        // Re-observe the selected clip's pattern
+        if (clipUiStates.isNotEmpty()) {
+            observeDrumPattern(trackId, clipUiStates[selectedIdx].patternId)
+        }
+
+        // Re-push to engine
         val track = _state.value.tracks.find { it.id == trackId } ?: return
-        val steps = patternState.steps
-        pushDrumPatternToEngine(track, patternState.stepsPerBar, patternState.bars, steps,
-            clipUiStates.map { it.offsetMs })
+        pushDrumClipsToEngine(track, newDrumState)
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────
@@ -1591,6 +1841,8 @@ class StudioViewModel @Inject constructor(
 
                 val channel = midiRepo.nextAvailableChannel(ideaId)
                 val trackId = studioRepo.addMidiTrack(ideaId, channel, 0)
+                // Create a default clip at offset 0 for the new track
+                midiRepo.ensureClipExists(trackId)
 
                 _state.update {
                     it.copy(
@@ -1613,7 +1865,7 @@ class StudioViewModel @Inject constructor(
     }
 
     /**
-     * Load MIDI note data for all MIDI tracks. Called once during [load].
+     * Load MIDI clip and note data for all MIDI tracks. Called once during [load].
      * Starts Flow observation for each track so note changes push to the engine.
      */
     private suspend fun loadMidiTracks(
@@ -1626,12 +1878,7 @@ class StudioViewModel @Inject constructor(
 
         val midiTrackStates = mutableMapOf<Long, MidiTrackUiState>()
         for (track in midiTracks) {
-            val notes = midiRepo.getNotesForTrack(track.id)
-            midiTrackStates[track.id] = MidiTrackUiState(
-                notes = notes,
-                midiProgram = track.midiProgram,
-                instrumentName = gmInstrumentName(track.midiProgram)
-            )
+            midiTrackStates[track.id] = buildMidiTrackUiState(track)
             observeMidiNotes(track.id)
         }
 
@@ -1640,15 +1887,40 @@ class StudioViewModel @Inject constructor(
         audioEngine.setMidiSequencerEnabled(true)
     }
 
-    /** Start observing MIDI notes for a track via Flow. */
+    /** Build a full MidiTrackUiState from DB data. */
+    private suspend fun buildMidiTrackUiState(
+        track: com.example.nightjar.data.db.entity.TrackEntity
+    ): MidiTrackUiState {
+        val clips = midiRepo.getClipsForTrack(track.id)
+        val clipStates = clips.map { clip ->
+            MidiClipUiState(
+                clipId = clip.id,
+                offsetMs = clip.offsetMs,
+                notes = midiRepo.getNotesForClip(clip.id)
+            )
+        }
+        val allNotes = clipStates.flatMap { it.notes }
+        return MidiTrackUiState(
+            notes = allNotes,
+            clips = clipStates,
+            midiProgram = track.midiProgram,
+            instrumentName = gmInstrumentName(track.midiProgram)
+        )
+    }
+
+    /** Start observing MIDI notes for a track via Flow. Rebuilds clip state on change. */
     private fun observeMidiNotes(trackId: Long) {
         midiNoteJobs[trackId]?.cancel()
         midiNoteJobs[trackId] = viewModelScope.launch {
-            midiRepo.observeNotes(trackId).collect { notes ->
+            midiRepo.observeNotes(trackId).collect {
+                // Rebuild the full track state including clips, preserving selectedClipId
+                val track = _state.value.tracks.find { t -> t.id == trackId } ?: return@collect
+                val existing = _state.value.midiTracks[trackId]
+                val updatedState = buildMidiTrackUiState(track)
+                    .copy(selectedClipId = existing?.selectedClipId)
                 _state.update { st ->
-                    val existing = st.midiTracks[trackId] ?: MidiTrackUiState()
                     st.copy(
-                        midiTracks = st.midiTracks + (trackId to existing.copy(notes = notes))
+                        midiTracks = st.midiTracks + (trackId to updatedState)
                     )
                 }
                 pushAllMidiToEngine()
@@ -1656,15 +1928,28 @@ class StudioViewModel @Inject constructor(
         }
     }
 
+    /** Reload MIDI clip data for a single track (after clip operations). */
+    private fun reloadMidiTrackState(trackId: Long) {
+        viewModelScope.launch {
+            val track = _state.value.tracks.find { it.id == trackId } ?: return@launch
+            val existing = _state.value.midiTracks[trackId]
+            val updatedState = buildMidiTrackUiState(track)
+                .copy(selectedClipId = existing?.selectedClipId)
+            _state.update { st ->
+                st.copy(midiTracks = st.midiTracks + (trackId to updatedState))
+            }
+            pushAllMidiToEngine()
+        }
+    }
+
     /**
      * Convert all MIDI tracks to flat arrays and push to the C++ engine.
-     * Called whenever notes change or tracks are added/removed.
+     * Applies clip offsets so notes play at their absolute timeline positions.
      */
     private fun pushAllMidiToEngine() {
         val st = _state.value
         val midiTrackEntries = st.tracks.filter { it.isMidi }
         if (midiTrackEntries.isEmpty()) {
-            // Push empty to clear
             audioEngine.updateMidiTracks(
                 IntArray(0), IntArray(0), FloatArray(0), BooleanArray(0), IntArray(0),
                 LongArray(0), IntArray(0), IntArray(0), IntArray(0)
@@ -1680,7 +1965,6 @@ class StudioViewModel @Inject constructor(
         val trackEventCounts = IntArray(trackCount)
         val anySoloed = st.soloedTrackIds.isNotEmpty()
 
-        // Collect all events across all tracks
         val allFrames = mutableListOf<Long>()
         val allChannels = mutableListOf<Int>()
         val allNotes = mutableListOf<Int>()
@@ -1689,7 +1973,6 @@ class StudioViewModel @Inject constructor(
         for (i in midiTrackEntries.indices) {
             val track = midiTrackEntries[i]
             val midiState = st.midiTracks[track.id]
-            val notes = midiState?.notes ?: emptyList()
 
             channels[i] = track.midiChannel
             programs[i] = track.midiProgram
@@ -1697,8 +1980,11 @@ class StudioViewModel @Inject constructor(
             muted[i] = track.isMuted ||
                 (anySoloed && track.id !in st.soloedTrackIds)
 
-            // Generate noteOn/noteOff event pairs from notes, sorted by frame
-            val events = generateMidiEvents(notes, track.midiChannel)
+            // Generate events from clips with absolute positions
+            val events = generateMidiEventsFromClips(
+                midiState?.clips ?: emptyList(),
+                track.midiChannel
+            )
             trackEventCounts[i] = events.size
 
             for (event in events) {
@@ -1723,27 +2009,33 @@ class StudioViewModel @Inject constructor(
     }
 
     /**
-     * Generate sorted noteOn/noteOff event pairs from MIDI note entities.
-     * Each note produces two events: noteOn at startMs, noteOff at startMs + durationMs.
+     * Generate sorted noteOn/noteOff event pairs from MIDI clips.
+     * Applies clip offsets to convert clip-relative positions to absolute timeline positions.
      */
-    private fun generateMidiEvents(
-        notes: List<MidiNoteEntity>,
+    private fun generateMidiEventsFromClips(
+        clips: List<MidiClipUiState>,
         channel: Int
     ): List<MidiEventFlat> {
         val events = mutableListOf<MidiEventFlat>()
         val sampleRate = 44100L
 
-        for (note in notes) {
-            val startFrame = (note.startMs * sampleRate) / 1000
-            val endFrame = ((note.startMs + note.durationMs) * sampleRate) / 1000
-            val velocity = (note.velocity * 127).toInt().coerceIn(1, 127)
+        for (clip in clips) {
+            for (note in clip.notes) {
+                val absoluteStartMs = clip.offsetMs + note.startMs
+                val absoluteEndMs = absoluteStartMs + note.durationMs
+                val startFrame = (absoluteStartMs * sampleRate) / 1000
+                val endFrame = (absoluteEndMs * sampleRate) / 1000
+                val velocity = (note.velocity * 127).toInt().coerceIn(1, 127)
 
-            events.add(MidiEventFlat(startFrame, channel, note.pitch, velocity))
-            events.add(MidiEventFlat(endFrame, channel, note.pitch, 0))
+                events.add(MidiEventFlat(startFrame, channel, note.pitch, velocity))
+                events.add(MidiEventFlat(endFrame, channel, note.pitch, 0))
+            }
         }
 
-        // Sort by frame position, noteOff before noteOn at same position
-        events.sortWith(compareBy<MidiEventFlat> { it.framePos }.thenBy { if (it.velocity == 0) 0 else 1 })
+        events.sortWith(
+            compareBy<MidiEventFlat> { it.framePos }
+                .thenBy { if (it.velocity == 0) 0 else 1 }
+        )
         return events
     }
 
@@ -1787,6 +2079,215 @@ class StudioViewModel @Inject constructor(
             delay(300L)
             audioEngine.synthNoteOff(previewChannel, 60)
         }
+    }
+
+    /** Open full-screen drum editor for a drum track. */
+    private fun openDrumEditor(trackId: Long, clipId: Long? = null) {
+        viewModelScope.launch {
+            _effects.emit(StudioEffect.NavigateToDrumEditor(trackId, clipId ?: 0L))
+        }
+    }
+
+    /** Open piano roll for a track, optionally targeting a specific clip. */
+    private fun openPianoRoll(trackId: Long, clipId: Long?) {
+        viewModelScope.launch {
+            // If no clip specified, use the first clip for the track
+            val resolvedClipId = clipId ?: run {
+                val clips = midiRepo.ensureClipExists(trackId)
+                clips.first().id
+            }
+            _effects.emit(StudioEffect.NavigateToPianoRoll(trackId, resolvedClipId))
+        }
+    }
+
+    // ── MIDI clip operations ──────────────────────────────────────────────
+
+    private fun duplicateMidiClip(trackId: Long, clipId: Long) {
+        viewModelScope.launch {
+            try {
+                val clip = midiRepo.getClipById(clipId) ?: return@launch
+                val clips = _state.value.midiTracks[trackId]?.clips ?: return@launch
+                val clipState = clips.find { it.clipId == clipId } ?: return@launch
+                val durationMs = clipState.contentDurationMs.coerceAtLeast(
+                    MusicalTimeConverter.msPerMeasure(
+                        _state.value.bpm,
+                        _state.value.timeSignatureNumerator,
+                        _state.value.timeSignatureDenominator
+                    ).toLong()
+                )
+                midiRepo.duplicateClip(clipId, durationMs)
+                midiRepo.recomputeTrackDuration(trackId)
+                reloadMidiTrackState(trackId)
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError("Failed to duplicate clip"))
+            }
+        }
+    }
+
+    private fun moveMidiClip(trackId: Long, clipId: Long, newOffsetMs: Long) {
+        viewModelScope.launch {
+            try {
+                val snapped = snapIfEnabled(newOffsetMs).coerceAtLeast(0L)
+                midiRepo.moveClip(clipId, snapped)
+                midiRepo.recomputeTrackDuration(trackId)
+                reloadMidiTrackState(trackId)
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError("Failed to move clip"))
+            }
+        }
+    }
+
+    private fun deleteMidiClip(trackId: Long, clipId: Long) {
+        viewModelScope.launch {
+            try {
+                midiRepo.deleteClip(clipId)
+                // Auto-create a new empty clip if that was the last one
+                midiRepo.ensureClipExists(trackId)
+                midiRepo.recomputeTrackDuration(trackId)
+                reloadMidiTrackState(trackId)
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError("Failed to delete clip"))
+            }
+        }
+    }
+
+    private fun startDragMidiClip(trackId: Long, clipId: Long) {
+        val midiState = _state.value.midiTracks[trackId] ?: return
+        val clip = midiState.clips.find { it.clipId == clipId } ?: return
+        _state.update {
+            it.copy(
+                midiClipDragState = MidiClipDragState(
+                    trackId = trackId,
+                    clipId = clipId,
+                    originalOffsetMs = clip.offsetMs,
+                    previewOffsetMs = clip.offsetMs
+                )
+            )
+        }
+    }
+
+    private fun updateDragMidiClip(previewOffsetMs: Long) {
+        _state.update { st ->
+            val ds = st.midiClipDragState ?: return@update st
+            val snapped = snapIfEnabled(previewOffsetMs).coerceAtLeast(0L)
+            val midiState = st.midiTracks[ds.trackId]
+            val measureMs = MusicalTimeConverter
+                .msPerMeasure(st.bpm, st.timeSignatureNumerator, st.timeSignatureDenominator).toLong()
+            val clamped = if (midiState != null) {
+                val clip = midiState.clips.find { it.clipId == ds.clipId }
+                val clipDurationMs = clip?.contentDurationMs?.coerceAtLeast(measureMs) ?: measureMs
+                val siblings = midiState.clips
+                    .filter { it.clipId != ds.clipId }
+                    .map { sib ->
+                        val sibDur = sib.contentDurationMs.coerceAtLeast(measureMs)
+                        sib.offsetMs to sib.offsetMs + sibDur
+                    }
+                clampToNoOverlap(ds.clipId, snapped, clipDurationMs, siblings)
+            } else snapped
+            st.copy(midiClipDragState = ds.copy(previewOffsetMs = clamped))
+        }
+    }
+
+    private fun finishDragMidiClip(trackId: Long, clipId: Long, newOffsetMs: Long) {
+        val st = _state.value
+        val midiState = st.midiTracks[trackId]
+        val measureMs = MusicalTimeConverter
+            .msPerMeasure(st.bpm, st.timeSignatureNumerator, st.timeSignatureDenominator).toLong()
+        val finalOffset = if (midiState != null) {
+            val snapped = snapIfEnabled(newOffsetMs).coerceAtLeast(0L)
+            val clip = midiState.clips.find { it.clipId == clipId }
+            val clipDurationMs = clip?.contentDurationMs?.coerceAtLeast(measureMs) ?: measureMs
+            val siblings = midiState.clips
+                .filter { it.clipId != clipId }
+                .map { sib ->
+                    val sibDur = sib.contentDurationMs.coerceAtLeast(measureMs)
+                    sib.offsetMs to sib.offsetMs + sibDur
+                }
+            clampToNoOverlap(clipId, snapped, clipDurationMs, siblings)
+        } else newOffsetMs
+        _state.update { it.copy(midiClipDragState = null) }
+        moveMidiClip(trackId, clipId, finalOffset)
+    }
+
+    private fun cancelDragMidiClip() {
+        _state.update { it.copy(midiClipDragState = null) }
+    }
+
+    // ── Clip action panel ─────────────────────────────────────────────────
+
+    private fun tapClip(trackId: Long, clipId: Long, clipType: String) {
+        val current = _state.value.expandedClipState
+        // Toggle: tap same clip dismisses, tap different clip opens it
+        if (current != null && current.trackId == trackId && current.clipId == clipId) {
+            _state.update { it.copy(expandedClipState = null) }
+        } else {
+            _state.update {
+                it.copy(expandedClipState = ExpandedClipState(trackId, clipId, clipType))
+            }
+        }
+
+        // Auto-select drum clip for the drawer's pattern editor
+        if (clipType == "drum") {
+            val drumState = _state.value.drumPatterns[trackId] ?: return
+            val clipIndex = drumState.clips.indexOfFirst { it.clipId == clipId }
+            if (clipIndex >= 0 && clipIndex != drumState.selectedClipIndex) {
+                selectDrumClip(trackId, clipIndex)
+            }
+        }
+
+        // Auto-select MIDI clip for the drawer's inline piano roll
+        if (clipType == "midi") {
+            selectMidiClip(trackId, clipId)
+        }
+    }
+
+    private fun selectMidiClip(trackId: Long, clipId: Long) {
+        _state.update { st ->
+            val current = st.midiTracks[trackId] ?: return@update st
+            st.copy(midiTracks = st.midiTracks + (trackId to current.copy(selectedClipId = clipId)))
+        }
+    }
+
+    private fun inlinePlaceNote(trackId: Long, clipId: Long, pitch: Int, startMs: Long, durationMs: Long) {
+        viewModelScope.launch {
+            midiRepo.addNote(clipId, trackId, pitch, startMs, durationMs)
+            midiRepo.recomputeTrackDuration(trackId)
+        }
+    }
+
+    private fun inlineMoveNote(trackId: Long, noteId: Long, newStartMs: Long, newPitch: Int) {
+        viewModelScope.launch {
+            midiRepo.updateNotePitch(noteId, newPitch.coerceIn(0, 127))
+            val note = _state.value.midiTracks.values
+                .flatMap { it.clips }
+                .flatMap { it.notes }
+                .find { it.id == noteId }
+            val duration = note?.durationMs ?: 250L
+            midiRepo.updateNoteTiming(noteId, newStartMs.coerceAtLeast(0), duration)
+            midiRepo.recomputeTrackDuration(trackId)
+        }
+    }
+
+    private fun inlineResizeNote(trackId: Long, noteId: Long, newDurationMs: Long) {
+        viewModelScope.launch {
+            val note = _state.value.midiTracks.values
+                .flatMap { it.clips }
+                .flatMap { it.notes }
+                .find { it.id == noteId } ?: return@launch
+            midiRepo.updateNoteTiming(noteId, note.startMs, newDurationMs.coerceAtLeast(50))
+            midiRepo.recomputeTrackDuration(trackId)
+        }
+    }
+
+    private fun inlineDeleteNote(trackId: Long, noteId: Long) {
+        viewModelScope.launch {
+            midiRepo.deleteNote(noteId)
+            midiRepo.recomputeTrackDuration(trackId)
+        }
+    }
+
+    private fun dismissClipPanel() {
+        _state.update { it.copy(expandedClipState = null) }
     }
 
     private suspend fun reloadAndPrepare() {

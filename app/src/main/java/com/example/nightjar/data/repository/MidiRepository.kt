@@ -1,30 +1,101 @@
 package com.example.nightjar.data.repository
 
+import com.example.nightjar.data.db.dao.MidiClipDao
 import com.example.nightjar.data.db.dao.MidiNoteDao
 import com.example.nightjar.data.db.dao.TrackDao
+import com.example.nightjar.data.db.entity.MidiClipEntity
 import com.example.nightjar.data.db.entity.MidiNoteEntity
 import kotlinx.coroutines.flow.Flow
 
 /**
- * Repository for MIDI note CRUD and instrument configuration.
+ * Repository for MIDI clip and note CRUD, and instrument configuration.
  *
- * Each MIDI track stores its notes as [MidiNoteEntity] rows.
+ * Each MIDI track has one or more [MidiClipEntity] clips. Notes within
+ * a clip use positions relative to the clip start (0ms = clip beginning).
  * Instrument selection (program/channel) lives on [TrackEntity].
  */
 class MidiRepository(
+    private val midiClipDao: MidiClipDao,
     private val midiNoteDao: MidiNoteDao,
     private val trackDao: TrackDao
 ) {
 
-    // -- Notes --
+    // -- Clips --
 
-    suspend fun getNotesForTrack(trackId: Long): List<MidiNoteEntity> =
-        midiNoteDao.getNotesForTrack(trackId)
+    suspend fun getClipsForTrack(trackId: Long): List<MidiClipEntity> =
+        midiClipDao.getClipsForTrack(trackId)
 
-    fun observeNotes(trackId: Long): Flow<List<MidiNoteEntity>> =
-        midiNoteDao.observeNotesForTrack(trackId)
+    fun observeClipsForTrack(trackId: Long): Flow<List<MidiClipEntity>> =
+        midiClipDao.observeClipsForTrack(trackId)
 
+    suspend fun getClipById(clipId: Long): MidiClipEntity? =
+        midiClipDao.getClipById(clipId)
+
+    /**
+     * Ensure a MIDI track has at least one clip. Creates a default clip
+     * at offset 0 if none exist. Returns all clips for the track.
+     */
+    suspend fun ensureClipExists(trackId: Long): List<MidiClipEntity> {
+        val existing = midiClipDao.getClipsForTrack(trackId)
+        if (existing.isNotEmpty()) return existing
+
+        midiClipDao.insertClip(
+            MidiClipEntity(trackId = trackId, offsetMs = 0L, sortIndex = 0)
+        )
+        return midiClipDao.getClipsForTrack(trackId)
+    }
+
+    /**
+     * Duplicate a clip and all its notes. The new clip is placed immediately
+     * after the source clip. [clipDurationMs] determines the offset gap.
+     */
+    suspend fun duplicateClip(clipId: Long, clipDurationMs: Long): MidiClipEntity? {
+        val source = midiClipDao.getClipById(clipId) ?: return null
+        val maxSort = midiClipDao.getMaxSortIndex(source.trackId) ?: 0
+        val newOffset = source.offsetMs + clipDurationMs
+
+        val newClipId = midiClipDao.insertClip(
+            MidiClipEntity(
+                trackId = source.trackId,
+                offsetMs = newOffset,
+                sortIndex = maxSort + 1
+            )
+        )
+
+        // Copy all notes to the new clip (same relative positions)
+        val notes = midiNoteDao.getNotesForClip(clipId)
+        for (note in notes) {
+            midiNoteDao.insertNote(
+                note.copy(id = 0L, clipId = newClipId)
+            )
+        }
+
+        return midiClipDao.getClipById(newClipId)
+    }
+
+    suspend fun moveClip(clipId: Long, newOffsetMs: Long) {
+        midiClipDao.updateClipOffset(clipId, newOffsetMs)
+    }
+
+    suspend fun deleteClip(clipId: Long) {
+        // Notes cascade-delete via FK
+        midiClipDao.deleteClip(clipId)
+    }
+
+    suspend fun insertClip(clip: MidiClipEntity): Long =
+        midiClipDao.insertClip(clip)
+
+    // -- Notes (clip-scoped) --
+
+    suspend fun getNotesForClip(clipId: Long): List<MidiNoteEntity> =
+        midiNoteDao.getNotesForClip(clipId)
+
+    fun observeNotesForClip(clipId: Long): Flow<List<MidiNoteEntity>> =
+        midiNoteDao.observeNotesForClip(clipId)
+
+    /** Add a note to a specific clip. [startMs] is relative to clip start. */
     suspend fun addNote(
+        clipId: Long,
         trackId: Long,
         pitch: Int,
         startMs: Long,
@@ -34,6 +105,7 @@ class MidiRepository(
         return midiNoteDao.insertNote(
             MidiNoteEntity(
                 trackId = trackId,
+                clipId = clipId,
                 pitch = pitch,
                 startMs = startMs,
                 durationMs = durationMs,
@@ -41,6 +113,14 @@ class MidiRepository(
             )
         )
     }
+
+    // -- Notes (track-scoped, for engine push and backwards compat) --
+
+    suspend fun getNotesForTrack(trackId: Long): List<MidiNoteEntity> =
+        midiNoteDao.getNotesForTrack(trackId)
+
+    fun observeNotes(trackId: Long): Flow<List<MidiNoteEntity>> =
+        midiNoteDao.observeNotesForTrack(trackId)
 
     suspend fun updateNoteTiming(noteId: Long, startMs: Long, durationMs: Long) {
         midiNoteDao.updateNoteTiming(noteId, startMs, durationMs)
@@ -97,12 +177,17 @@ class MidiRepository(
     // -- Track duration --
 
     /**
-     * Recompute and persist the track's durationMs from its MIDI notes.
-     * Duration = max(startMs + durationMs) across all notes.
+     * Recompute and persist the track's durationMs from all its MIDI clips and notes.
+     * Duration = max(clip.offsetMs + note.startMs + note.durationMs) across all clips.
      */
     suspend fun recomputeTrackDuration(trackId: Long) {
-        val notes = midiNoteDao.getNotesForTrack(trackId)
-        val maxEnd = notes.maxOfOrNull { it.startMs + it.durationMs } ?: 0L
+        val clips = midiClipDao.getClipsForTrack(trackId)
+        var maxEnd = 0L
+        for (clip in clips) {
+            val notes = midiNoteDao.getNotesForClip(clip.id)
+            val clipEnd = notes.maxOfOrNull { clip.offsetMs + it.startMs + it.durationMs } ?: clip.offsetMs
+            if (clipEnd > maxEnd) maxEnd = clipEnd
+        }
         trackDao.updateDuration(trackId, maxEnd)
     }
 }

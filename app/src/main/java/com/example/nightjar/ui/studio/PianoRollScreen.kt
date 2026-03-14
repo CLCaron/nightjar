@@ -66,6 +66,7 @@ import com.example.nightjar.ui.theme.NjOutline
 import com.example.nightjar.ui.theme.NjStudioAccent
 import com.example.nightjar.ui.theme.NjStudioGreen
 import com.example.nightjar.ui.theme.NjSurface
+import com.example.nightjar.ui.theme.NjStudioLane
 import com.example.nightjar.ui.theme.NjTrackColors
 import kotlin.math.abs
 
@@ -125,7 +126,9 @@ fun PianoRollScreen(
     val paddingMs = measureMs * 4          // 4 measures of empty space after last note
     val minContentMs = measureMs * 16      // always show at least 16 measures
     val maxNoteEndMs = state.notes.maxOfOrNull { it.startMs + it.durationMs } ?: 0L
-    val contentMs = maxOf(maxNoteEndMs + paddingMs, state.totalDurationMs + paddingMs, minContentMs)
+    val maxClipEndMs = state.clips.maxOfOrNull { it.endMs } ?: 0L
+    val contentMs = maxOf(maxNoteEndMs + paddingMs, maxClipEndMs + paddingMs,
+        state.totalDurationMs + paddingMs, minContentMs)
     val gridWidthDp = (contentMs * PX_PER_MS).dp
 
     val verticalScrollState = rememberScrollState(
@@ -187,6 +190,12 @@ fun PianoRollScreen(
                 }
             },
             actions = {
+                NjButton(
+                    text = "1/${state.gridResolution}",
+                    onClick = { viewModel.onAction(PianoRollAction.CycleGridResolution) },
+                    textColor = NjStudioAccent.copy(alpha = 0.8f)
+                )
+                Spacer(Modifier.width(4.dp))
                 NjButton(
                     text = "Snap",
                     onClick = { viewModel.onAction(PianoRollAction.ToggleSnap) },
@@ -274,7 +283,7 @@ fun PianoRollScreen(
                                             handleResizeDrag(
                                                 edgeNote, longPress.id, pxPerMs, rowHeightPx,
                                                 state.isSnapEnabled, state.bpm,
-                                                state.timeSignatureDenominator,
+                                                state.gridResolution, state.timeSignatureDenominator,
                                                 scrollX = { horizontalScrollState.value },
                                                 onPreview = { dragPreview = it },
                                                 onCommit = { noteId, newDurationMs ->
@@ -307,7 +316,7 @@ fun PianoRollScreen(
                                             handleMoveDrag(
                                                 hitNote, longPress.id, pxPerMs, rowHeightPx,
                                                 state.isSnapEnabled, state.bpm,
-                                                state.timeSignatureDenominator,
+                                                state.gridResolution, state.timeSignatureDenominator,
                                                 scrollX = { horizontalScrollState.value },
                                                 scrollY = { verticalScrollState.value },
                                                 onPreview = { dragPreview = it },
@@ -362,8 +371,9 @@ fun PianoRollScreen(
                                                     (down.position.y / rowHeightPx).toInt()
                                                 val tapMs = (down.position.x / pxPerMs).toLong()
                                                 val snapMs = if (state.isSnapEnabled) {
-                                                    MusicalTimeConverter.snapToBeat(
+                                                    MusicalTimeConverter.snapToGrid(
                                                         tapMs, state.bpm,
+                                                        state.gridResolution,
                                                         state.timeSignatureDenominator
                                                     )
                                                 } else tapMs
@@ -386,12 +396,15 @@ fun PianoRollScreen(
                             rowHeightPx = rowHeightPx,
                             pxPerMs = PX_PER_MS * density.density,
                             notes = state.notes,
+                            clips = state.clips,
+                            highlightClipId = state.highlightClipId,
                             selectedNoteId = state.selectedNoteId,
                             noteColor = noteColor,
                             positionMs = state.positionMs,
                             isPlaying = state.isPlaying,
                             bpm = state.bpm,
                             beatsPerBar = state.timeSignatureNumerator,
+                            gridResolution = state.gridResolution,
                             contentMs = contentMs,
                             dragPreview = dragPreview
                         )
@@ -447,22 +460,29 @@ private fun DrawScope.drawPianoKeys(
     }
 }
 
-/** Draw the note grid, beat lines, notes, and playhead. */
+/** Draw the note grid, beat lines, clip regions, notes, and playhead. */
 private fun DrawScope.drawGrid(
     rowHeightPx: Float,
     pxPerMs: Float,
     notes: List<MidiNoteEntity>,
+    clips: List<PianoRollClipInfo>,
+    highlightClipId: Long = 0L,
     selectedNoteId: Long?,
     noteColor: Color,
     positionMs: Long,
     isPlaying: Boolean,
     bpm: Double,
     beatsPerBar: Int,
+    gridResolution: Int,
     contentMs: Long,
     dragPreview: NoteDragPreview? = null
 ) {
     val totalHeight = TOTAL_NOTES * rowHeightPx
     val beatMs = 60_000.0 / bpm
+    // Grid step in ms: subdivides a whole note by gridResolution
+    val gridStepMs = MusicalTimeConverter.msPerGridStep(bpm, gridResolution)
+    // How many grid steps per beat (e.g. gridResolution=16 in 4/4 -> 4 sub-steps per beat)
+    val gridStepsPerBeat = gridResolution / 4
 
     // Row backgrounds (alternate for black/white keys)
     for (note in 0 until TOTAL_NOTES) {
@@ -488,24 +508,85 @@ private fun DrawScope.drawGrid(
         )
     }
 
-    // Beat and measure grid lines
-    var timeMs = 0.0
-    var beatCount = 0
-    while (timeMs < contentMs) {
-        val x = (timeMs * pxPerMs).toFloat()
-        val isBar = beatCount % beatsPerBar == 0
-        val alpha = if (isBar) 0.4f else 0.15f
-        val strokeWidth = if (isBar) 1.5f else 0.5f
+    // Clip region backgrounds and boundary lines
+    for (clip in clips) {
+        val clipStartPx = clip.offsetMs * pxPerMs
+        val clipWidthPx = (clip.endMs - clip.offsetMs) * pxPerMs
+        val isHighlighted = highlightClipId != 0L && clip.clipId == highlightClipId
 
-        drawLine(
-            color = NjMuted2.copy(alpha = alpha),
-            start = Offset(x, 0f),
-            end = Offset(x, totalHeight),
-            strokeWidth = strokeWidth
+        // Subtle tinted background for clip region (slightly brighter for highlighted)
+        drawRect(
+            color = NjStudioLane.copy(alpha = if (isHighlighted) 0.12f else 0.06f),
+            topLeft = Offset(clipStartPx, 0f),
+            size = Size(clipWidthPx, totalHeight)
         )
 
-        timeMs += beatMs
-        beatCount++
+        // Clip start boundary
+        val borderColor = if (isHighlighted) NjStudioAccent.copy(alpha = 0.45f)
+            else NjStudioAccent.copy(alpha = 0.2f)
+        drawLine(
+            color = borderColor,
+            start = Offset(clipStartPx, 0f),
+            end = Offset(clipStartPx, totalHeight),
+            strokeWidth = if (isHighlighted) 2.5f else 1.5f
+        )
+
+        // Clip end boundary
+        val clipEndPx = clipStartPx + clipWidthPx
+        drawLine(
+            color = if (isHighlighted) NjStudioAccent.copy(alpha = 0.3f)
+                else NjStudioAccent.copy(alpha = 0.1f),
+            start = Offset(clipEndPx, 0f),
+            end = Offset(clipEndPx, totalHeight),
+            strokeWidth = if (isHighlighted) 2.5f else 1f
+        )
+
+        // Highlight: top and bottom borders for source clip
+        if (isHighlighted) {
+            drawLine(
+                color = NjStudioAccent.copy(alpha = 0.35f),
+                start = Offset(clipStartPx, 0f),
+                end = Offset(clipEndPx, 0f),
+                strokeWidth = 2f
+            )
+            drawLine(
+                color = NjStudioAccent.copy(alpha = 0.35f),
+                start = Offset(clipStartPx, totalHeight),
+                end = Offset(clipEndPx, totalHeight),
+                strokeWidth = 2f
+            )
+        }
+    }
+
+    // Grid lines at sub-beat resolution
+    if (gridStepMs > 0.0) {
+        var stepTimeMs = 0.0
+        var gridIndex = 0
+        while (stepTimeMs < contentMs) {
+            val x = (stepTimeMs * pxPerMs).toFloat()
+            // Determine which level this line falls on
+            val beatIndex = if (gridStepsPerBeat > 0) gridIndex % gridStepsPerBeat else 0
+            val isBeat = beatIndex == 0
+            val isBar = isBeat && ((gridIndex / gridStepsPerBeat) % beatsPerBar == 0)
+
+            val alpha: Float
+            val strokeWidth: Float
+            when {
+                isBar -> { alpha = 0.4f; strokeWidth = 1.5f }
+                isBeat -> { alpha = 0.15f; strokeWidth = 0.5f }
+                else -> { alpha = 0.07f; strokeWidth = 0.5f }
+            }
+
+            drawLine(
+                color = NjMuted2.copy(alpha = alpha),
+                start = Offset(x, 0f),
+                end = Offset(x, totalHeight),
+                strokeWidth = strokeWidth
+            )
+
+            stepTimeMs += gridStepMs
+            gridIndex++
+        }
     }
 
     // Draw notes
@@ -607,6 +688,7 @@ private suspend fun AwaitPointerEventScope.handleResizeDrag(
     rowHeightPx: Float,
     isSnapEnabled: Boolean,
     bpm: Double,
+    gridResolution: Int,
     timeSignatureDenominator: Int,
     scrollX: () -> Int,
     onPreview: (NoteDragPreview) -> Unit,
@@ -634,7 +716,13 @@ private suspend fun AwaitPointerEventScope.handleResizeDrag(
         change.consume()
         val accumulatedPx = change.position.x + scrollX() - startAbsX
         val deltaMs = (accumulatedPx / pxPerMs).toLong()
-        val newDurationMs = (note.durationMs + deltaMs).coerceAtLeast(50L)
+        val rawDurationMs = (note.durationMs + deltaMs).coerceAtLeast(50L)
+        val newDurationMs = if (isSnapEnabled) {
+            val snappedEndMs = MusicalTimeConverter.snapToGrid(
+                note.startMs + rawDurationMs, bpm, gridResolution, timeSignatureDenominator
+            )
+            (snappedEndMs - note.startMs).coerceAtLeast(50L)
+        } else rawDurationMs
         onPreview(
             NoteDragPreview(note.id, note.startMs, newDurationMs, note.pitch)
         )
@@ -647,8 +735,8 @@ private suspend fun AwaitPointerEventScope.handleResizeDrag(
         val deltaMs = (accumulatedPx / pxPerMs).toLong()
         var finalDurationMs = (note.durationMs + deltaMs).coerceAtLeast(50L)
         if (isSnapEnabled) {
-            val snappedEndMs = MusicalTimeConverter.snapToBeat(
-                note.startMs + finalDurationMs, bpm, timeSignatureDenominator
+            val snappedEndMs = MusicalTimeConverter.snapToGrid(
+                note.startMs + finalDurationMs, bpm, gridResolution, timeSignatureDenominator
             )
             finalDurationMs = (snappedEndMs - note.startMs).coerceAtLeast(50L)
         }
@@ -672,6 +760,7 @@ private suspend fun AwaitPointerEventScope.handleMoveDrag(
     rowHeightPx: Float,
     isSnapEnabled: Boolean,
     bpm: Double,
+    gridResolution: Int,
     timeSignatureDenominator: Int,
     scrollX: () -> Int,
     scrollY: () -> Int,
@@ -709,7 +798,10 @@ private suspend fun AwaitPointerEventScope.handleMoveDrag(
         val totalDy = change.position.y + scrollY() - startAbsY!!
 
         val deltaMs = (totalDx / pxPerMs).toLong()
-        val newStartMs = (note.startMs + deltaMs).coerceAtLeast(0L)
+        val rawStartMs = (note.startMs + deltaMs).coerceAtLeast(0L)
+        val newStartMs = if (isSnapEnabled) {
+            MusicalTimeConverter.snapToGrid(rawStartMs, bpm, gridResolution, timeSignatureDenominator)
+        } else rawStartMs
         val pitchDelta = -(totalDy / rowHeightPx).toInt()
         val newPitch = (note.pitch + pitchDelta).coerceIn(0, 127)
 
@@ -736,8 +828,8 @@ private suspend fun AwaitPointerEventScope.handleMoveDrag(
         val finalPitch = (note.pitch + pitchDelta).coerceIn(0, 127)
 
         if (isSnapEnabled) {
-            finalStartMs = MusicalTimeConverter.snapToBeat(
-                finalStartMs, bpm, timeSignatureDenominator
+            finalStartMs = MusicalTimeConverter.snapToGrid(
+                finalStartMs, bpm, gridResolution, timeSignatureDenominator
             )
         }
         onCommit(note.id, finalStartMs, finalPitch)

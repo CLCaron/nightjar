@@ -18,8 +18,17 @@ interface DrumPatternDao {
     @Insert
     suspend fun insertPattern(pattern: DrumPatternEntity): Long
 
+    @Insert
+    suspend fun insertSteps(steps: List<DrumStepEntity>)
+
     @Query("SELECT * FROM drum_patterns WHERE trackId = :trackId")
     suspend fun getPatternForTrack(trackId: Long): DrumPatternEntity?
+
+    @Query("SELECT * FROM drum_patterns WHERE trackId = :trackId ORDER BY id")
+    suspend fun getPatternsForTrack(trackId: Long): List<DrumPatternEntity>
+
+    @Query("SELECT * FROM drum_patterns WHERE id = :patternId")
+    suspend fun getPatternById(patternId: Long): DrumPatternEntity?
 
     @Query("UPDATE drum_patterns SET stepsPerBar = :stepsPerBar, bars = :bars WHERE id = :id")
     suspend fun updatePatternGrid(id: Long, stepsPerBar: Int, bars: Int)
@@ -66,6 +75,39 @@ interface DrumPatternDao {
         }
     }
 
+    @Query("DELETE FROM drum_steps WHERE patternId = :patternId")
+    suspend fun deleteAllStepsForPattern(patternId: Long)
+
+    /**
+     * Remap step indices when changing pattern resolution.
+     * Steps that don't land cleanly on the new grid are dropped.
+     */
+    @Transaction
+    suspend fun remapPatternResolution(
+        patternId: Long,
+        oldStepsPerBar: Int,
+        newStepsPerBar: Int,
+        bars: Int
+    ) {
+        val steps = getStepsForPattern(patternId)
+        val scale = newStepsPerBar.toDouble() / oldStepsPerBar
+        val remapped = steps.mapNotNull { step ->
+            val newIndex = step.stepIndex * scale
+            val rounded = newIndex.toInt()
+            if (kotlin.math.abs(newIndex - rounded) < 0.001) {
+                DrumStepEntity(
+                    patternId = patternId,
+                    stepIndex = rounded,
+                    drumNote = step.drumNote,
+                    velocity = step.velocity
+                )
+            } else null
+        }
+        deleteAllStepsForPattern(patternId)
+        if (remapped.isNotEmpty()) insertSteps(remapped)
+        updatePatternGrid(patternId, newStepsPerBar, bars)
+    }
+
     // -- Clip CRUD --
 
     @Insert
@@ -85,4 +127,23 @@ interface DrumPatternDao {
 
     @Query("SELECT MAX(sortIndex) FROM drum_clips WHERE patternId = :patternId")
     suspend fun getMaxClipSortIndex(patternId: Long): Int?
+
+    @Query("""
+        SELECT MAX(dc.sortIndex) FROM drum_clips dc
+        INNER JOIN drum_patterns dp ON dp.id = dc.patternId
+        WHERE dp.trackId = :trackId
+    """)
+    suspend fun getMaxClipSortIndexForTrack(trackId: Long): Int?
+
+    /**
+     * Get all clips for a given track, joined through drum_patterns.
+     * Returns clips sorted by offset for timeline display.
+     */
+    @Query("""
+        SELECT dc.* FROM drum_clips dc
+        INNER JOIN drum_patterns dp ON dp.id = dc.patternId
+        WHERE dp.trackId = :trackId
+        ORDER BY dc.offsetMs
+    """)
+    suspend fun getClipsForTrack(trackId: Long): List<DrumClipEntity>
 }
