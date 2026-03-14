@@ -62,7 +62,6 @@ import com.example.nightjar.ui.components.NjButton
 import com.example.nightjar.ui.theme.NjBg
 import com.example.nightjar.ui.theme.NjMuted2
 import com.example.nightjar.ui.theme.NjOnBg
-import com.example.nightjar.ui.theme.NjOutline
 import com.example.nightjar.ui.theme.NjStudioAccent
 import com.example.nightjar.ui.theme.NjStudioGreen
 import com.example.nightjar.ui.theme.NjSurface
@@ -258,6 +257,7 @@ fun PianoRollScreen(
                         modifier = Modifier
                             .width(gridWidthDp)
                             .height(totalGridHeight)
+                            .background(Color(0xFF0C0A14))
                             .pointerInput(state.notes, state.isSnapEnabled, state.bpm) {
                                 val pxPerMs = PX_PER_MS * density.density
                                 val edgeZonePx = EDGE_TOUCH_ZONE.toPx()
@@ -428,35 +428,35 @@ private fun DrawScope.drawPianoKeys(
         val octaveIndex = displayNote % 12
         val isBlack = octaveIndex in BLACK_KEYS
 
-        // Key background
-        val keyColor = if (isBlack) Color(0xFF1A1520) else Color(0xFF2A2530)
+        // Key background -- matches grid row tints (dark=dark, light=light)
+        val keyColor = if (isBlack) Color(0xFF14101E) else Color(0xFF0C0A14)
         drawRect(
             color = keyColor,
             topLeft = Offset(0f, y),
             size = Size(width, rowHeightPx)
         )
 
-        // Separator
+        // Separator -- stronger at C notes (octave boundaries)
+        val isC = octaveIndex == 0
         drawLine(
-            color = NjOutline,
+            color = NjMuted2.copy(alpha = if (isC) 0.6f else 0.3f),
             start = Offset(0f, y),
             end = Offset(width, y),
-            strokeWidth = 0.5f
+            strokeWidth = if (isC) 1f else 0.5f
         )
 
-        // Label for C notes
-        if (octaveIndex == 0) {
-            val octave = displayNote / 12 - 1
-            val label = "C$octave"
-            val result = textMeasurer.measure(
-                text = label,
-                style = TextStyle(color = NjOnBg, fontSize = 10.sp)
-            )
-            drawText(
-                textLayoutResult = result,
-                topLeft = Offset(4f, y + (rowHeightPx - result.size.height) / 2f)
-            )
-        }
+        // Note label for every key
+        val noteName = NOTE_NAMES[octaveIndex]
+        val label = if (octaveIndex == 0) "C${displayNote / 12 - 1}" else noteName
+        val labelColor = if (octaveIndex == 0) NjOnBg else NjMuted2.copy(alpha = 0.6f)
+        val result = textMeasurer.measure(
+            text = label,
+            style = TextStyle(color = labelColor, fontSize = 10.sp)
+        )
+        drawText(
+            textLayoutResult = result,
+            topLeft = Offset(4f, y + (rowHeightPx - result.size.height) / 2f)
+        )
     }
 }
 
@@ -493,18 +493,19 @@ private fun DrawScope.drawGrid(
 
         if (isBlack) {
             drawRect(
-                color = Color(0xFF0D0B14),
+                color = Color(0xFF14101E),
                 topLeft = Offset(0f, y),
                 size = Size(size.width, rowHeightPx)
             )
         }
 
-        // Row separator
+        // Row separator -- stronger at C notes (octave boundaries)
+        val isC = octaveIndex == 0
         drawLine(
-            color = NjOutline.copy(alpha = 0.3f),
+            color = NjMuted2.copy(alpha = if (isC) 0.6f else 0.3f),
             start = Offset(0f, y),
             end = Offset(size.width, y),
-            strokeWidth = 0.5f
+            strokeWidth = if (isC) 1f else 0.5f
         )
     }
 
@@ -572,9 +573,9 @@ private fun DrawScope.drawGrid(
             val alpha: Float
             val strokeWidth: Float
             when {
-                isBar -> { alpha = 0.4f; strokeWidth = 1.5f }
-                isBeat -> { alpha = 0.15f; strokeWidth = 0.5f }
-                else -> { alpha = 0.07f; strokeWidth = 0.5f }
+                isBar -> { alpha = 0.5f; strokeWidth = 1.5f }
+                isBeat -> { alpha = 0.3f; strokeWidth = 1f }
+                else -> { alpha = 0.2f; strokeWidth = 0.5f }
             }
 
             drawLine(
@@ -589,7 +590,8 @@ private fun DrawScope.drawGrid(
         }
     }
 
-    // Draw notes
+    // Draw notes with beveled edges
+    val bw = 1f // bevel line width
     for (note in notes) {
         val isDragging = dragPreview != null && note.id == dragPreview.noteId
         val drawPitch = if (isDragging) dragPreview!!.previewPitch else note.pitch
@@ -603,28 +605,51 @@ private fun DrawScope.drawGrid(
         val h = rowHeightPx - 2f
 
         val isSelected = note.id == selectedNoteId
-        val color = when {
-            isDragging -> noteColor // full brightness during drag
-            isSelected -> noteColor
-            else -> noteColor.copy(alpha = 0.75f)
-        }
         val cornerRadius = CornerRadius(3f, 3f)
+        val bevelW = 3f
 
-        drawRoundRect(
-            color = color,
-            topLeft = Offset(x, y),
-            size = Size(w, h),
-            cornerRadius = cornerRadius
-        )
-
-        // Selection or drag border
         if (isSelected || isDragging) {
+            // Pressed in: darkened fill + inner shadow
             drawRoundRect(
-                color = if (isDragging) Color.White.copy(alpha = 0.7f) else Color.White.copy(alpha = 0.5f),
+                color = noteColor,
+                topLeft = Offset(x, y),
+                size = Size(w, h),
+                cornerRadius = cornerRadius
+            )
+            // Dark overlay to sink the color
+            drawRoundRect(
+                color = Color.Black.copy(alpha = 0.25f),
+                topLeft = Offset(x, y),
+                size = Size(w, h),
+                cornerRadius = cornerRadius
+            )
+            // Inner shadow: dark top/left, faint light bottom/right
+            drawLine(Color.Black.copy(alpha = 0.7f), Offset(x, y), Offset(x + w, y), bevelW)
+            drawLine(Color.Black.copy(alpha = 0.5f), Offset(x, y), Offset(x, y + h), bevelW)
+            drawLine(Color.White.copy(alpha = 0.15f), Offset(x, y + h), Offset(x + w, y + h), bevelW)
+            drawLine(Color.White.copy(alpha = 0.1f), Offset(x + w, y), Offset(x + w, y + h), bevelW)
+        } else {
+            // Raised: bright fill + strong highlight/shadow
+            drawRoundRect(
+                color = noteColor,
+                topLeft = Offset(x, y),
+                size = Size(w, h),
+                cornerRadius = cornerRadius
+            )
+            drawLine(Color.White.copy(alpha = 0.5f), Offset(x, y), Offset(x + w, y), bevelW)
+            drawLine(Color.White.copy(alpha = 0.3f), Offset(x, y), Offset(x, y + h), bevelW)
+            drawLine(Color.Black.copy(alpha = 0.6f), Offset(x, y + h), Offset(x + w, y + h), bevelW)
+            drawLine(Color.Black.copy(alpha = 0.4f), Offset(x + w, y), Offset(x + w, y + h), bevelW)
+        }
+
+        // Drag border (brighter outline during active drag)
+        if (isDragging) {
+            drawRoundRect(
+                color = Color.White.copy(alpha = 0.6f),
                 topLeft = Offset(x, y),
                 size = Size(w, h),
                 cornerRadius = cornerRadius,
-                style = androidx.compose.ui.graphics.drawscope.Stroke(width = if (isDragging) 2f else 1.5f)
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f)
             )
         }
     }

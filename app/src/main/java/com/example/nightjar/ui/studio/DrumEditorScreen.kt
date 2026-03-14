@@ -492,7 +492,7 @@ private fun DrawScope.drawDrumGrid(
 
             for (rowIndex in 0 until numRows) {
                 val drumNote = GM_DRUM_ROWS[rowIndex].note
-                val isActive = (step to drumNote) in activeStepsT
+                val isActive = (step to drumNote) in activeSteps
 
                 // Center the square cell within the step column and row
                 val stepX = clipStartPx + step * stepWidthPx

@@ -38,7 +38,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -51,9 +50,7 @@ import com.example.nightjar.audio.MusicalTimeConverter
 import com.example.nightjar.data.db.entity.MidiNoteEntity
 import com.example.nightjar.ui.components.NjButton
 import com.example.nightjar.ui.theme.NjMuted2
-import com.example.nightjar.ui.theme.NjOutline
 import com.example.nightjar.ui.theme.NjStudioAccent
-import com.example.nightjar.ui.theme.NjStudioLane
 import com.example.nightjar.ui.theme.NjTrackColors
 import kotlin.math.abs
 
@@ -189,6 +186,7 @@ fun MiniPianoRoll(
                         modifier = Modifier
                             .width(KEY_LABEL_WIDTH)
                             .fillMaxHeight()
+                            .background(Color(0xFF0C0A14))
                     ) {
                         val labelStyle = TextStyle(fontSize = 8.sp, color = Color.White.copy(alpha = 0.6f))
                         for (i in 0 until VISIBLE_PITCHES) {
@@ -200,7 +198,7 @@ fun MiniPianoRoll(
 
                             if (isBlack) {
                                 drawRect(
-                                    color = Color.White.copy(alpha = 0.04f),
+                                    color = Color(0xFF14101E),
                                     topLeft = Offset(0f, y),
                                     size = Size(size.width, rowHeightPx)
                                 )
@@ -216,11 +214,12 @@ fun MiniPianoRoll(
                                 )
                             )
 
+                            val isC = (pitch % 12) == 0
                             drawLine(
-                                color = NjOutline.copy(alpha = 0.3f),
+                                color = NjMuted2.copy(alpha = if (isC) 0.6f else 0.3f),
                                 start = Offset(0f, y),
                                 end = Offset(size.width, y),
-                                strokeWidth = 0.5f
+                                strokeWidth = if (isC) 1f else 0.5f
                             )
                         }
                     }
@@ -235,7 +234,7 @@ fun MiniPianoRoll(
                             modifier = Modifier
                                 .width(canvasWidthDp)
                                 .height(gridHeight)
-                                .background(NjStudioLane.copy(alpha = 0.5f))
+                                .background(Color(0xFF0C0A14))
                                 .pointerInput(clip, pitchRange, pxPerMs, rowHeightPx, isSnapEnabled, gridStepMs, msPerBeat) {
                                     awaitEachGesture {
                                         val down = awaitFirstDown(requireUnconsumed = false)
@@ -361,32 +360,37 @@ fun MiniPianoRoll(
                                 isSnapEnabled = isSnapEnabled
                             )
 
+                            // Draw notes with beveled edges
+                            val bw = 1f
                             for (note in clip.notes) {
                                 val pitchIndex = high - note.pitch
                                 if (pitchIndex < 0 || pitchIndex >= VISIBLE_PITCHES) continue
 
                                 val x = note.startMs * pxPerMs
-                                val y = pitchIndex * rowHeightPx
+                                val ny = pitchIndex * rowHeightPx + 1f
                                 val w = (note.durationMs * pxPerMs).coerceAtLeast(6f)
+                                val h = rowHeightPx - 2f
 
                                 val isSelected = note.id == selectedNoteId
-                                val noteColor = if (isSelected) trackColor else trackColor.copy(alpha = 0.7f)
 
-                                drawRoundRect(
-                                    color = noteColor,
-                                    topLeft = Offset(x, y + 1f),
-                                    size = Size(w, rowHeightPx - 2f),
-                                    cornerRadius = CornerRadius(3f, 3f)
-                                )
+                                val cr = CornerRadius(3f, 3f)
+                                val bevelW = 3f
 
                                 if (isSelected) {
-                                    drawRoundRect(
-                                        color = NjStudioAccent,
-                                        topLeft = Offset(x, y + 1f),
-                                        size = Size(w, rowHeightPx - 2f),
-                                        cornerRadius = CornerRadius(3f, 3f),
-                                        style = Stroke(width = 1.5f)
-                                    )
+                                    // Pressed in: darkened fill + inner shadow
+                                    drawRoundRect(color = trackColor, topLeft = Offset(x, ny), size = Size(w, h), cornerRadius = cr)
+                                    drawRoundRect(color = Color.Black.copy(alpha = 0.25f), topLeft = Offset(x, ny), size = Size(w, h), cornerRadius = cr)
+                                    drawLine(Color.Black.copy(alpha = 0.7f), Offset(x, ny), Offset(x + w, ny), bevelW)
+                                    drawLine(Color.Black.copy(alpha = 0.5f), Offset(x, ny), Offset(x, ny + h), bevelW)
+                                    drawLine(Color.White.copy(alpha = 0.15f), Offset(x, ny + h), Offset(x + w, ny + h), bevelW)
+                                    drawLine(Color.White.copy(alpha = 0.1f), Offset(x + w, ny), Offset(x + w, ny + h), bevelW)
+                                } else {
+                                    // Raised: bright fill + strong highlight/shadow
+                                    drawRoundRect(color = trackColor, topLeft = Offset(x, ny), size = Size(w, h), cornerRadius = cr)
+                                    drawLine(Color.White.copy(alpha = 0.5f), Offset(x, ny), Offset(x + w, ny), bevelW)
+                                    drawLine(Color.White.copy(alpha = 0.3f), Offset(x, ny), Offset(x, ny + h), bevelW)
+                                    drawLine(Color.Black.copy(alpha = 0.6f), Offset(x, ny + h), Offset(x + w, ny + h), bevelW)
+                                    drawLine(Color.Black.copy(alpha = 0.4f), Offset(x + w, ny), Offset(x + w, ny + h), bevelW)
                                 }
                             }
                         }
@@ -407,10 +411,7 @@ private fun DrawScope.drawMiniRollGrid(
     gridStepMs: Double,
     isSnapEnabled: Boolean
 ) {
-    val gridColor = NjOutline.copy(alpha = 0.15f)
-    val beatColor = NjOutline.copy(alpha = 0.25f)
-    val measureColor = NjOutline.copy(alpha = 0.4f)
-
+    // Match full-screen piano roll grid colors
     for (i in 0 until VISIBLE_PITCHES) {
         val pitch = highPitch - i
         val y = i * rowHeightPx
@@ -418,16 +419,16 @@ private fun DrawScope.drawMiniRollGrid(
 
         if (isBlack) {
             drawRect(
-                color = Color.White.copy(alpha = 0.03f),
+                color = Color(0xFF14101E),
                 topLeft = Offset(0f, y),
                 size = Size(size.width, rowHeightPx)
             )
         }
 
-        // Stronger line at C notes (octave boundaries)
+        // Row separator -- stronger at C notes (octave boundaries)
         val isC = (pitch % 12) == 0
         drawLine(
-            color = if (isC) NjOutline.copy(alpha = 0.5f) else gridColor,
+            color = NjMuted2.copy(alpha = if (isC) 0.6f else 0.3f),
             start = Offset(0f, y),
             end = Offset(size.width, y),
             strokeWidth = if (isC) 1f else 0.5f
@@ -441,12 +442,14 @@ private fun DrawScope.drawMiniRollGrid(
             val isMeasure = ms % msPerMeasure < 0.5
             val isBeat = ms % msPerBeat < 0.5
 
-            val color = when {
-                isMeasure -> measureColor
-                isBeat -> beatColor
-                else -> gridColor
+            val alpha: Float
+            val width: Float
+            when {
+                isMeasure -> { alpha = 0.5f; width = 1.5f }
+                isBeat -> { alpha = 0.3f; width = 1f }
+                else -> { alpha = 0.2f; width = 0.5f }
             }
-            val width = if (isMeasure) 1.5f else 0.5f
+            val color = NjMuted2.copy(alpha = alpha)
 
             drawLine(
                 color = color,
