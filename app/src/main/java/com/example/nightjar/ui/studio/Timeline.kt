@@ -54,6 +54,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -93,6 +94,7 @@ import com.example.nightjar.ui.theme.NjStudioLane
 import com.example.nightjar.ui.theme.NjSurface2
 import com.example.nightjar.ui.theme.NjStudioWaveform
 import com.example.nightjar.ui.theme.NjTrackColors
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import java.io.File
@@ -160,27 +162,57 @@ fun TimelinePanel(
     }
     val density = LocalDensity.current
 
-    // Auto-scroll: keep playhead/recording edge visible during playback or recording
-    LaunchedEffect(scrollState, isPlaying, isRecording) {
-        if (!isPlaying && !isRecording) return@LaunchedEffect
-        snapshotFlow { globalPositionMs }
-            .map { ms -> with(density) { (ms / msPerDp).dp.toPx() }.toInt() }
-            .distinctUntilChanged()
-            .collect { edgePx ->
-                val viewportStart = scrollState.value
-                val viewportEnd = viewportStart + scrollState.viewportSize
-                val margin = with(density) { 60.dp.toPx() }.toInt()
+    // ── Playhead auto-follow ───────────────────────────────────────────
+    // Two phases:
+    //   1. Playhead travels naturally across the screen (normal in-content line)
+    //   2. Once it reaches the 1/4 viewport mark, "locked follow" engages:
+    //      content scrolls, playhead becomes a fixed overlay line.
+    // Disengages when the user touches the timeline. Re-engages on next play.
+    var isFollowActive by remember { mutableStateOf(false) }
+    var isFollowEligible by remember { mutableStateOf(false) }
+    val currentPositionMs by rememberUpdatedState(globalPositionMs)
 
-                when {
-                    edgePx > viewportEnd - margin ->
-                        scrollState.scrollTo(
-                            (edgePx - scrollState.viewportSize + margin)
-                                .coerceAtLeast(0)
-                        )
-                    edgePx < viewportStart + margin ->
-                        scrollState.scrollTo((edgePx - margin).coerceAtLeast(0))
+    // Mark follow-eligible when playback starts; clear on stop
+    LaunchedEffect(isPlaying, isRecording) {
+        if (isPlaying || isRecording) {
+            isFollowEligible = true
+        } else {
+            isFollowEligible = false
+            isFollowActive = false
+        }
+    }
+
+    // Follow loop: once the playhead reaches the 1/4 mark, start scrolling
+    LaunchedEffect(isFollowEligible) {
+        if (!isFollowEligible) return@LaunchedEffect
+
+        while (true) {
+            val playheadPx = with(density) {
+                (currentPositionMs / msPerDp).dp.toPx()
+            }.toInt()
+            val viewportStart = scrollState.value
+            val targetOffset = scrollState.viewportSize / 4
+            val playheadScreenPx = playheadPx - viewportStart
+
+            if (!isFollowActive && playheadScreenPx >= targetOffset) {
+                // Playhead just reached the 1/4 mark — engage locked follow
+                isFollowActive = true
+            }
+
+            if (isFollowActive) {
+                val scrollTarget = (playheadPx - targetOffset).coerceAtLeast(0)
+                if (scrollTarget >= scrollState.maxValue) {
+                    // Scroll hit the end — disengage overlay, let in-content
+                    // playhead travel through the remaining visible area
+                    scrollState.scrollTo(scrollState.maxValue)
+                    isFollowActive = false
+                } else {
+                    scrollState.scrollTo(scrollTarget)
                 }
             }
+
+            delay(16L)
+        }
     }
 
     // Drawer animation specs
@@ -199,7 +231,19 @@ fun TimelinePanel(
         )
     )
 
-    Column(modifier = modifier.fillMaxWidth()) {
+    Box(modifier = modifier.fillMaxWidth()) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .pointerInput(Unit) {
+                // Disengage follow on any user touch in the timeline area
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    isFollowEligible = false
+                    isFollowActive = false
+                }
+            }
+    ) {
         // ── Ruler row ──────────────────────────────────────────────
         Row(Modifier.fillMaxWidth()) {
             Spacer(Modifier.width(HEADER_WIDTH))
@@ -244,11 +288,13 @@ fun TimelinePanel(
                         onAction = onAction
                     )
 
-                    PlayheadSegment(
-                        globalPositionMs = globalPositionMs,
-                        msPerDp = msPerDp,
-                        height = RULER_HEIGHT
-                    )
+                    if (!isFollowActive) {
+                        PlayheadSegment(
+                            globalPositionMs = globalPositionMs,
+                            msPerDp = msPerDp,
+                            height = RULER_HEIGHT
+                        )
+                    }
                 }
             }
         }
@@ -366,11 +412,13 @@ fun TimelinePanel(
                             )
                         }
 
-                        PlayheadSegment(
-                            globalPositionMs = globalPositionMs,
-                            msPerDp = msPerDp,
-                            height = TRACK_LANE_HEIGHT
-                        )
+                        if (!isFollowActive) {
+                            PlayheadSegment(
+                                globalPositionMs = globalPositionMs,
+                                msPerDp = msPerDp,
+                                height = TRACK_LANE_HEIGHT
+                            )
+                        }
                     }
                 }
             }
@@ -485,6 +533,24 @@ fun TimelinePanel(
                 timelineWidthDp = timelineWidthDp,
                 scrollState = scrollState
             )
+        }
+    }
+
+        // Fixed playhead overlay during follow mode — drawn at a constant
+        // screen position so it never jitters. Content scrolls underneath.
+        if (isFollowActive) {
+            val lineXPx = with(density) {
+                HEADER_WIDTH.toPx() + scrollState.viewportSize / 4f
+            }
+            val lineColor = NjStudioAccent
+            Canvas(modifier = Modifier.matchParentSize()) {
+                drawLine(
+                    color = lineColor,
+                    start = Offset(lineXPx, 0f),
+                    end = Offset(lineXPx, size.height),
+                    strokeWidth = 2.dp.toPx()
+                )
+            }
         }
     }
 }
