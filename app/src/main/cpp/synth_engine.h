@@ -121,6 +121,17 @@ public:
 private:
     void renderThreadFunc();
 
+    /**
+     * Sub-buffer scheduling: render a chunk by splitting fluid_synth_write_float()
+     * at event boundaries so MIDI events fire at exact sample positions.
+     * Returns false if FluidSynth render fails.
+     */
+    bool renderSubBuffer(float* buf, int32_t totalFrames,
+                         std::vector<NoteEvent>& events);
+
+    /** Fire a single NoteEvent into FluidSynth. */
+    void fireEvent(const NoteEvent& e);
+
     AtomicTransport& transport_;
 
     void* settings_ = nullptr;   // fluid_settings_t* (avoid header dependency)
@@ -145,6 +156,9 @@ private:
 
     int64_t renderPos_ = 0;       // render thread's timeline position
     bool wasPlaying_ = false;     // for detecting play/pause transitions
+
+    // Scratch buffer for merged events (reused across render iterations)
+    std::vector<NoteEvent> mergedEvents_;
 };
 
 }  // namespace nightjar

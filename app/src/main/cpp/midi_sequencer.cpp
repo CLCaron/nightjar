@@ -48,6 +48,7 @@ const std::vector<NoteEvent>& MidiSequencer::tick(int64_t renderPos, int32_t chu
                 ne.channel = ch;
                 ne.note = -1;       // sentinel: all notes off on this channel
                 ne.velocity = 0;
+                ne.frameOffset = 0; // fire immediately at chunk start
                 pendingEvents_.push_back(ne);
             }
         }
@@ -76,6 +77,10 @@ const std::vector<NoteEvent>& MidiSequencer::tick(int64_t renderPos, int32_t chu
                 } else {
                     ne.velocity = 0;
                 }
+                ne.frameOffset = static_cast<int32_t>(
+                    std::clamp(e.framePos - renderPos,
+                               static_cast<int64_t>(0),
+                               static_cast<int64_t>(chunkFrames - 1)));
                 pendingEvents_.push_back(ne);
             }
             ++idx;

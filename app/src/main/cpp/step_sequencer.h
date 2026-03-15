@@ -18,7 +18,8 @@ struct DrumHit {
 struct NoteEvent {
     int channel;
     int note;
-    int velocity;    // > 0 = noteOn, 0 = noteOff
+    int velocity;       // > 0 = noteOn, 0 = noteOff
+    int32_t frameOffset; // sample offset within render chunk (0 to chunkFrames-1)
 };
 
 /**

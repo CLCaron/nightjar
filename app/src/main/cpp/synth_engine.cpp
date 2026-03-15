@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <vector>
 
 namespace nightjar {
 
@@ -196,6 +197,76 @@ int64_t SynthEngine::getMidiMaxEndFrame() const {
     return midiSequencer_.getMaxEndFrame();
 }
 
+// ── Sub-buffer scheduling ──────────────────────────────────────────────────
+
+void SynthEngine::fireEvent(const NoteEvent& e) {
+    if (!synth_) return;
+    if (e.note < 0) {
+        // Sentinel: silence all notes on this channel (mute transition)
+        fluid_synth_all_notes_off(FS_SYNTH, e.channel);
+    } else if (e.velocity > 0) {
+        fluid_synth_noteon(FS_SYNTH, e.channel, e.note, e.velocity);
+    } else {
+        fluid_synth_noteoff(FS_SYNTH, e.channel, e.note);
+    }
+}
+
+bool SynthEngine::renderSubBuffer(float* buf, int32_t totalFrames,
+                                   std::vector<NoteEvent>& events) {
+    if (events.empty()) {
+        // No events -- render the full chunk in one call
+        int result = fluid_synth_write_float(
+            FS_SYNTH, totalFrames,
+            buf, 0, 2, buf, 1, 2);
+        return result == FLUID_OK;
+    }
+
+    // Sort events by frame offset for correct sub-buffer ordering
+    std::sort(events.begin(), events.end(),
+              [](const NoteEvent& a, const NoteEvent& b) {
+                  return a.frameOffset < b.frameOffset;
+              });
+
+    int32_t rendered = 0;
+
+    for (size_t i = 0; i < events.size(); ++i) {
+        int32_t eventFrame = events[i].frameOffset;
+
+        // Render audio up to this event's frame position
+        int32_t framesToRender = eventFrame - rendered;
+        if (framesToRender > 0) {
+            int32_t sampleOffset = rendered * kOutputChannelCount;
+            int result = fluid_synth_write_float(
+                FS_SYNTH, framesToRender,
+                buf + sampleOffset, 0, 2,
+                buf + sampleOffset, 1, 2);
+            if (result != FLUID_OK) return false;
+            rendered += framesToRender;
+        }
+
+        // Fire all events at this exact frame position
+        fireEvent(events[i]);
+        while (i + 1 < events.size() &&
+               events[i + 1].frameOffset == eventFrame) {
+            ++i;
+            fireEvent(events[i]);
+        }
+    }
+
+    // Render remaining frames after the last event
+    int32_t remaining = totalFrames - rendered;
+    if (remaining > 0) {
+        int32_t sampleOffset = rendered * kOutputChannelCount;
+        int result = fluid_synth_write_float(
+            FS_SYNTH, remaining,
+            buf + sampleOffset, 0, 2,
+            buf + sampleOffset, 1, 2);
+        if (result != FLUID_OK) return false;
+    }
+
+    return true;
+}
+
 // ── Render thread ──────────────────────────────────────────────────────────
 
 void SynthEngine::renderThreadFunc() {
@@ -254,49 +325,25 @@ void SynthEngine::renderThreadFunc() {
             continue;
         }
 
-        // Tick step sequencer (playing is guaranteed true here)
+        // Collect timed events from both sequencers
+        mergedEvents_.clear();
+
         if (sequencerEnabled_.load(std::memory_order_relaxed)) {
             double bpm = transport_.bpm.load(std::memory_order_relaxed);
             const auto& events = sequencer_.tick(
                 renderPos_, kSynthRenderChunkFrames, bpm);
-            for (const auto& e : events) {
-                if (synth_) {
-                    if (e.velocity > 0) {
-                        fluid_synth_noteon(FS_SYNTH, e.channel, e.note, e.velocity);
-                    } else {
-                        fluid_synth_noteoff(FS_SYNTH, e.channel, e.note);
-                    }
-                }
-            }
+            mergedEvents_.insert(mergedEvents_.end(), events.begin(), events.end());
         }
 
-        // Tick MIDI sequencer (playing is guaranteed true here)
         if (midiSequencerEnabled_.load(std::memory_order_relaxed)) {
             const auto& midiEvents = midiSequencer_.tick(
                 renderPos_, kSynthRenderChunkFrames);
-            for (const auto& e : midiEvents) {
-                if (synth_) {
-                    if (e.note < 0) {
-                        // Sentinel: silence all notes on this channel (mute transition)
-                        fluid_synth_all_notes_off(FS_SYNTH, e.channel);
-                    } else if (e.velocity > 0) {
-                        fluid_synth_noteon(FS_SYNTH, e.channel, e.note, e.velocity);
-                    } else {
-                        fluid_synth_noteoff(FS_SYNTH, e.channel, e.note);
-                    }
-                }
-            }
+            mergedEvents_.insert(mergedEvents_.end(), midiEvents.begin(), midiEvents.end());
         }
 
-        // Render interleaved stereo: L at even indices, R at odd
-        int result = fluid_synth_write_float(
-            FS_SYNTH, kSynthRenderChunkFrames,
-            renderBuf, 0, 2,   // left:  buf[0], buf[2], buf[4], ...
-            renderBuf, 1, 2    // right: buf[1], buf[3], buf[5], ...
-        );
-
-        if (result != FLUID_OK) {
-            LOGW("SynthEngine: fluid_synth_write_float failed");
+        // Sub-buffer scheduling: split FluidSynth render at event boundaries
+        // so noteOn/noteOff land at the exact sample position
+        if (!renderSubBuffer(renderBuf, kSynthRenderChunkFrames, mergedEvents_)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
             continue;
         }
@@ -328,13 +375,7 @@ void SynthEngine::renderThreadFunc() {
                     const auto& events = sequencer_.tick(
                         loopStart, overshootFrames, bpm);
                     for (const auto& e : events) {
-                        if (synth_) {
-                            if (e.velocity > 0) {
-                                fluid_synth_noteon(FS_SYNTH, e.channel, e.note, e.velocity);
-                            } else {
-                                fluid_synth_noteoff(FS_SYNTH, e.channel, e.note);
-                            }
-                        }
+                        fireEvent(e);
                     }
                 }
 
@@ -342,13 +383,7 @@ void SynthEngine::renderThreadFunc() {
                     const auto& midiEvents = midiSequencer_.tick(
                         loopStart, overshootFrames);
                     for (const auto& e : midiEvents) {
-                        if (synth_) {
-                            if (e.velocity > 0) {
-                                fluid_synth_noteon(FS_SYNTH, e.channel, e.note, e.velocity);
-                            } else {
-                                fluid_synth_noteoff(FS_SYNTH, e.channel, e.note);
-                            }
-                        }
+                        fireEvent(e);
                     }
                 }
             }

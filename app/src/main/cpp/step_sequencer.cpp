@@ -129,13 +129,21 @@ const std::vector<NoteEvent>& StepSequencer::tick(
                     if (step >= totalSteps) break;  // one-shot: don't wrap
                 }
 
+                // Exact frame where this step lands on the global timeline
+                auto stepFrame = static_cast<int64_t>(
+                    step * framesPerStep) + clip.offsetFrames;
+                int32_t offset = static_cast<int32_t>(
+                    std::clamp(stepFrame - renderPos,
+                               static_cast<int64_t>(0),
+                               static_cast<int64_t>(chunkFrames - 1)));
+
                 for (const auto& hit : clip.hits) {
                     if (hit.stepIndex == step) {
                         int vel = static_cast<int>(
                             static_cast<float>(hit.velocity) * pat->volume);
                         vel = std::clamp(vel, 0, 127);
                         if (vel > 0) {
-                            pendingEvents_.push_back({9, hit.drumNote, vel});
+                            pendingEvents_.push_back({9, hit.drumNote, vel, offset});
                         }
                     }
                 }
