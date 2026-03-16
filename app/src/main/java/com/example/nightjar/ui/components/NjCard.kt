@@ -61,6 +61,7 @@ fun NjCard(
         modifier = modifier
             .clip(shape)
             .background(bgColor)
+            .njGrain(alpha = 0.04f)
             .drawWithContent {
                 drawContent()
 

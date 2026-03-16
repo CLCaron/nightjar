@@ -123,6 +123,7 @@ private fun ToggleModeButton(
         modifier = modifier
             .clip(shape)
             .background(bgColor)
+            .njGrain(alpha = 0.04f)
             .drawWithContent {
                 drawContent()
 
@@ -293,6 +294,7 @@ private fun MomentaryModeButton(
         modifier = modifier
             .clip(shape)
             .background(bgColor)
+            .njGrain(alpha = 0.04f)
             .drawWithContent {
                 drawContent()
 
