@@ -76,6 +76,9 @@ import androidx.compose.material.icons.filled.SkipPrevious
 import com.example.nightjar.ui.components.NjIcons
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Repeat
+import androidx.compose.material.icons.outlined.Settings
+import com.example.nightjar.ui.theme.NjMetronomeLed
+import com.example.nightjar.ui.theme.NjMuted
 import kotlinx.coroutines.flow.collectLatest
 
 /**
@@ -524,7 +527,7 @@ private fun TransportAndControls(
             }
         }
 
-        // Project controls: time sig, BPM, snap, position
+        // Project controls: time sig, BPM, snap, metronome, position
         if (!state.isLoading && state.errorMessage == null) {
             ProjectControlsBar(
                 bpm = state.bpm,
@@ -533,6 +536,12 @@ private fun TransportAndControls(
                 isSnapEnabled = state.isSnapEnabled,
                 gridResolution = state.gridResolution,
                 globalPositionMs = state.globalPositionMs,
+                isMetronomeEnabled = state.isMetronomeEnabled,
+                isMetronomeSettingsOpen = state.isMetronomeSettingsOpen,
+                metronomeVolume = state.metronomeVolume,
+                countInBars = state.countInBars,
+                lastBeatFrame = state.lastBeatFrame,
+                isPlaying = state.isPlaying,
                 onAction = onAction
             )
         }
@@ -770,6 +779,12 @@ private fun ProjectControlsBar(
     isSnapEnabled: Boolean,
     gridResolution: Int,
     globalPositionMs: Long,
+    isMetronomeEnabled: Boolean,
+    isMetronomeSettingsOpen: Boolean,
+    metronomeVolume: Float,
+    countInBars: Int,
+    lastBeatFrame: Long,
+    isPlaying: Boolean,
     onAction: (StudioAction) -> Unit
 ) {
     val position = remember(globalPositionMs, bpm, timeSignatureNumerator, timeSignatureDenominator) {
@@ -778,79 +793,192 @@ private fun ProjectControlsBar(
         )
     }
 
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    NjBg.copy(alpha = 0.6f),
+                    RoundedCornerShape(6.dp)
+                )
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Time signature picker -- cycle through presets on tap
+            val currentSig = timeSignatureNumerator to timeSignatureDenominator
+            NjButton(
+                text = "$timeSignatureNumerator/$timeSignatureDenominator",
+                onClick = {
+                    val idx = TIME_SIGNATURE_PRESETS.indexOf(currentSig)
+                    val next = TIME_SIGNATURE_PRESETS[(idx + 1) % TIME_SIGNATURE_PRESETS.size]
+                    onAction(StudioAction.SetTimeSignature(next.first, next.second))
+                },
+                textColor = NjStudioAccent.copy(alpha = 0.8f)
+            )
+
+            // BPM with +/- buttons
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                NjButton(
+                    text = "-",
+                    onClick = { onAction(StudioAction.SetBpm(bpm - 1.0)) },
+                    textColor = NjStudioAccent.copy(alpha = 0.7f)
+                )
+                Text(
+                    text = "${bpm.toInt()} BPM",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = NjStudioAccent.copy(alpha = 0.8f),
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
+                NjButton(
+                    text = "+",
+                    onClick = { onAction(StudioAction.SetBpm(bpm + 1.0)) },
+                    textColor = NjStudioAccent.copy(alpha = 0.7f)
+                )
+            }
+
+            // Snap toggle
+            NjButton(
+                text = "Snap",
+                onClick = { onAction(StudioAction.ToggleSnap) },
+                isActive = isSnapEnabled,
+                ledColor = NjStudioAccent,
+            )
+
+            // Metronome + Gear rocker pill
+            MetronomeButtonPill(
+                isEnabled = isMetronomeEnabled,
+                isSettingsOpen = isMetronomeSettingsOpen,
+                lastBeatFrame = lastBeatFrame,
+                isPlaying = isPlaying,
+                onAction = onAction
+            )
+
+            // Push position to the right
+            Spacer(Modifier.weight(1f))
+
+            // Position readout
+            Text(
+                text = position.format(),
+                style = MaterialTheme.typography.labelMedium,
+                color = NjStudioWaveform.copy(alpha = 0.7f)
+            )
+        }
+
+        // Metronome settings drawer
+        androidx.compose.animation.AnimatedVisibility(
+            visible = isMetronomeSettingsOpen,
+            enter = androidx.compose.animation.expandVertically(),
+            exit = androidx.compose.animation.shrinkVertically()
+        ) {
+            MetronomeSettingsDrawer(
+                volume = metronomeVolume,
+                countInBars = countInBars,
+                onAction = onAction
+            )
+        }
+    }
+}
+
+/** Metronome + Gear rocker pill pair (matches Loop/Clear pattern). */
+@Composable
+private fun MetronomeButtonPill(
+    isEnabled: Boolean,
+    isSettingsOpen: Boolean,
+    lastBeatFrame: Long,
+    isPlaying: Boolean,
+    onAction: (StudioAction) -> Unit
+) {
+    // Beat pulse animation: scale up briefly when a new beat is detected
+    val beatScale = remember { androidx.compose.animation.core.Animatable(1f) }
+    LaunchedEffect(lastBeatFrame) {
+        if (lastBeatFrame >= 0 && isEnabled && isPlaying) {
+            beatScale.snapTo(1.3f)
+            beatScale.animateTo(
+                1f,
+                animationSpec = androidx.compose.animation.core.tween(
+                    durationMillis = 150,
+                    easing = androidx.compose.animation.core.FastOutSlowInEasing
+                )
+            )
+        }
+    }
+
+    Row(
+        modifier = Modifier.height(IntrinsicSize.Min),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        NjButton(
+            text = "Met",
+            onClick = { onAction(StudioAction.ToggleMetronome) },
+            isActive = isEnabled,
+            ledColor = NjMetronomeLed,
+            ledScale = beatScale.value
+        )
+
+        Box(
+            Modifier
+                .width(1.dp)
+                .fillMaxHeight()
+                .background(NjOutline)
+        )
+
+        NjButton(
+            text = "Cfg",
+            icon = Icons.Outlined.Settings,
+            onClick = { onAction(StudioAction.ToggleMetronomeSettings) },
+            isActive = isSettingsOpen,
+            ledColor = NjMuted2,
+            activeGlow = false
+        )
+    }
+}
+
+/** Compact settings drawer for metronome: volume knob + count-in selector. */
+@Composable
+private fun MetronomeSettingsDrawer(
+    volume: Float,
+    countInBars: Int,
+    onAction: (StudioAction) -> Unit
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(
-                NjBg.copy(alpha = 0.6f),
-                RoundedCornerShape(6.dp)
+                NjBg.copy(alpha = 0.8f),
+                RoundedCornerShape(bottomStart = 6.dp, bottomEnd = 6.dp)
             )
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Time signature picker -- cycle through presets on tap
-        val currentSig = timeSignatureNumerator to timeSignatureDenominator
+        // Volume knob
+        com.example.nightjar.ui.components.NjKnob(
+            value = volume,
+            onValueChange = { onAction(StudioAction.SetMetronomeVolume(it)) },
+            knobSize = 36.dp,
+            label = "Vol"
+        )
+
+        // Count-in selector: cycle through 0/1/2/4
+        val countInOptions = listOf(0, 1, 2, 4)
         NjButton(
-            text = "$timeSignatureNumerator/$timeSignatureDenominator",
+            text = if (countInBars == 0) "No CI" else "${countInBars} Bar",
             onClick = {
-                val idx = TIME_SIGNATURE_PRESETS.indexOf(currentSig)
-                val next = TIME_SIGNATURE_PRESETS[(idx + 1) % TIME_SIGNATURE_PRESETS.size]
-                onAction(StudioAction.SetTimeSignature(next.first, next.second))
+                val idx = countInOptions.indexOf(countInBars)
+                val next = countInOptions[(idx + 1) % countInOptions.size]
+                onAction(StudioAction.SetCountInBars(next))
             },
-            textColor = NjStudioAccent.copy(alpha = 0.8f)
+            textColor = NjMetronomeLed.copy(alpha = 0.8f)
         )
 
-        // BPM with +/- buttons
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            NjButton(
-                text = "-",
-                onClick = { onAction(StudioAction.SetBpm(bpm - 1.0)) },
-                textColor = NjStudioAccent.copy(alpha = 0.7f)
-            )
-            Text(
-                text = "${bpm.toInt()} BPM",
-                style = MaterialTheme.typography.labelMedium,
-                color = NjStudioAccent.copy(alpha = 0.8f),
-                modifier = Modifier.padding(horizontal = 4.dp)
-            )
-            NjButton(
-                text = "+",
-                onClick = { onAction(StudioAction.SetBpm(bpm + 1.0)) },
-                textColor = NjStudioAccent.copy(alpha = 0.7f)
-            )
-        }
-
-        // Snap toggle
-        NjButton(
-            text = "Snap",
-            onClick = { onAction(StudioAction.ToggleSnap) },
-            isActive = isSnapEnabled,
-            ledColor = NjStudioAccent,
-        )
-
-        // Grid resolution picker -- cycle through presets on tap
-        NjButton(
-            text = "1/${gridResolution}",
-            onClick = {
-                val idx = GRID_RESOLUTION_PRESETS.indexOf(gridResolution)
-                val next = GRID_RESOLUTION_PRESETS[(idx + 1) % GRID_RESOLUTION_PRESETS.size]
-                onAction(StudioAction.SetGridResolution(next))
-            },
-            textColor = NjStudioAccent.copy(alpha = 0.8f)
-        )
-
-        // Push position to the right
-        Spacer(Modifier.weight(1f))
-
-        // Position readout
         Text(
-            text = position.format(),
-            style = MaterialTheme.typography.labelMedium,
-            color = NjStudioWaveform.copy(alpha = 0.7f)
+            text = "Count-In",
+            style = MaterialTheme.typography.labelSmall,
+            color = NjMuted
         )
     }
 }

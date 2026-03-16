@@ -14,6 +14,7 @@ import com.example.nightjar.ui.theme.NjBg
 import com.example.nightjar.ui.theme.NjPanelInset
 import com.example.nightjar.ui.theme.NjMuted
 import com.example.nightjar.ui.theme.NjMuted2
+import com.example.nightjar.ui.theme.NjMetronomeLed
 import com.example.nightjar.ui.theme.NjRecordCoral
 import com.example.nightjar.ui.theme.NjTrackColors
 import android.content.res.Configuration
@@ -204,6 +205,7 @@ fun RecordScreen(
             val writeSunk = isBusy || postRecording != null
 
             val lcdText = when {
+                state.isCountingIn -> "COUNT IN"
                 state.isRecording -> "RECORDING"
                 isSaving -> "SAVING"
                 postRecording != null -> "SAVED"
@@ -230,6 +232,8 @@ fun RecordScreen(
                         else vm.onAction(RecordAction.CreateStudioIdea)
                     },
                     onLibrary = onOpenLibrary,
+                    onAction = { vm.onAction(it) },
+                    metronomeState = state,
                     modifier = contentModifier
                 )
             } else {
@@ -252,6 +256,8 @@ fun RecordScreen(
                         else vm.onAction(RecordAction.CreateStudioIdea)
                     },
                     onLibrary = onOpenLibrary,
+                    onAction = { vm.onAction(it) },
+                    metronomeState = state,
                     modifier = contentModifier
                 )
             }
@@ -273,6 +279,8 @@ private fun PortraitRecordLayout(
     onWrite: () -> Unit,
     onStudio: () -> Unit,
     onLibrary: () -> Unit,
+    onAction: (RecordAction) -> Unit,
+    metronomeState: RecordUiState,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -351,12 +359,36 @@ private fun PortraitRecordLayout(
             )
         }
         Spacer(Modifier.height(10.dp))
-        RecordScreenButton(
-            icon = Icons.AutoMirrored.Filled.List,
-            label = "Library",
-            onClick = onLibrary,
-            enabled = !isBusy
-        )
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            RecordScreenButton(
+                icon = Icons.AutoMirrored.Filled.List,
+                label = "Library",
+                onClick = onLibrary,
+                enabled = !isBusy,
+                modifier = Modifier.weight(1f)
+            )
+            RecordMetronomeButton(
+                isEnabled = metronomeState.isMetronomeEnabled,
+                isSettingsOpen = metronomeState.isMetronomeSettingsOpen,
+                onAction = onAction,
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        // Metronome settings drawer
+        androidx.compose.animation.AnimatedVisibility(
+            visible = metronomeState.isMetronomeSettingsOpen,
+            enter = androidx.compose.animation.expandVertically(),
+            exit = androidx.compose.animation.shrinkVertically()
+        ) {
+            RecordMetronomeSettingsDrawer(
+                isEnabled = metronomeState.isMetronomeEnabled,
+                bpm = metronomeState.metronomeBpm,
+                volume = metronomeState.metronomeVolume,
+                countInBars = metronomeState.countInBars,
+                onAction = onAction
+            )
+        }
     }
 }
 
@@ -374,6 +406,8 @@ private fun LandscapeRecordLayout(
     onWrite: () -> Unit,
     onStudio: () -> Unit,
     onLibrary: () -> Unit,
+    onAction: (RecordAction) -> Unit,
+    metronomeState: RecordUiState,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -432,6 +466,27 @@ private fun LandscapeRecordLayout(
                     onClick = onLibrary,
                     enabled = !isBusy,
                     modifier = Modifier.weight(1f)
+                )
+                RecordMetronomeButton(
+                    isEnabled = metronomeState.isMetronomeEnabled,
+                    isSettingsOpen = metronomeState.isMetronomeSettingsOpen,
+                    onAction = onAction,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            // Metronome settings drawer
+            androidx.compose.animation.AnimatedVisibility(
+                visible = metronomeState.isMetronomeSettingsOpen,
+                enter = androidx.compose.animation.expandVertically(),
+                exit = androidx.compose.animation.shrinkVertically()
+            ) {
+                RecordMetronomeSettingsDrawer(
+                    isEnabled = metronomeState.isMetronomeEnabled,
+                    bpm = metronomeState.metronomeBpm,
+                    volume = metronomeState.metronomeVolume,
+                    countInBars = metronomeState.countInBars,
+                    onAction = onAction
                 )
             }
         }
@@ -1002,5 +1057,138 @@ private fun TransformingWaveformPanel(
             height = 48.dp,
             barColor = barColor
         )
+    }
+}
+
+/** Metronome button styled as an NjCard for the Record screen. Tap to toggle settings drawer. */
+@Composable
+private fun RecordMetronomeButton(
+    isEnabled: Boolean,
+    isSettingsOpen: Boolean,
+    onAction: (RecordAction) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    NjCard(
+        onClick = { onAction(RecordAction.ToggleMetronomeSettings) },
+        modifier = modifier
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Tune,
+                contentDescription = "Metronome",
+                tint = if (isEnabled) NjMetronomeLed else NjMuted2,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "Metro",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (isEnabled) NjMetronomeLed else NjMuted
+            )
+        }
+    }
+}
+
+/** Metronome settings drawer for the Record screen. */
+@Composable
+private fun RecordMetronomeSettingsDrawer(
+    isEnabled: Boolean,
+    bpm: Double,
+    volume: Float,
+    countInBars: Int,
+    onAction: (RecordAction) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp)
+            .background(
+                NjBg.copy(alpha = 0.8f),
+                RoundedCornerShape(6.dp)
+            )
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        // Enable toggle row
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            NjButton(
+                text = if (isEnabled) "On" else "Off",
+                onClick = { onAction(RecordAction.ToggleMetronome) },
+                isActive = isEnabled,
+                ledColor = NjMetronomeLed,
+                textColor = if (isEnabled) NjMetronomeLed else NjMuted
+            )
+            Text(
+                text = "Metronome",
+                style = MaterialTheme.typography.labelMedium,
+                color = if (isEnabled) NjMetronomeLed.copy(alpha = 0.8f) else NjMuted
+            )
+        }
+
+        // BPM + Tap Tempo row
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            NjButton(
+                text = "-",
+                onClick = { onAction(RecordAction.SetMetronomeBpm(bpm - 1.0)) },
+                textColor = NjMetronomeLed.copy(alpha = 0.7f)
+            )
+            Text(
+                text = "${bpm.toInt()} BPM",
+                style = MaterialTheme.typography.labelMedium,
+                color = NjMetronomeLed.copy(alpha = 0.8f),
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
+            NjButton(
+                text = "+",
+                onClick = { onAction(RecordAction.SetMetronomeBpm(bpm + 1.0)) },
+                textColor = NjMetronomeLed.copy(alpha = 0.7f)
+            )
+
+            Spacer(Modifier.width(8.dp))
+
+            NjButton(
+                text = "Tap",
+                onClick = { onAction(RecordAction.TapTempo) },
+                textColor = NjMetronomeLed.copy(alpha = 0.7f)
+            )
+        }
+
+        // Volume + Count-in row
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            com.example.nightjar.ui.components.NjKnob(
+                value = volume,
+                onValueChange = { onAction(RecordAction.SetMetronomeVolume(it)) },
+                knobSize = 36.dp,
+                label = "Vol"
+            )
+
+            val countInOptions = listOf(0, 1, 2, 4)
+            NjButton(
+                text = if (countInBars == 0) "No CI" else "${countInBars} Bar",
+                onClick = {
+                    val idx = countInOptions.indexOf(countInBars)
+                    val next = countInOptions[(idx + 1) % countInOptions.size]
+                    onAction(RecordAction.SetCountInBars(next))
+                },
+                textColor = NjMetronomeLed.copy(alpha = 0.8f)
+            )
+            Text(
+                text = "Count-In",
+                style = MaterialTheme.typography.labelSmall,
+                color = NjMuted
+            )
+        }
     }
 }

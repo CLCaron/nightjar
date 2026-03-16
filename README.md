@@ -86,6 +86,7 @@ Nightjar is in active development, working toward a v1.0 Play Store release.
 - Sample-accurate MIDI and drum timing via sub-buffer scheduling (events fire at exact sample positions within render chunks)
 - Measure/beat timeline with time signature support (4/4, 3/4, 6/8, 2/4) and snap-to-grid
 - Project controls bar (BPM, time signature, snap toggle, position readout)
+- Metronome with configurable count-in (1/2/4 bars), tap tempo, volume control. Plays continuously through recording on both Record and Studio screens. Seamless negative-position count-in with zero gap at the recording boundary.
 - Take mini-drawer with rename and delete (long-press take header to open)
 - Unified hardware-style UI components (NjButton, NjCard, NjRecessedPanel, NjLedDot) across all screens
 - Unified indigo color palette (base and Studio tokens merged)

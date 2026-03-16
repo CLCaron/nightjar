@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.nightjar.audio.AudioLatencyEstimator
+import com.example.nightjar.audio.MetronomePreferences
 import com.example.nightjar.audio.MusicalTimeConverter
 import com.example.nightjar.audio.OboeAudioEngine
 import com.example.nightjar.audio.SoundFontManager
@@ -63,7 +64,8 @@ class StudioViewModel @Inject constructor(
     private val audioEngine: OboeAudioEngine,
     private val recordingStorage: RecordingStorage,
     private val latencyEstimator: AudioLatencyEstimator,
-    private val soundFontManager: SoundFontManager
+    private val soundFontManager: SoundFontManager,
+    private val metronomePrefs: MetronomePreferences
 ) : ViewModel() {
 
     private var currentIdeaId: Long? = null
@@ -110,6 +112,16 @@ class StudioViewModel @Inject constructor(
     private var isFirstTrackRecording: Boolean = false
 
     init {
+        // Load persisted metronome settings
+        _state.update {
+            it.copy(
+                isMetronomeEnabled = metronomePrefs.isEnabled,
+                metronomeVolume = metronomePrefs.volume,
+                countInBars = metronomePrefs.countInBars
+            )
+        }
+        audioEngine.setMetronomeVolume(metronomePrefs.volume)
+
         startTick()
     }
 
@@ -127,11 +139,17 @@ class StudioViewModel @Inject constructor(
                 } else {
                     engineDuration
                 }
+                // Poll metronome beat frame for LED pulse animation
+                val beatFrame = if (_state.value.isMetronomeEnabled) {
+                    audioEngine.getLastMetronomeBeatFrame()
+                } else -1L
+
                 _state.update {
                     it.copy(
                         isPlaying = audioEngine.isPlaying.value,
                         globalPositionMs = audioEngine.positionMs.value,
-                        totalDurationMs = effectiveDuration
+                        totalDurationMs = effectiveDuration,
+                        lastBeatFrame = beatFrame
                     )
                 }
 
@@ -176,8 +194,14 @@ class StudioViewModel @Inject constructor(
             }
             StudioAction.MicPermissionGranted -> startRecordingAfterPermission()
             StudioAction.StopOverdubRecording -> stopRecording()
-            StudioAction.Play -> audioEngine.play()
-            StudioAction.Pause -> audioEngine.pause()
+            StudioAction.Play -> {
+                audioEngine.play()
+                syncMetronomeToEngine()
+            }
+            StudioAction.Pause -> {
+                audioEngine.pause()
+                syncMetronomeToEngine()
+            }
             StudioAction.RestartPlayback -> {
                 audioEngine.pause()
                 audioEngine.seekTo(0L)
@@ -387,6 +411,14 @@ class StudioViewModel @Inject constructor(
             is StudioAction.TapClip -> tapClip(action.trackId, action.clipId, action.clipType)
             StudioAction.DismissClipPanel -> dismissClipPanel()
 
+            // Metronome
+            StudioAction.ToggleMetronome -> toggleMetronome()
+            is StudioAction.SetMetronomeVolume -> setMetronomeVolume(action.volume)
+            is StudioAction.SetCountInBars -> setCountInBars(action.bars)
+            StudioAction.ToggleMetronomeSettings -> {
+                _state.update { it.copy(isMetronomeSettingsOpen = !it.isMetronomeSettingsOpen) }
+            }
+
             // Inline MiniPianoRoll
             is StudioAction.SelectMidiClip -> selectMidiClip(action.trackId, action.clipId)
             is StudioAction.InlinePlaceNote -> inlinePlaceNote(action.trackId, action.clipId, action.pitch, action.startMs, action.durationMs)
@@ -425,8 +457,9 @@ class StudioViewModel @Inject constructor(
                     )
                 }
 
-                // Set project BPM in the native engine
+                // Set project BPM and metronome config in the native engine
                 audioEngine.setBpm(idea.bpm)
+                audioEngine.setMetronomeBeatsPerBar(idea.timeSignatureNumerator)
 
                 // Load takes for all audio tracks so the engine can load them correctly
                 val audioTrackIds = tracks.filter { it.isAudio }.map { it.id }
@@ -564,6 +597,7 @@ class StudioViewModel @Inject constructor(
     /**
      * Called after mic permission is granted. Starts the actual recording.
      * Handles both new-track creation (no armed track) and armed-track take recording.
+     * If count-in is configured, plays metronome for N measures first.
      */
     private fun startRecordingAfterPermission() {
         val ideaId = currentIdeaId ?: return
@@ -574,30 +608,53 @@ class StudioViewModel @Inject constructor(
         loopResetTimestampsMs.clear()
         lastLoopResetCount = audioEngine.getLoopResetCount()
 
-        // Keep loop enabled during recording (no longer disable it)
-
         viewModelScope.launch {
             try {
+                val countInBars = st.countInBars
+                val hasCountIn = countInBars > 0 && st.isMetronomeEnabled
+
+                if (hasCountIn) {
+                    _state.update { it.copy(isCountingIn = true) }
+                }
+
+                // Configure metronome and count-in before starting anything
+                syncMetronomeToEngine()
+                if (hasCountIn) {
+                    audioEngine.setCountIn(countInBars, st.timeSignatureNumerator)
+                }
+
                 val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
                 val file = recordingStorage.getAudioFile("nightjar_overdub_$ts.wav")
                 recordingFile = file
 
                 val intendedStartMs = audioEngine.positionMs.value
 
-                // Pre-roll capture protocol
+                // Phase 1: Start input stream
                 val started = audioEngine.startRecording(file.absolutePath)
                 if (!started) {
+                    _state.update { it.copy(isCountingIn = false) }
                     _effects.emit(StudioEffect.ShowError("Failed to start recording."))
                     return@launch
                 }
+                // Phase 2: Pipeline hot
                 audioEngine.awaitFirstBuffer()
 
-                audioEngine.openWriteGate()
-                val writeGateNanos = System.nanoTime()
-
+                // Start playback from negative position (count-in) or current position
                 val hasPlayableTracks = st.tracks.any { !it.isMuted }
                 audioEngine.setRecording(true)
                 audioEngine.play()
+
+                if (hasCountIn) {
+                    // Wait for count-in duration (metronome-only, mixer silent at negative pos)
+                    val beatDurationMs = 60_000.0 / st.bpm
+                    val countInMs = (countInBars * st.timeSignatureNumerator * beatDurationMs).toLong()
+                    delay(countInMs)
+                    _state.update { it.copy(isCountingIn = false) }
+                }
+
+                // Phase 3: Open write gate -- recording starts as position crosses 0
+                audioEngine.openWriteGate()
+                val writeGateNanos = System.nanoTime()
 
                 val preRollMs = (System.nanoTime() - writeGateNanos) / 1_000_000L
                 val compensation = latencyEstimator.computeCompensationMs(
@@ -614,7 +671,8 @@ class StudioViewModel @Inject constructor(
                     "hasPlayableTracks=$hasPlayableTracks, " +
                     "isLoopRecording=$isLoopRecording, " +
                     "armedTrackId=$recordingArmedTrackId, " +
-                    "isFirstTrack=$isFirstTrackRecording")
+                    "isFirstTrack=$isFirstTrackRecording, " +
+                    "countInBars=$countInBars")
 
                 amplitudeBuffer.clear()
                 _state.update {
@@ -642,6 +700,7 @@ class StudioViewModel @Inject constructor(
                     }
                 }
             } catch (e: Exception) {
+                _state.update { it.copy(isCountingIn = false) }
                 _effects.emit(
                     StudioEffect.ShowError(e.message ?: "Failed to start recording.")
                 )
@@ -1472,6 +1531,7 @@ class StudioViewModel @Inject constructor(
                 timeSignatureDenominator = denominator
             )
         }
+        audioEngine.setMetronomeBeatsPerBar(numerator)
         val ideaId = currentIdeaId ?: return
         viewModelScope.launch {
             try {
@@ -2343,7 +2403,41 @@ class StudioViewModel @Inject constructor(
         audioEngine.pause()
         audioEngine.setDrumSequencerEnabled(false)
         audioEngine.setMidiSequencerEnabled(false)
+        audioEngine.setMetronomeEnabled(false)
         audioEngine.synthAllSoundsOff()
         audioEngine.removeAllTracks()
+    }
+
+    // ── Metronome ─────────────────────────────────────────────────────────
+
+    private fun toggleMetronome() {
+        val newEnabled = !_state.value.isMetronomeEnabled
+        _state.update { it.copy(isMetronomeEnabled = newEnabled) }
+        metronomePrefs.isEnabled = newEnabled
+        syncMetronomeToEngine()
+    }
+
+    private fun setMetronomeVolume(volume: Float) {
+        val clamped = volume.coerceIn(0f, 1f)
+        _state.update { it.copy(metronomeVolume = clamped) }
+        audioEngine.setMetronomeVolume(clamped)
+        metronomePrefs.volume = clamped
+    }
+
+    private fun setCountInBars(bars: Int) {
+        _state.update { it.copy(countInBars = bars) }
+        metronomePrefs.countInBars = bars
+    }
+
+    /**
+     * Sync metronome config to the engine.
+     * The C++ render thread already gates on transport_.playing,
+     * so we only need to reflect the user's enabled preference here.
+     */
+    private fun syncMetronomeToEngine() {
+        val st = _state.value
+        audioEngine.setMetronomeEnabled(st.isMetronomeEnabled)
+        audioEngine.setMetronomeVolume(st.metronomeVolume)
+        audioEngine.setMetronomeBeatsPerBar(st.timeSignatureNumerator)
     }
 }

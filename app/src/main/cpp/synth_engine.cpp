@@ -86,6 +86,7 @@ void SynthEngine::start() {
     wasPlaying_ = false;
     sequencer_.reset();
     midiSequencer_.reset();
+    metronome_.reset();
     running_.store(true, std::memory_order_release);
     renderThread_ = std::thread(&SynthEngine::renderThreadFunc, this);
     LOGD("SynthEngine: render thread started");
@@ -101,6 +102,7 @@ void SynthEngine::stop() {
     ringBuffer_.reset();
     sequencer_.reset();
     midiSequencer_.reset();
+    metronome_.reset();
     LOGD("SynthEngine: render thread stopped");
 }
 
@@ -197,6 +199,27 @@ int64_t SynthEngine::getMidiMaxEndFrame() const {
     return midiSequencer_.getMaxEndFrame();
 }
 
+// ── Metronome control ──────────────────────────────────────────────────
+
+void SynthEngine::setMetronomeEnabled(bool enabled) {
+    metronome_.setEnabled(enabled);
+    if (!enabled) {
+        // No need for allSoundsOff -- percussion notes are short one-shots
+    }
+}
+
+void SynthEngine::setMetronomeVolume(float volume) {
+    metronome_.setVolume(volume);
+}
+
+void SynthEngine::setMetronomeBeatsPerBar(int beatsPerBar) {
+    metronome_.setBeatsPerBar(beatsPerBar);
+}
+
+int64_t SynthEngine::getLastMetronomeBeatFrame() const {
+    return metronome_.getLastBeatFrame();
+}
+
 // ── Sub-buffer scheduling ──────────────────────────────────────────────────
 
 void SynthEngine::fireEvent(const NoteEvent& e) {
@@ -283,6 +306,7 @@ void SynthEngine::renderThreadFunc() {
                 fluid_synth_all_sounds_off(FS_SYNTH, -1);  // -1 = all channels
             }
             sequencer_.reset();
+            metronome_.reset();
             renderPos_ = transport_.posFrames.load(std::memory_order_relaxed);
             midiSequencer_.resetToPosition(renderPos_);
             flushRequested_.store(false, std::memory_order_release);
@@ -301,6 +325,7 @@ void SynthEngine::renderThreadFunc() {
             renderPos_ = transport_.pendingStartPos.load(std::memory_order_acquire);
             sequencer_.reset();
             midiSequencer_.resetToPosition(renderPos_);
+            metronome_.reset();
         }
         if (!playing && wasPlaying_) {
             // Play stopped -- kill notes instantly (CC 120, no release tail)
@@ -309,6 +334,7 @@ void SynthEngine::renderThreadFunc() {
             }
             sequencer_.reset();
             midiSequencer_.reset();
+            metronome_.reset();
         }
         wasPlaying_ = playing;
 
@@ -341,6 +367,14 @@ void SynthEngine::renderThreadFunc() {
             mergedEvents_.insert(mergedEvents_.end(), midiEvents.begin(), midiEvents.end());
         }
 
+        // Metronome tick (uses its own enabled_ atomic)
+        if (metronome_.isEnabled()) {
+            double bpm = transport_.bpm.load(std::memory_order_relaxed);
+            const auto& metEvents = metronome_.tick(
+                renderPos_, kSynthRenderChunkFrames, bpm);
+            mergedEvents_.insert(mergedEvents_.end(), metEvents.begin(), metEvents.end());
+        }
+
         // Sub-buffer scheduling: split FluidSynth render at event boundaries
         // so noteOn/noteOff land at the exact sample position
         if (!renderSubBuffer(renderBuf, kSynthRenderChunkFrames, mergedEvents_)) {
@@ -364,6 +398,7 @@ void SynthEngine::renderThreadFunc() {
             }
             sequencer_.reset();
             midiSequencer_.resetToPosition(loopStart);
+            metronome_.reset();
 
             // Tick sequencers for the overshoot frames so events at
             // loopStart are not skipped on loop wrap
@@ -383,6 +418,15 @@ void SynthEngine::renderThreadFunc() {
                     const auto& midiEvents = midiSequencer_.tick(
                         loopStart, overshootFrames);
                     for (const auto& e : midiEvents) {
+                        fireEvent(e);
+                    }
+                }
+
+                if (metronome_.isEnabled()) {
+                    double bpm = transport_.bpm.load(std::memory_order_relaxed);
+                    const auto& metEvents = metronome_.tick(
+                        loopStart, overshootFrames, bpm);
+                    for (const auto& e : metEvents) {
                         fireEvent(e);
                     }
                 }

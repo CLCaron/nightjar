@@ -413,4 +413,39 @@ Java_com_example_nightjar_audio_OboeAudioEngine_nativeSetMidiSequencerEnabled(
     if (sEngine) sEngine->setMidiSequencerEnabled(static_cast<bool>(enabled));
 }
 
+// ── Count-in API ─────────────────────────────────────────────────────
+
+JNIEXPORT void JNICALL
+Java_com_example_nightjar_audio_OboeAudioEngine_nativeSetCountIn(
+        JNIEnv* /* env */, jobject /* thiz */, jint bars, jint beatsPerBar) {
+    if (sEngine) sEngine->setCountIn(static_cast<int>(bars), static_cast<int>(beatsPerBar));
+}
+
+// ── Metronome API ────────────────────────────────────────────────────
+
+JNIEXPORT void JNICALL
+Java_com_example_nightjar_audio_OboeAudioEngine_nativeSetMetronomeEnabled(
+        JNIEnv* /* env */, jobject /* thiz */, jboolean enabled) {
+    if (sEngine) sEngine->setMetronomeEnabled(static_cast<bool>(enabled));
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_nightjar_audio_OboeAudioEngine_nativeSetMetronomeVolume(
+        JNIEnv* /* env */, jobject /* thiz */, jfloat volume) {
+    if (sEngine) sEngine->setMetronomeVolume(static_cast<float>(volume));
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_nightjar_audio_OboeAudioEngine_nativeSetMetronomeBeatsPerBar(
+        JNIEnv* /* env */, jobject /* thiz */, jint beatsPerBar) {
+    if (sEngine) sEngine->setMetronomeBeatsPerBar(static_cast<int>(beatsPerBar));
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_example_nightjar_audio_OboeAudioEngine_nativeGetLastMetronomeBeatFrame(
+        JNIEnv* /* env */, jobject /* thiz */) {
+    if (!sEngine) return -1;
+    return static_cast<jlong>(sEngine->getLastMetronomeBeatFrame());
+}
+
 }  // extern "C"

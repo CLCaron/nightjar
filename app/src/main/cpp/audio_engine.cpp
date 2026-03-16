@@ -148,19 +148,24 @@ void AudioEngine::removeAllTracks() {
 void AudioEngine::play() {
     if (!transport_) return;
 
+    int64_t countIn = countInFrames_.exchange(0, std::memory_order_relaxed);
+
     int64_t pos = transport_->posFrames.load(std::memory_order_relaxed);
     int64_t total = transport_->totalFrames.load(std::memory_order_relaxed);
 
     // If at the end, restart from loop start or 0
-    if (pos >= total) {
+    if (pos >= total && total > 0) {
         int64_t loopStart = transport_->loopStartFrames.load(std::memory_order_relaxed);
         pos = (loopStart >= 0) ? loopStart : 0;
-        transport_->posFrames.store(pos, std::memory_order_relaxed);
     }
 
-    transport_->pendingStartPos.store(pos, std::memory_order_release);
+    int64_t startPos = pos - countIn;  // negative if count-in > 0
+
+    transport_->posFrames.store(startPos, std::memory_order_relaxed);
+    transport_->pendingStartPos.store(startPos, std::memory_order_release);
     transport_->playing.store(true, std::memory_order_release);
-    LOGD("AudioEngine: play (pos=%lldms)", (long long)framesToMs(pos));
+    LOGD("AudioEngine: play (pos=%lldms, countIn=%lldms)",
+         (long long)framesToMs(startPos), (long long)framesToMs(countIn));
 }
 
 void AudioEngine::pause() {
@@ -414,6 +419,44 @@ void AudioEngine::updateMidiTracks(const int* channels, const int* programs,
 
 void AudioEngine::setMidiSequencerEnabled(bool enabled) {
     if (synthEngine_) synthEngine_->setMidiSequencerEnabled(enabled);
+}
+
+// ── Count-in API ────────────────────────────────────────────────────
+
+void AudioEngine::setCountIn(int bars, int beatsPerBar) {
+    if (!transport_ || bars <= 0 || beatsPerBar <= 0) {
+        countInFrames_.store(0, std::memory_order_relaxed);
+        return;
+    }
+    double bpm = transport_->bpm.load(std::memory_order_relaxed);
+    if (bpm <= 0.0) {
+        countInFrames_.store(0, std::memory_order_relaxed);
+        return;
+    }
+    double framesPerBeat = (60.0 / bpm) * static_cast<double>(kSampleRate);
+    auto frames = static_cast<int64_t>(bars * beatsPerBar * framesPerBeat);
+    countInFrames_.store(frames, std::memory_order_relaxed);
+    LOGD("AudioEngine: setCountIn bars=%d bpb=%d -> %lld frames", bars, beatsPerBar,
+         (long long)frames);
+}
+
+// ── Metronome API ───────────────────────────────────────────────────
+
+void AudioEngine::setMetronomeEnabled(bool enabled) {
+    if (synthEngine_) synthEngine_->setMetronomeEnabled(enabled);
+}
+
+void AudioEngine::setMetronomeVolume(float volume) {
+    if (synthEngine_) synthEngine_->setMetronomeVolume(volume);
+}
+
+void AudioEngine::setMetronomeBeatsPerBar(int beatsPerBar) {
+    if (synthEngine_) synthEngine_->setMetronomeBeatsPerBar(beatsPerBar);
+}
+
+int64_t AudioEngine::getLastMetronomeBeatFrame() const {
+    if (!synthEngine_) return -1;
+    return synthEngine_->getLastMetronomeBeatFrame();
 }
 
 // ── Hardware latency measurement ────────────────────────────────────
