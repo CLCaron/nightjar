@@ -51,8 +51,9 @@ Both levels stay in sync -- edits in the drawer reflect in the full-screen edito
 
 #### Studio - General
 
-- [ ] **[Feature] Auto-follow playhead** — Timeline should scroll to keep the playhead visible during playback.
+- [x] **[Feature] Auto-follow playhead** — Timeline should scroll to keep the playhead visible during playback.
 - [ ] **[Feature] Takes order and auto-mute** — After loop recording, latest take should be on top and all except the most recent auto-muted.
+- [ ] **[Feature] Revisit audio recording takes** — We should revisit the way audio recording "takes" are handled. Currently, if you loop and record an initial audio recording (no track to arm. Simply hit the record button while looping with a 1 measure drum track, for example) it will simply combine all of those "takes" in to one continuous take. We should treat these similar to MIDI instrument and drum-track, where we can have multiple clips on a track and each of those clips can have their own takes which are presented if you tap on the clip. Let's discuss details before planning and implementation
 - [ ] **[UX] Replace FAB with Add Track button** — Let the user choose track type (Audio, Drum, MIDI) instead of a generic FAB.
 - [x] **[Feature] Clip action card-flip animation** — Tapping a clip triggers an X-axis card-flip animation (FlippableClip composable, 300ms tween) to reveal icon-only action buttons (ContentCopy/Edit/Delete) on the back face. Applied to drum, MIDI, and audio clips. Drag-across no longer accidentally selects clips (distance check vs touchSlop).
 - [ ] **[Bug] Clip deselect not working** — Tapping empty timeline space or the back-face background of a flipped clip should dismiss the selection (flip back), but currently does not. The `detectTapGestures` on the timeline background Box and the `clickable` on the ClipActionButtons Row are not receiving events, likely because clip-level `awaitFirstDown(requireUnconsumed = false)` intercepts all pointer events first. Needs a different approach -- possibly a global tap observer at the TimelinePanel level, or switching clips to consume-based gesture handling so taps can fall through.
