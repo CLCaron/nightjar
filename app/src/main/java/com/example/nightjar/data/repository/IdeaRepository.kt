@@ -10,6 +10,7 @@ import com.example.nightjar.data.db.entity.IdeaEntity
 import com.example.nightjar.data.db.entity.TagEntity
 import com.example.nightjar.data.db.entity.TrackEntity
 import com.example.nightjar.data.storage.RecordingStorage
+import kotlinx.coroutines.flow.Flow
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -148,17 +149,17 @@ class IdeaRepository(
     suspend fun getAllUsedTags(): List<TagEntity> =
         tagDao.getAllUsedTags()
 
-    suspend fun getIdeasNewest(): List<IdeaEntity> =
-        ideaDao.getIdeasNewest()
+    fun observeIdeasNewest(): Flow<List<IdeaEntity>> =
+        ideaDao.observeIdeas()
 
-    suspend fun getIdeasOldestFirst(): List<IdeaEntity> =
-        ideaDao.getIdeasOldestFirst()
+    fun observeIdeasOldestFirst(): Flow<List<IdeaEntity>> =
+        ideaDao.observeIdeasOldestFirst()
 
-    suspend fun getIdeasFavoritesFirst(): List<IdeaEntity> =
-        ideaDao.getIdeasFavoritesFirst()
+    fun observeIdeasFavoritesFirst(): Flow<List<IdeaEntity>> =
+        ideaDao.observeIdeasFavoritesFirst()
 
-    suspend fun getIdeasForTag(tagNormalized: String): List<IdeaEntity> =
-        ideaDao.getIdeasForTag(tagNormalized)
+    fun observeIdeasForTag(tagNormalized: String): Flow<List<IdeaEntity>> =
+        ideaDao.observeIdeasForTag(tagNormalized)
 
     /** Returns a map of idea ID → total playback duration in milliseconds. */
     suspend fun getIdeaDurations(): Map<Long, Long> =

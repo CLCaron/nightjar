@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -26,9 +28,10 @@ enum class SortMode {
 /**
  * ViewModel for the Library screen.
  *
- * Loads all ideas with sorting and tag-based filtering. Refreshes
- * automatically when the sort mode or selected tag changes. Supports
- * multi-track audio preview via [OboeAudioEngine].
+ * Observes ideas reactively via Room Flows so the list auto-updates
+ * when ideas are created, edited, or deleted from any screen.
+ * Supports sorting, tag-based filtering, and multi-track audio
+ * preview via [OboeAudioEngine].
  */
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
@@ -44,8 +47,34 @@ class LibraryViewModel @Inject constructor(
 
     private var pollJob: Job? = null
 
+    // Separate flows for the query parameters so flatMapLatest
+    // can switch the observed Room query when they change.
+    private val _sortMode = MutableStateFlow(SortMode.NEWEST)
+    private val _selectedTag = MutableStateFlow<String?>(null)
+
     init {
-        onAction(LibraryAction.Load)
+        // Reactive ideas observation -- auto-updates on any DB change
+        viewModelScope.launch {
+            @Suppress("OPT_IN_USAGE")
+            combine(_sortMode, _selectedTag) { sort, tag -> sort to tag }
+                .flatMapLatest { (sort, tag) ->
+                    when {
+                        tag != null -> repo.observeIdeasForTag(tag)
+                        sort == SortMode.FAVORITES_FIRST -> repo.observeIdeasFavoritesFirst()
+                        sort == SortMode.OLDEST -> repo.observeIdeasOldestFirst()
+                        else -> repo.observeIdeasNewest()
+                    }
+                }
+                .collect { ideas ->
+                    _state.update { it.copy(ideas = ideas, isLoading = false) }
+                }
+        }
+
+        // One-shot loads for tags and durations
+        viewModelScope.launch {
+            refreshUsedTags()
+            refreshDurations()
+        }
     }
 
     fun onAction(action: LibraryAction) {
@@ -64,7 +93,6 @@ class LibraryViewModel @Inject constructor(
             _state.update { it.copy(errorMessage = null) }
             refreshUsedTags()
             refreshDurations()
-            refreshIdeas()
         }
     }
 
@@ -88,38 +116,19 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
-    private suspend fun refreshIdeas() {
-        val tag = _state.value.selectedTagNormalized
-        val sort = _state.value.sortMode
-
-        try {
-            val ideas = when {
-                tag != null -> repo.getIdeasForTag(tag)
-                sort == SortMode.FAVORITES_FIRST -> repo.getIdeasFavoritesFirst()
-                sort == SortMode.OLDEST -> repo.getIdeasOldestFirst()
-                else -> repo.getIdeasNewest()
-            }
-            _state.update { it.copy(ideas = ideas) }
-        } catch (e: Exception) {
-            val msg = e.message ?: "Failed to load ideas."
-            _state.update { it.copy(errorMessage = msg) }
-            _effects.emit(LibraryEffect.ShowError(msg))
-        }
-    }
-
     private fun clearTagFilter() {
+        _selectedTag.value = null
         _state.update { it.copy(selectedTagNormalized = null) }
-        viewModelScope.launch { refreshIdeas() }
     }
 
     private fun selectTag(tagNormalized: String) {
+        _selectedTag.value = tagNormalized
         _state.update { it.copy(selectedTagNormalized = tagNormalized) }
-        viewModelScope.launch { refreshIdeas() }
     }
 
     private fun setSortMode(mode: SortMode) {
+        _sortMode.value = mode
         _state.update { it.copy(sortMode = mode) }
-        viewModelScope.launch { refreshIdeas() }
     }
 
     private fun playPreview(ideaId: Long) {
