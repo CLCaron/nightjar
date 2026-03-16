@@ -5,6 +5,7 @@ import com.example.nightjar.audio.MusicalTimeConverter
 import com.example.nightjar.ui.components.NjButton
 import android.Manifest
 import android.content.pm.PackageManager
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
@@ -130,6 +131,9 @@ fun StudioScreen(
         }
     }
 
+    // Intercept system back so empty-idea cleanup runs via the ViewModel.
+    BackHandler { vm.onAction(StudioAction.NavigateBack) }
+
     LaunchedEffect(Unit) {
         vm.effects.collectLatest { effect ->
             when (effect) {
@@ -194,7 +198,7 @@ fun StudioScreen(
             ) {
                 NjTopBar(
                     title = state.ideaTitle.ifBlank { "Studio" },
-                    onBack = onBack,
+                    onBack = { vm.onAction(StudioAction.NavigateBack) },
                     trailing = {
                         IconButton(
                             onClick = { vm.onAction(StudioAction.ShowLatencySetup) }

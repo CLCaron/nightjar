@@ -173,6 +173,7 @@ class StudioViewModel @Inject constructor(
 
     fun onAction(action: StudioAction) {
         when (action) {
+            StudioAction.NavigateBack -> navigateBack()
             is StudioAction.Load -> load(action.ideaId)
             StudioAction.ShowAddTrackSheet -> {
                 _state.update { it.copy(showAddTrackSheet = true) }
@@ -481,6 +482,18 @@ class StudioViewModel @Inject constructor(
                 _state.update { it.copy(isLoading = false, errorMessage = msg) }
                 _effects.emit(StudioEffect.ShowError(msg))
             }
+        }
+    }
+
+    private fun navigateBack() {
+        val ideaId = currentIdeaId ?: run {
+            viewModelScope.launch { _effects.emit(StudioEffect.NavigateBack) }
+            return
+        }
+
+        viewModelScope.launch {
+            ideaRepo.deleteIdeaIfEmpty(ideaId)
+            _effects.emit(StudioEffect.NavigateBack)
         }
     }
 

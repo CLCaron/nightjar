@@ -75,6 +75,7 @@ class OverviewViewModel @Inject constructor(
             OverviewAction.ToggleFavorite -> toggleFavorite()
             is OverviewAction.AddTagsFromInput -> addTagsFromInput(action.raw)
             is OverviewAction.RemoveTag -> removeTag(action.tagId)
+            OverviewAction.NavigateBack -> navigateBack()
             OverviewAction.DeleteIdea -> deleteIdea()
             OverviewAction.FlushPendingSaves -> flushPendingSaves()
             OverviewAction.Play -> audioEngine.play()
@@ -120,6 +121,33 @@ class OverviewViewModel @Inject constructor(
                 _state.update { it.copy(errorMessage = msg) }
                 _effects.emit(OverviewEffect.ShowError(msg))
             }
+        }
+    }
+
+    private fun navigateBack() {
+        val ideaId = currentIdeaId ?: run {
+            viewModelScope.launch { _effects.emit(OverviewEffect.NavigateBack) }
+            return
+        }
+
+        // Cancel pending debounce jobs -- we'll handle saves inline.
+        titleSaveJob?.cancel()
+        notesSaveJob?.cancel()
+
+        viewModelScope.launch {
+            // Flush any pending edits first so the DB reflects final state.
+            val idea = _state.value.idea
+            if (idea != null) {
+                try {
+                    repo.updateTitle(idea.id, _state.value.titleDraft)
+                    repo.updateNotes(idea.id, _state.value.notesDraft)
+                } catch (_: Exception) { /* best effort */ }
+            }
+
+            // Delete the idea if the user never added meaningful content.
+            repo.deleteIdeaIfEmpty(ideaId)
+
+            _effects.emit(OverviewEffect.NavigateBack)
         }
     }
 

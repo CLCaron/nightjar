@@ -127,6 +127,28 @@ class IdeaRepository(
     }
 
     /**
+     * Deletes the idea if it has no meaningful content -- no tracks, blank
+     * notes, no tags, and not favorited. Returns true if deleted.
+     *
+     * Used for cleanup when the user navigates back without doing anything
+     * after tapping "Write" or "Studio" on the Record screen.
+     */
+    suspend fun deleteIdeaIfEmpty(id: Long): Boolean {
+        val idea = ideaDao.getIdeaById(id) ?: return false
+        if (idea.isFavorite) return false
+        if (idea.notes.isNotBlank()) return false
+
+        val tracks = trackDao.getTracksForIdea(id)
+        if (tracks.isNotEmpty()) return false
+
+        val tags = tagDao.getTagsForIdea(id)
+        if (tags.isNotEmpty()) return false
+
+        ideaDao.deleteIdeaById(id)
+        return true
+    }
+
+    /**
      * Returns the audio file for the first track (by sort index) of the given idea,
      * or null if the idea has no tracks.
      */

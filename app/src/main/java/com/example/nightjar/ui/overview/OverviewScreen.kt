@@ -1,6 +1,7 @@
 package com.example.nightjar.ui.overview
 
 import android.view.HapticFeedbackConstants
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -147,8 +148,16 @@ fun OverviewScreen(
         }
     }
 
+    // Intercept system back so empty-idea cleanup runs via the ViewModel.
+    BackHandler { vm.onAction(OverviewAction.NavigateBack) }
+
     DisposableEffect(Unit) {
-        onDispose { vm.onAction(OverviewAction.FlushPendingSaves) }
+        onDispose {
+            // Flush is also done in NavigateBack, but this covers cases
+            // where the screen is disposed without an explicit back action
+            // (e.g. process death, activity recreation).
+            vm.onAction(OverviewAction.FlushPendingSaves)
+        }
     }
 
     // Pause playback when leaving the screen, refresh tracks when returning.
@@ -235,7 +244,7 @@ fun OverviewScreen(
         ) {
             NjTopBar(
                 title = "Overview",
-                onBack = onBack
+                onBack = { vm.onAction(OverviewAction.NavigateBack) }
             )
 
             errorMessage?.let { msg ->

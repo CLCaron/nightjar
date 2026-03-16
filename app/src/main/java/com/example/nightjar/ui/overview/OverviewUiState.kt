@@ -46,6 +46,7 @@ sealed interface OverviewAction {
     data object ToggleFavorite : OverviewAction
     data class AddTagsFromInput(val raw: String) : OverviewAction
     data class RemoveTag(val tagId: Long) : OverviewAction
+    data object NavigateBack : OverviewAction
     data object DeleteIdea : OverviewAction
     data object FlushPendingSaves : OverviewAction
     data object Play : OverviewAction
