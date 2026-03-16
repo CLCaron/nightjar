@@ -106,6 +106,16 @@ public:
                           int totalEventCount);
     void setMidiSequencerEnabled(bool enabled);
 
+    // ── Count-in API ──────────────────────────────────────────────
+    /** Set count-in duration. Next play() will start from -countInFrames. */
+    void setCountIn(int bars, int beatsPerBar);
+
+    // ── Metronome API ───────────────────────────────────────────────
+    void setMetronomeEnabled(bool enabled);
+    void setMetronomeVolume(float volume);
+    void setMetronomeBeatsPerBar(int beatsPerBar);
+    int64_t getLastMetronomeBeatFrame() const;
+
     // ── Hardware latency measurement ──────────────────────────────────
     int64_t getOutputLatencyMs() const;
     int64_t getInputLatencyMs() const;
@@ -115,6 +125,7 @@ private:
     void recomputeTotalFrames();
 
     std::atomic<bool> initialized_{false};
+    std::atomic<int64_t> countInFrames_{0};
     std::atomic<int64_t> drumEndFrames_{0};
     std::atomic<int64_t> midiEndFrames_{0};
     std::unique_ptr<OboeRecordingStream> recordingStream_;

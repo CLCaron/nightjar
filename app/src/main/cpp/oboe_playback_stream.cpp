@@ -124,7 +124,7 @@ oboe::DataCallbackResult OboePlaybackStream::onAudioReady(
 
     // End-of-timeline check
     bool recording = transport_.recording.load(std::memory_order_relaxed);
-    if (!recording && pos >= total) {
+    if (!recording && total > 0 && pos >= total) {
         // Playback finished — stop and reset to 0
         transport_.playing.store(false, std::memory_order_release);
         transport_.posFrames.store(0, std::memory_order_relaxed);

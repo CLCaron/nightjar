@@ -4,6 +4,7 @@
 #include "spsc_ring_buffer.h"
 #include "step_sequencer.h"
 #include "midi_sequencer.h"
+#include "metronome_sequencer.h"
 #include <atomic>
 #include <thread>
 #include <string>
@@ -118,6 +119,13 @@ public:
     /** Get max end frame from the MIDI sequencer for timeline length. */
     int64_t getMidiMaxEndFrame() const;
 
+    // ── Metronome control ──────────────────────────────────────────────
+
+    void setMetronomeEnabled(bool enabled);
+    void setMetronomeVolume(float volume);
+    void setMetronomeBeatsPerBar(int beatsPerBar);
+    int64_t getLastMetronomeBeatFrame() const;
+
 private:
     void renderThreadFunc();
 
@@ -153,6 +161,9 @@ private:
     // MIDI sequencer
     MidiSequencer midiSequencer_;
     std::atomic<bool> midiSequencerEnabled_{false};
+
+    // Metronome
+    MetronomeSequencer metronome_;
 
     int64_t renderPos_ = 0;       // render thread's timeline position
     bool wasPlaying_ = false;     // for detecting play/pause transitions

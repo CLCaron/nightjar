@@ -126,7 +126,13 @@ data class StudioUiState(
     val midiTracks: Map<Long, MidiTrackUiState> = emptyMap(),
     val midiClipDragState: MidiClipDragState? = null,
     val expandedClipState: ExpandedClipState? = null,
-    val showInstrumentPickerForTrackId: Long? = null
+    val showInstrumentPickerForTrackId: Long? = null,
+    val isMetronomeEnabled: Boolean = false,
+    val metronomeVolume: Float = 0.7f,
+    val countInBars: Int = 0,
+    val isCountingIn: Boolean = false,
+    val lastBeatFrame: Long = -1L,
+    val isMetronomeSettingsOpen: Boolean = false
 ) {
     val hasLoopRegion: Boolean get() = loopStartMs != null && loopEndMs != null
 
@@ -179,7 +185,13 @@ data class StudioUiState(
                 midiTracks == other.midiTracks &&
                 midiClipDragState == other.midiClipDragState &&
                 expandedClipState == other.expandedClipState &&
-                showInstrumentPickerForTrackId == other.showInstrumentPickerForTrackId
+                showInstrumentPickerForTrackId == other.showInstrumentPickerForTrackId &&
+                isMetronomeEnabled == other.isMetronomeEnabled &&
+                metronomeVolume == other.metronomeVolume &&
+                countInBars == other.countInBars &&
+                isCountingIn == other.isCountingIn &&
+                lastBeatFrame == other.lastBeatFrame &&
+                isMetronomeSettingsOpen == other.isMetronomeSettingsOpen
     }
 
     override fun hashCode(): Int {
@@ -230,6 +242,12 @@ data class StudioUiState(
         result = 31 * result + (midiClipDragState?.hashCode() ?: 0)
         result = 31 * result + (expandedClipState?.hashCode() ?: 0)
         result = 31 * result + (showInstrumentPickerForTrackId?.hashCode() ?: 0)
+        result = 31 * result + isMetronomeEnabled.hashCode()
+        result = 31 * result + metronomeVolume.hashCode()
+        result = 31 * result + countInBars.hashCode()
+        result = 31 * result + isCountingIn.hashCode()
+        result = 31 * result + lastBeatFrame.hashCode()
+        result = 31 * result + isMetronomeSettingsOpen.hashCode()
         return result
     }
 }
@@ -365,6 +383,12 @@ sealed interface StudioAction {
     data class UpdateDragMidiClip(val previewOffsetMs: Long) : StudioAction
     data class FinishDragMidiClip(val trackId: Long, val clipId: Long, val newOffsetMs: Long) : StudioAction
     data object CancelDragMidiClip : StudioAction
+
+    // Metronome
+    data object ToggleMetronome : StudioAction
+    data class SetMetronomeVolume(val volume: Float) : StudioAction
+    data class SetCountInBars(val bars: Int) : StudioAction
+    data object ToggleMetronomeSettings : StudioAction
 
     // Inline MiniPianoRoll
     data class SelectMidiClip(val trackId: Long, val clipId: Long) : StudioAction

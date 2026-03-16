@@ -37,6 +37,7 @@ val NjStudioGreen = Color(0xFF7DA87A)       // muted sage green -- Play LED
 val NjStudioTeal = Color(0xFF5EA8A3)        // dusty teal -- Solo LED
 val NjStudioYellow = Color(0xFFCCB35A)      // warm muted yellow -- Mute LED
 val NjStudioWaveform = Color(0xFF9E9488)    // warm silver — trim handles, inactive UI
+val NjMetronomeLed = Color(0xFFB0D4F1)      // cool white-blue — metronome LED
 
 // ── Per-track waveform colors — muted warm tones ─────────────────
 // Enough saturation to distinguish tracks at a glance, but still

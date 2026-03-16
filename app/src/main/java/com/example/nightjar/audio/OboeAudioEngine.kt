@@ -251,6 +251,26 @@ class OboeAudioEngine @Inject constructor() {
     fun setMidiSequencerEnabled(enabled: Boolean) =
         nativeSetMidiSequencerEnabled(enabled)
 
+    // ── Count-in ──────────────────────────────────────────────────────────
+
+    /** Set count-in duration. Next play() will start from negative position. */
+    fun setCountIn(bars: Int, beatsPerBar: Int) =
+        nativeSetCountIn(bars, beatsPerBar)
+
+    // ── Metronome ─────────────────────────────────────────────────────────
+
+    fun setMetronomeEnabled(enabled: Boolean) =
+        nativeSetMetronomeEnabled(enabled)
+
+    fun setMetronomeVolume(volume: Float) =
+        nativeSetMetronomeVolume(volume)
+
+    fun setMetronomeBeatsPerBar(beatsPerBar: Int) =
+        nativeSetMetronomeBeatsPerBar(beatsPerBar)
+
+    /** Returns the frame of the last metronome beat event. Polled for LED pulse. */
+    fun getLastMetronomeBeatFrame(): Long = nativeGetLastMetronomeBeatFrame()
+
     // ── Hardware latency measurement ──────────────────────────────────────
 
     /**
@@ -345,6 +365,15 @@ class OboeAudioEngine @Inject constructor() {
         eventNotes: IntArray, eventVelocities: IntArray
     )
     private external fun nativeSetMidiSequencerEnabled(enabled: Boolean)
+
+    // Count-in
+    private external fun nativeSetCountIn(bars: Int, beatsPerBar: Int)
+
+    // Metronome
+    private external fun nativeSetMetronomeEnabled(enabled: Boolean)
+    private external fun nativeSetMetronomeVolume(volume: Float)
+    private external fun nativeSetMetronomeBeatsPerBar(beatsPerBar: Int)
+    private external fun nativeGetLastMetronomeBeatFrame(): Long
 
     // Hardware latency
     private external fun nativeGetOutputLatencyMs(): Long

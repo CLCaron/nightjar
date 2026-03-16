@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -71,10 +72,11 @@ fun NjButton(
     textColor: Color? = null,
     ledColor: Color? = null,
     activeGlow: Boolean = true,
+    ledScale: Float = 1f,
     shape: Shape = RoundedCornerShape(2.dp)
 ) {
     if (ledColor != null) {
-        ToggleModeButton(text, onClick, modifier, icon, isActive, ledColor, activeGlow, shape)
+        ToggleModeButton(text, onClick, modifier, icon, isActive, ledColor, activeGlow, ledScale, shape)
     } else {
         MomentaryModeButton(text, onClick, modifier, icon, isActive, activeAccent, textColor, shape)
     }
@@ -90,6 +92,7 @@ private fun ToggleModeButton(
     isActive: Boolean,
     ledColor: Color,
     activeGlow: Boolean,
+    ledScale: Float,
     shape: Shape
 ) {
     val toggleState = rememberMechanicalToggleState(isActive)
@@ -191,6 +194,10 @@ private fun ToggleModeButton(
             ),
         contentAlignment = Alignment.Center
     ) {
+        val scaleModifier = if (ledScale != 1f) {
+            Modifier.graphicsLayer(scaleX = ledScale, scaleY = ledScale)
+        } else Modifier
+
         if (icon != null) {
             // Neon glow: radial gradient behind the icon
             val glowColor = if (visuallyActive && activeGlow) ledColor else Color.Transparent
@@ -198,7 +205,7 @@ private fun ToggleModeButton(
                 imageVector = icon,
                 contentDescription = text.ifEmpty { null },
                 tint = fgColor,
-                modifier = Modifier
+                modifier = scaleModifier
                     .size(20.dp)
                     .drawBehind {
                         if (glowColor != Color.Transparent) {
@@ -237,7 +244,8 @@ private fun ToggleModeButton(
                 style = MaterialTheme.typography.labelLarge.let { base ->
                     if (glowShadow != null) base.copy(shadow = glowShadow) else base
                 },
-                color = fgColor
+                color = fgColor,
+                modifier = scaleModifier
             )
         }
     }
