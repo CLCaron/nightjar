@@ -1,21 +1,24 @@
 package com.example.nightjar.ui.record
 
-import com.example.nightjar.ui.components.NjCard
+import com.example.nightjar.ui.components.NjButton
+import com.example.nightjar.ui.components.NjIcons
+import com.example.nightjar.ui.components.NjLedDot
 import com.example.nightjar.ui.components.NjLiveWaveform
+import com.example.nightjar.ui.components.NjRecessedPanel
+import com.example.nightjar.ui.components.NjWaveform
 import com.example.nightjar.ui.components.PressedBodyColor
 import com.example.nightjar.ui.components.RaisedBodyColor
-import com.example.nightjar.ui.components.NjRecessedPanel
-import com.example.nightjar.ui.components.NjButton
-import com.example.nightjar.ui.components.NjWaveform
 import com.example.nightjar.ui.components.collectIsPressedWithMinDuration
+import com.example.nightjar.ui.components.njGrain
 import com.example.nightjar.ui.components.rememberMechanicalToggleState
 import com.example.nightjar.ui.theme.IbmPlexMono
 import com.example.nightjar.ui.theme.NjBg
-import com.example.nightjar.ui.theme.NjPanelInset
+import com.example.nightjar.ui.theme.NjMetronomeLed
 import com.example.nightjar.ui.theme.NjMuted
 import com.example.nightjar.ui.theme.NjMuted2
-import com.example.nightjar.ui.theme.NjMetronomeLed
+import com.example.nightjar.ui.theme.NjPanelInset
 import com.example.nightjar.ui.theme.NjRecordCoral
+import com.example.nightjar.ui.theme.NjStarlight
 import com.example.nightjar.ui.theme.NjTrackColors
 import android.content.res.Configuration
 import android.Manifest
@@ -23,6 +26,7 @@ import android.content.pm.PackageManager
 import android.view.HapticFeedbackConstants
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -49,9 +53,9 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
@@ -73,6 +77,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -80,11 +85,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -168,101 +175,153 @@ fun RecordScreen(
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
     ) { padding ->
-        val contentModifier = Modifier
-            .fillMaxSize()
-            .padding(padding)
-            .navigationBarsPadding()
-            .padding(horizontal = 20.dp, vertical = if (isLandscape) 8.dp else 18.dp)
+        Box(Modifier.fillMaxSize()) {
+            RecordScreenBackground()
 
-        if (!hasMicPermission) {
-            Column(
-                modifier = contentModifier,
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    text = "Microphone permission is required to record.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.80f)
-                )
+            val contentModifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp, vertical = if (isLandscape) 8.dp else 18.dp)
 
-                Spacer(Modifier.height(14.dp))
+            if (!hasMicPermission) {
+                Column(
+                    modifier = contentModifier,
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "Microphone permission is required to record.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.80f)
+                    )
 
-                NjButton(
-                    text = "Enable microphone",
-                    onClick = { requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
-                    isActive = false,
-                    ledColor = NjRecordCoral,
-                    modifier = Modifier.heightIn(min = 48.dp)
-                )
-            }
-        } else {
-            val postRecording = state.postRecording
-            val isSaving = !state.isRecording && postRecording == null &&
-                state.liveAmplitudes.isNotEmpty()
-            val isBusy = state.isRecording || isSaving
-            val waveformColor = NjTrackColors[0].copy(alpha = 0.65f)
-            val writeSunk = isBusy || postRecording != null
+                    Spacer(Modifier.height(14.dp))
 
-            val lcdText = when {
-                state.isCountingIn -> "COUNT IN"
-                state.isRecording -> "RECORDING"
-                isSaving -> "SAVING"
-                postRecording != null -> "SAVED"
-                else -> "RECORD"
-            }
-
-            if (isLandscape) {
-                LandscapeRecordLayout(
-                    isRecording = state.isRecording,
-                    lcdText = lcdText,
-                    postRecording = postRecording,
-                    liveAmplitudes = state.liveAmplitudes,
-                    waveformColor = waveformColor,
-                    isBusy = isBusy,
-                    writeSunk = writeSunk,
-                    onRecord = {
-                        if (!state.isRecording) vm.onAction(RecordAction.StartRecording)
-                        else vm.onAction(RecordAction.StopAndSave)
-                    },
-                    onGoToOverview = { vm.onAction(RecordAction.GoToOverview) },
-                    onWrite = { vm.onAction(RecordAction.CreateWriteIdea) },
-                    onStudio = {
-                        if (postRecording != null) vm.onAction(RecordAction.GoToStudio)
-                        else vm.onAction(RecordAction.CreateStudioIdea)
-                    },
-                    onLibrary = onOpenLibrary,
-                    onAction = { vm.onAction(it) },
-                    metronomeState = state,
-                    modifier = contentModifier
-                )
+                    NjButton(
+                        text = "Enable microphone",
+                        onClick = { requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
+                        isActive = false,
+                        ledColor = NjRecordCoral,
+                        modifier = Modifier.heightIn(min = 48.dp)
+                    )
+                }
             } else {
-                PortraitRecordLayout(
-                    isRecording = state.isRecording,
-                    lcdText = lcdText,
-                    postRecording = postRecording,
-                    liveAmplitudes = state.liveAmplitudes,
-                    waveformColor = waveformColor,
-                    isBusy = isBusy,
-                    writeSunk = writeSunk,
-                    onRecord = {
-                        if (!state.isRecording) vm.onAction(RecordAction.StartRecording)
-                        else vm.onAction(RecordAction.StopAndSave)
-                    },
-                    onGoToOverview = { vm.onAction(RecordAction.GoToOverview) },
-                    onWrite = { vm.onAction(RecordAction.CreateWriteIdea) },
-                    onStudio = {
-                        if (postRecording != null) vm.onAction(RecordAction.GoToStudio)
-                        else vm.onAction(RecordAction.CreateStudioIdea)
-                    },
-                    onLibrary = onOpenLibrary,
-                    onAction = { vm.onAction(it) },
-                    metronomeState = state,
-                    modifier = contentModifier
-                )
+                val postRecording = state.postRecording
+                val isSaving = !state.isRecording && postRecording == null &&
+                    state.liveAmplitudes.isNotEmpty()
+                val isBusy = state.isRecording || isSaving
+                val waveformColor = NjTrackColors[0].copy(alpha = 0.65f)
+                val writeSunk = isBusy || postRecording != null
+
+                val lcdText = when {
+                    state.isCountingIn -> "COUNT IN"
+                    state.isRecording -> "RECORDING"
+                    isSaving -> "SAVING"
+                    postRecording != null -> "SAVED"
+                    else -> "RECORD"
+                }
+
+                if (isLandscape) {
+                    LandscapeRecordLayout(
+                        isRecording = state.isRecording,
+                        lcdText = lcdText,
+                        postRecording = postRecording,
+                        liveAmplitudes = state.liveAmplitudes,
+                        waveformColor = waveformColor,
+                        isBusy = isBusy,
+                        writeSunk = writeSunk,
+                        onRecord = {
+                            if (!state.isRecording) vm.onAction(RecordAction.StartRecording)
+                            else vm.onAction(RecordAction.StopAndSave)
+                        },
+                        onGoToOverview = { vm.onAction(RecordAction.GoToOverview) },
+                        onWrite = { vm.onAction(RecordAction.CreateWriteIdea) },
+                        onStudio = {
+                            if (postRecording != null) vm.onAction(RecordAction.GoToStudio)
+                            else vm.onAction(RecordAction.CreateStudioIdea)
+                        },
+                        onLibrary = onOpenLibrary,
+                        onAction = { vm.onAction(it) },
+                        metronomeState = state,
+                        modifier = contentModifier
+                    )
+                } else {
+                    PortraitRecordLayout(
+                        isRecording = state.isRecording,
+                        lcdText = lcdText,
+                        postRecording = postRecording,
+                        liveAmplitudes = state.liveAmplitudes,
+                        waveformColor = waveformColor,
+                        isBusy = isBusy,
+                        writeSunk = writeSunk,
+                        onRecord = {
+                            if (!state.isRecording) vm.onAction(RecordAction.StartRecording)
+                            else vm.onAction(RecordAction.StopAndSave)
+                        },
+                        onGoToOverview = { vm.onAction(RecordAction.GoToOverview) },
+                        onWrite = { vm.onAction(RecordAction.CreateWriteIdea) },
+                        onStudio = {
+                            if (postRecording != null) vm.onAction(RecordAction.GoToStudio)
+                            else vm.onAction(RecordAction.CreateStudioIdea)
+                        },
+                        onLibrary = onOpenLibrary,
+                        onAction = { vm.onAction(it) },
+                        metronomeState = state,
+                        modifier = contentModifier
+                    )
+                }
             }
         }
     }
+}
+
+/**
+ * Layered background treatment for the Record screen.
+ *
+ * Three effects composed in a single full-bleed Box:
+ * 1. Fine grain -- breaks the glossy-flat digital feel
+ * 2. Vignette -- gentle edge darkening via radial gradient
+ * 3. Directional light -- extremely faint top-left warmth
+ */
+@Composable
+private fun RecordScreenBackground() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .njGrain(alpha = 0.015f, tintColor = 0x009E8CB0) // NjStarlight (warm lilac)
+            .drawBehind {
+                // Vignette: transparent center, warm dark edges
+                // Uses deep indigo rather than pure black to preserve warmth
+                val diagonal = kotlin.math.sqrt(
+                    size.width * size.width + size.height * size.height
+                )
+                val vignetteEdge = Color(0xFF060410) // very dark indigo
+                drawRect(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            Color.Transparent,
+                            vignetteEdge.copy(alpha = 0.35f)
+                        ),
+                        center = Offset(size.width / 2f, size.height / 2f),
+                        radius = diagonal * 0.375f
+                    )
+                )
+
+                // Directional light: faint warmth from top-left
+                // Warm cream tint instead of white to avoid gray cast
+                drawRect(
+                    brush = Brush.linearGradient(
+                        colors = listOf(
+                            Color(0xFFECE0D4).copy(alpha = 0.02f),
+                            Color.Transparent
+                        ),
+                        start = Offset.Zero,
+                        end = Offset(size.width, size.height)
+                    )
+                )
+            }
+    )
 }
 
 @Composable
@@ -283,112 +342,121 @@ private fun PortraitRecordLayout(
     metronomeState: RecordUiState,
     modifier: Modifier = Modifier
 ) {
-    Column(
-        modifier = modifier,
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Box {
-            Text(
-                text = "Nightjar",
-                style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
-            )
-            Text(
-                text = "Nightjar",
-                style = MaterialTheme.typography.headlineSmall,
-                color = Color.White.copy(alpha = 0.25f),
-                modifier = Modifier.offset(x = 1.1.dp, y = 1.3.dp)
-            )
-        }
+    Box(modifier = modifier) {
+        // Main content -- nudged slightly below center so Record
+        // button doesn't feel too high with the taller feature buttons.
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(0.dp, Alignment.CenterVertically),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Spacer(Modifier.height(18.dp))
+            Box {
+                Text(
+                    text = "Nightjar",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+                )
+                Text(
+                    text = "Nightjar",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = Color.White.copy(alpha = 0.25f),
+                    modifier = Modifier.offset(x = 1.1.dp, y = 1.3.dp)
+                )
+            }
 
-        // Subtle groove below title
-        Spacer(Modifier.height(10.dp))
-        Canvas(Modifier.fillMaxWidth(0.5f).height(1.dp)) {
-            drawLine(
-                brush = Brush.horizontalGradient(
+            // Hard groove below title -- wider, fading out at edges
+            Spacer(Modifier.height(10.dp))
+            Canvas(Modifier.fillMaxWidth(0.7f).height(2.dp)) {
+                val darkBrush = Brush.horizontalGradient(
                     colors = listOf(
                         Color.Transparent,
-                        NjMuted.copy(alpha = 0.18f),
+                        Color.Black.copy(alpha = 0.50f),
+                        Color.Black.copy(alpha = 0.50f),
                         Color.Transparent
+                    ),
+                    startX = 0f,
+                    endX = size.width
+                )
+                val lightBrush = Brush.horizontalGradient(
+                    colors = listOf(
+                        Color.Transparent,
+                        Color.White.copy(alpha = 0.07f),
+                        Color.White.copy(alpha = 0.07f),
+                        Color.Transparent
+                    ),
+                    startX = 0f,
+                    endX = size.width
+                )
+                drawLine(darkBrush, Offset(0f, 0f), Offset(size.width, 0f), size.height / 2)
+                drawLine(lightBrush, Offset(0f, size.height), Offset(size.width, size.height), size.height / 2)
+            }
+
+            Spacer(Modifier.height(24.dp))
+
+            StatusLcd(lcdText)
+
+            Spacer(Modifier.height(14.dp))
+
+            HardwareRecordButton(
+                isRecording = isRecording,
+                onClick = onRecord
+            )
+
+            Spacer(Modifier.height(14.dp))
+
+            WaveformSection(
+                postRecording = postRecording,
+                liveAmplitudes = liveAmplitudes,
+                waveformColor = waveformColor,
+                onGoToOverview = onGoToOverview,
+                modifier = Modifier.fillMaxWidth(0.85f)
+            )
+
+            Spacer(Modifier.height(16.dp))
+
+            // Action button bay -- groove-bordered recess for feature buttons
+            FeatureButtonWell {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    FeatureButton(
+                        icon = Icons.Filled.Edit,
+                        label = "Write",
+                        accentColor = NjStarlight,
+                        onClick = onWrite,
+                        enabled = !writeSunk,
+                        modifier = Modifier.weight(1f)
                     )
-                ),
-                start = Offset(0f, size.height / 2),
-                end = Offset(size.width, size.height / 2),
-                strokeWidth = size.height
+                    FeatureButton(
+                        icon = Icons.Filled.Tune,
+                        label = "Studio",
+                        accentColor = NjStudioAccent,
+                        onClick = onStudio,
+                        enabled = !isBusy,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            NjButton(
+                text = "Library",
+                onClick = onLibrary
             )
         }
 
-        Spacer(Modifier.height(24.dp))
-
-        HardwareRecordButton(
-            isRecording = isRecording,
-            onClick = onRecord
+        // Bottom-anchored metronome panel -- always visible, expands in place
+        MetronomePanel(
+            isEnabled = metronomeState.isMetronomeEnabled,
+            isOpen = metronomeState.isMetronomeSettingsOpen,
+            bpm = metronomeState.metronomeBpm,
+            volume = metronomeState.metronomeVolume,
+            countInBars = metronomeState.countInBars,
+            onAction = onAction,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 4.dp)
         )
-
-        Spacer(Modifier.height(14.dp))
-
-        StatusLcd(lcdText)
-
-        Spacer(Modifier.height(16.dp))
-
-        WaveformSection(
-            postRecording = postRecording,
-            liveAmplitudes = liveAmplitudes,
-            waveformColor = waveformColor,
-            onGoToOverview = onGoToOverview,
-            modifier = Modifier.fillMaxWidth(0.85f)
-        )
-
-        Spacer(Modifier.height(16.dp))
-
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            RecordScreenButton(
-                icon = Icons.Filled.Edit,
-                label = "Write",
-                onClick = onWrite,
-                enabled = !writeSunk,
-                modifier = Modifier.weight(1f)
-            )
-            RecordScreenButton(
-                icon = Icons.Filled.Tune,
-                label = "Studio",
-                onClick = onStudio,
-                enabled = !isBusy,
-                modifier = Modifier.weight(1f)
-            )
-        }
-        Spacer(Modifier.height(10.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            RecordScreenButton(
-                icon = Icons.AutoMirrored.Filled.List,
-                label = "Library",
-                onClick = onLibrary,
-                enabled = !isBusy,
-                modifier = Modifier.weight(1f)
-            )
-            RecordMetronomeButton(
-                isEnabled = metronomeState.isMetronomeEnabled,
-                isSettingsOpen = metronomeState.isMetronomeSettingsOpen,
-                onAction = onAction,
-                modifier = Modifier.weight(1f)
-            )
-        }
-
-        // Metronome settings drawer
-        androidx.compose.animation.AnimatedVisibility(
-            visible = metronomeState.isMetronomeSettingsOpen,
-            enter = androidx.compose.animation.expandVertically(),
-            exit = androidx.compose.animation.shrinkVertically()
-        ) {
-            RecordMetronomeSettingsDrawer(
-                isEnabled = metronomeState.isMetronomeEnabled,
-                bpm = metronomeState.metronomeBpm,
-                volume = metronomeState.metronomeVolume,
-                countInBars = metronomeState.countInBars,
-                onAction = onAction
-            )
-        }
     }
 }
 
@@ -414,14 +482,26 @@ private fun LandscapeRecordLayout(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Left: Record button, centered
+        // Left: Record button + metronome panel below
         Box(
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1f).fillMaxSize(),
             contentAlignment = Alignment.Center
         ) {
             HardwareRecordButton(
                 isRecording = isRecording,
                 onClick = onRecord
+            )
+
+            MetronomePanel(
+                isEnabled = metronomeState.isMetronomeEnabled,
+                isOpen = metronomeState.isMetronomeSettingsOpen,
+                bpm = metronomeState.metronomeBpm,
+                volume = metronomeState.metronomeVolume,
+                countInBars = metronomeState.countInBars,
+                onAction = onAction,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 4.dp, start = 4.dp, end = 4.dp)
             )
         }
 
@@ -443,52 +523,37 @@ private fun LandscapeRecordLayout(
                 modifier = Modifier.fillMaxWidth(0.85f)
             )
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(10.dp))
 
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                RecordScreenButton(
-                    icon = Icons.Filled.Edit,
-                    label = "Write",
-                    onClick = onWrite,
-                    enabled = !writeSunk,
-                    modifier = Modifier.weight(1f)
-                )
-                RecordScreenButton(
-                    icon = Icons.Filled.Tune,
-                    label = "Studio",
-                    onClick = onStudio,
-                    enabled = !isBusy,
-                    modifier = Modifier.weight(1f)
-                )
-                RecordScreenButton(
-                    icon = Icons.AutoMirrored.Filled.List,
-                    label = "Library",
-                    onClick = onLibrary,
-                    enabled = !isBusy,
-                    modifier = Modifier.weight(1f)
-                )
-                RecordMetronomeButton(
-                    isEnabled = metronomeState.isMetronomeEnabled,
-                    isSettingsOpen = metronomeState.isMetronomeSettingsOpen,
-                    onAction = onAction,
-                    modifier = Modifier.weight(1f)
-                )
+            FeatureButtonWell {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FeatureButton(
+                        icon = Icons.Filled.Edit,
+                        label = "Write",
+                        accentColor = NjStarlight,
+                        onClick = onWrite,
+                        enabled = !writeSunk,
+                        minHeight = 68.dp,
+                        modifier = Modifier.weight(1f)
+                    )
+                    FeatureButton(
+                        icon = Icons.Filled.Tune,
+                        label = "Studio",
+                        accentColor = NjStudioAccent,
+                        onClick = onStudio,
+                        enabled = !isBusy,
+                        minHeight = 68.dp,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
 
-            // Metronome settings drawer
-            androidx.compose.animation.AnimatedVisibility(
-                visible = metronomeState.isMetronomeSettingsOpen,
-                enter = androidx.compose.animation.expandVertically(),
-                exit = androidx.compose.animation.shrinkVertically()
-            ) {
-                RecordMetronomeSettingsDrawer(
-                    isEnabled = metronomeState.isMetronomeEnabled,
-                    bpm = metronomeState.metronomeBpm,
-                    volume = metronomeState.metronomeVolume,
-                    countInBars = metronomeState.countInBars,
-                    onAction = onAction
-                )
-            }
+            Spacer(Modifier.height(6.dp))
+
+            NjButton(
+                text = "Library",
+                onClick = onLibrary
+            )
         }
     }
 }
@@ -782,6 +847,14 @@ private fun HardwareRecordButton(
                 center = center
             )
         }
+
+        // Grain overlay clipped to the body circle
+        Box(
+            Modifier
+                .size(92.dp * 0.86f * pressScale)
+                .clip(CircleShape)
+                .njGrain(alpha = 0.04f)
+        )
     }
 }
 
@@ -812,65 +885,171 @@ private fun StatusLcd(
     }
 }
 
-/** Full-width button with a leading icon for the Record screen vertical stack. */
+/**
+ * Groove-bordered bay for the action buttons. A routed channel runs around
+ * the perimeter (dark inner edge, light outer catch) and the interior is
+ * barely darker than the background -- just enough to read as a shallow
+ * pocket in the faceplate, not a display window.
+ */
 @Composable
-private fun RecordScreenButton(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    onClick: () -> Unit,
+private fun FeatureButtonWell(
     modifier: Modifier = Modifier,
-    enabled: Boolean = true
+    content: @Composable () -> Unit
 ) {
-    NjCard(
-        onClick = onClick,
-        modifier = modifier,
-        enabled = enabled,
-        horizontalArrangement = Arrangement.Center
+    val shape = RoundedCornerShape(6.dp)
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(NjBg.copy(alpha = 0.6f)) // barely darker than surroundings
+            .drawWithContent {
+                drawContent()
+                val sw = 1.dp.toPx()
+                // Inner groove: dark top-left edge (shadow side of channel)
+                drawLine(Color.Black.copy(alpha = 0.40f), Offset(0f, sw / 2), Offset(size.width, sw / 2), sw)
+                drawLine(Color.Black.copy(alpha = 0.25f), Offset(sw / 2, 0f), Offset(sw / 2, size.height), sw)
+                // Outer groove: light bottom-right catch (lit side of channel)
+                drawLine(Color.White.copy(alpha = 0.06f), Offset(0f, size.height - sw / 2), Offset(size.width, size.height - sw / 2), sw)
+                drawLine(Color.White.copy(alpha = 0.04f), Offset(size.width - sw / 2, 0f), Offset(size.width - sw / 2, size.height), sw)
+            }
+            .padding(10.dp)
     ) {
-        if (enabled) {
-            Box {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = Color.White.copy(alpha = 0.10f),
-                    modifier = Modifier.size(18.dp).offset(x = 0.4.dp, y = 0.6.dp)
-                )
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = NjMuted.copy(alpha = 0.65f),
-                    modifier = Modifier.size(18.dp)
-                )
+        content()
+    }
+}
+
+/** Prominent feature button with LED dot, icon glow, and embossed label. */
+@Composable
+private fun FeatureButton(
+    icon: ImageVector,
+    label: String,
+    accentColor: Color,
+    onClick: () -> Unit,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    minHeight: Dp = 84.dp
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedWithMinDuration()
+    val view = LocalView.current
+    val shape = RoundedCornerShape(4.dp)
+
+    val visuallyPressed = !enabled || isPressed
+    val bgColor = if (visuallyPressed) PressedBodyColor else RaisedBodyColor
+    val iconTint = if (enabled) accentColor.copy(alpha = 0.85f) else NjMuted
+    val labelAlpha = if (enabled) 0.75f else 0.45f
+
+    LaunchedEffect(interactionSource) {
+        interactionSource.interactions.collect { interaction ->
+            when (interaction) {
+                is PressInteraction.Press ->
+                    view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                is PressInteraction.Release ->
+                    view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
             }
-        } else {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = NjMuted.copy(alpha = 0.65f),
-                modifier = Modifier.size(18.dp)
-            )
         }
-        Spacer(Modifier.width(10.dp))
-        if (enabled) {
+    }
+
+    Box(
+        modifier = modifier
+            .heightIn(min = minHeight)
+            .clip(shape)
+            .background(bgColor)
+            .njGrain(alpha = 0.04f)
+            .drawWithContent {
+                drawContent()
+                val sw = 1.dp.toPx()
+                if (visuallyPressed) {
+                    drawLine(Color.Black.copy(alpha = 0.45f), Offset(0f, sw / 2), Offset(size.width, sw / 2), sw * 1.5f)
+                    drawLine(Color.Black.copy(alpha = 0.25f), Offset(sw / 2, 0f), Offset(sw / 2, size.height), sw)
+                    drawLine(Color.White.copy(alpha = 0.06f), Offset(0f, size.height - sw / 2), Offset(size.width, size.height - sw / 2), sw)
+                    drawLine(Color.White.copy(alpha = 0.04f), Offset(size.width - sw / 2, 0f), Offset(size.width - sw / 2, size.height), sw)
+                } else {
+                    drawLine(Color.White.copy(alpha = 0.09f), Offset(0f, sw / 2), Offset(size.width, sw / 2), sw)
+                    drawLine(Color.White.copy(alpha = 0.05f), Offset(sw / 2, 0f), Offset(sw / 2, size.height), sw)
+                    drawLine(Color.Black.copy(alpha = 0.35f), Offset(0f, size.height - sw / 2), Offset(size.width, size.height - sw / 2), sw)
+                    drawLine(Color.Black.copy(alpha = 0.18f), Offset(size.width - sw / 2, 0f), Offset(size.width - sw / 2, size.height), sw)
+                }
+            }
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                enabled = enabled,
+                onClick = onClick
+            )
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+    ) {
+        // LED dot at top-end
+        NjLedDot(
+            isLit = enabled,
+            size = 5.dp,
+            litColor = accentColor,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 0.dp, end = 0.dp)
+        )
+
+        // Centered content
+        Column(
+            modifier = Modifier.align(Alignment.Center),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Icon with radial glow behind
+            Box(contentAlignment = Alignment.Center) {
+                if (enabled) {
+                    Canvas(Modifier.size(36.dp)) {
+                        drawCircle(
+                            brush = Brush.radialGradient(
+                                colors = listOf(
+                                    accentColor.copy(alpha = 0.18f),
+                                    Color.Transparent
+                                ),
+                                center = center,
+                                radius = 18.dp.toPx()
+                            ),
+                            radius = 18.dp.toPx(),
+                            center = center
+                        )
+                    }
+                }
+                // Embossed icon: shadow layer + main layer
+                Box {
+                    if (enabled) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            tint = Color.White.copy(alpha = 0.10f),
+                            modifier = Modifier.size(28.dp).offset(x = 0.4.dp, y = 0.6.dp)
+                        )
+                    }
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = iconTint,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // Embossed label
             Box {
+                if (enabled) {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = Color.White.copy(alpha = 0.10f),
+                        modifier = Modifier.offset(x = 0.4.dp, y = 0.6.dp)
+                    )
+                }
                 Text(
                     text = label,
                     style = MaterialTheme.typography.labelLarge,
-                    color = Color.White.copy(alpha = 0.10f),
-                    modifier = Modifier.offset(x = 0.4.dp, y = 0.6.dp)
-                )
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = labelAlpha)
                 )
             }
-        } else {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
-            )
         }
     }
 }
@@ -1060,135 +1239,189 @@ private fun TransformingWaveformPanel(
     }
 }
 
-/** Metronome button styled as an NjCard for the Record screen. Tap to toggle settings drawer. */
+/**
+ * Metronome control panel -- a single beveled hardware surface always visible
+ * at the bottom of the Record screen.
+ *
+ * Closed: compact header with metronome icon, LED dot, BPM readout, and a
+ * chevron showing it's expandable. Solid opaque surface.
+ *
+ * Open: grows taller via animateContentSize. A hard groove line separates the
+ * header from the controls below. Two compact rows of controls.
+ */
 @Composable
-private fun RecordMetronomeButton(
+private fun MetronomePanel(
     isEnabled: Boolean,
-    isSettingsOpen: Boolean,
-    onAction: (RecordAction) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    NjCard(
-        onClick = { onAction(RecordAction.ToggleMetronomeSettings) },
-        modifier = modifier
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Icon(
-                imageVector = Icons.Filled.Tune,
-                contentDescription = "Metronome",
-                tint = if (isEnabled) NjMetronomeLed else NjMuted2,
-                modifier = Modifier.size(20.dp)
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = "Metro",
-                style = MaterialTheme.typography.labelSmall,
-                color = if (isEnabled) NjMetronomeLed else NjMuted
-            )
-        }
-    }
-}
-
-/** Metronome settings drawer for the Record screen. */
-@Composable
-private fun RecordMetronomeSettingsDrawer(
-    isEnabled: Boolean,
+    isOpen: Boolean,
     bpm: Double,
     volume: Float,
     countInBars: Int,
-    onAction: (RecordAction) -> Unit
+    onAction: (RecordAction) -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 8.dp)
-            .background(
-                NjBg.copy(alpha = 0.8f),
-                RoundedCornerShape(6.dp)
-            )
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        // Enable toggle row
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            NjButton(
-                text = if (isEnabled) "On" else "Off",
-                onClick = { onAction(RecordAction.ToggleMetronome) },
-                isActive = isEnabled,
-                ledColor = NjMetronomeLed,
-                textColor = if (isEnabled) NjMetronomeLed else NjMuted
-            )
-            Text(
-                text = "Metronome",
-                style = MaterialTheme.typography.labelMedium,
-                color = if (isEnabled) NjMetronomeLed.copy(alpha = 0.8f) else NjMuted
-            )
-        }
+    val view = LocalView.current
+    val shape = RoundedCornerShape(4.dp)
 
-        // BPM + Tap Tempo row
+    // Opaque body color -- NjBg base with the RaisedBodyColor tint composited on top.
+    // RaisedBodyColor is 12% alpha so buttons/cards are see-through by design,
+    // but this panel needs to be solid when it overlaps content.
+    val panelColor = remember {
+        val bg = NjBg // 0xFF0F0D18
+        val tint = RaisedBodyColor // NjMuted2 at 12%
+        lerp(bg, Color(tint.red, tint.green, tint.blue), tint.alpha)
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(panelColor)
+            .njGrain(alpha = 0.04f)
+            .drawWithContent {
+                drawContent()
+                val sw = 1.dp.toPx()
+                drawLine(Color.White.copy(alpha = 0.09f), Offset(0f, sw / 2), Offset(size.width, sw / 2), sw)
+                drawLine(Color.White.copy(alpha = 0.05f), Offset(sw / 2, 0f), Offset(sw / 2, size.height), sw)
+                drawLine(Color.Black.copy(alpha = 0.35f), Offset(0f, size.height - sw / 2), Offset(size.width, size.height - sw / 2), sw)
+                drawLine(Color.Black.copy(alpha = 0.18f), Offset(size.width - sw / 2, 0f), Offset(size.width - sw / 2, size.height), sw)
+            }
+            .animateContentSize(animationSpec = tween(300))
+    ) {
+        // Header -- always visible, tappable to toggle
         Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = {
+                        view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                        onAction(RecordAction.ToggleMetronomeSettings)
+                    }
+                )
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            NjButton(
-                text = "-",
-                onClick = { onAction(RecordAction.SetMetronomeBpm(bpm - 1.0)) },
-                textColor = NjMetronomeLed.copy(alpha = 0.7f)
+            Icon(
+                imageVector = NjIcons.Metronome,
+                contentDescription = "Metronome settings",
+                tint = if (isEnabled) NjMetronomeLed else NjMuted2,
+                modifier = Modifier.size(20.dp)
             )
+            Spacer(Modifier.width(8.dp))
+            NjLedDot(
+                isLit = isEnabled,
+                size = 5.dp,
+                litColor = NjMetronomeLed
+            )
+            Spacer(Modifier.weight(1f))
             Text(
                 text = "${bpm.toInt()} BPM",
-                style = MaterialTheme.typography.labelMedium,
-                color = NjMetronomeLed.copy(alpha = 0.8f),
-                modifier = Modifier.padding(horizontal = 4.dp)
+                style = TextStyle(
+                    fontFamily = IbmPlexMono,
+                    fontSize = 11.sp,
+                    letterSpacing = 1.sp
+                ),
+                color = if (isEnabled) NjMetronomeLed.copy(alpha = 0.7f) else NjMuted2
             )
-            NjButton(
-                text = "+",
-                onClick = { onAction(RecordAction.SetMetronomeBpm(bpm + 1.0)) },
-                textColor = NjMetronomeLed.copy(alpha = 0.7f)
-            )
-
             Spacer(Modifier.width(8.dp))
-
-            NjButton(
-                text = "Tap",
-                onClick = { onAction(RecordAction.TapTempo) },
-                textColor = NjMetronomeLed.copy(alpha = 0.7f)
+            // Chevron -- shows this is expandable
+            Text(
+                text = if (isOpen) "\u25B2" else "\u25BC",
+                style = MaterialTheme.typography.labelSmall,
+                color = NjMuted2
             )
         }
 
-        // Volume + Count-in row
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            com.example.nightjar.ui.components.NjKnob(
-                value = volume,
-                onValueChange = { onAction(RecordAction.SetMetronomeVolume(it)) },
-                knobSize = 36.dp,
-                label = "Vol"
-            )
+        // Expanded controls
+        if (isOpen) {
+            // Hard groove -- two lines (dark then light) like a routed channel
+            Canvas(Modifier.fillMaxWidth().height(2.dp)) {
+                val y1 = 0f
+                val y2 = size.height
+                drawLine(Color.Black.copy(alpha = 0.50f), Offset(0f, y1), Offset(size.width, y1), y2 / 2)
+                drawLine(Color.White.copy(alpha = 0.07f), Offset(0f, y2), Offset(size.width, y2), y2 / 2)
+            }
 
-            val countInOptions = listOf(0, 1, 2, 4)
-            NjButton(
-                text = if (countInBars == 0) "No CI" else "${countInBars} Bar",
-                onClick = {
-                    val idx = countInOptions.indexOf(countInBars)
-                    val next = countInOptions[(idx + 1) % countInOptions.size]
-                    onAction(RecordAction.SetCountInBars(next))
-                },
-                textColor = NjMetronomeLed.copy(alpha = 0.8f)
-            )
-            Text(
-                text = "Count-In",
-                style = MaterialTheme.typography.labelSmall,
-                color = NjMuted
-            )
+            Column(
+                modifier = Modifier.padding(
+                    start = 14.dp, end = 14.dp, top = 10.dp, bottom = 10.dp
+                ),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Row 1: Volume knob, Count-In (label below), On/Off toggle
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    com.example.nightjar.ui.components.NjKnob(
+                        value = volume,
+                        onValueChange = { onAction(RecordAction.SetMetronomeVolume(it)) },
+                        knobSize = 36.dp,
+                        label = "Vol"
+                    )
+
+                    val countInOptions = listOf(0, 1, 2, 4)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        NjButton(
+                            text = if (countInBars == 0) "No CI" else "${countInBars} Bar",
+                            onClick = {
+                                val idx = countInOptions.indexOf(countInBars)
+                                val next = countInOptions[(idx + 1) % countInOptions.size]
+                                onAction(RecordAction.SetCountInBars(next))
+                            },
+                            textColor = NjMetronomeLed.copy(alpha = 0.8f)
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = "Count-In",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = NjMuted
+                        )
+                    }
+
+                    Spacer(Modifier.weight(1f))
+
+                    NjButton(
+                        text = if (isEnabled) "On" else "Off",
+                        onClick = { onAction(RecordAction.ToggleMetronome) },
+                        isActive = isEnabled,
+                        ledColor = NjMetronomeLed,
+                        textColor = if (isEnabled) NjMetronomeLed else NjMuted
+                    )
+                }
+
+                // Row 2: BPM -/value/+ and Tap
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    NjButton(
+                        text = "-",
+                        onClick = { onAction(RecordAction.SetMetronomeBpm(bpm - 1.0)) },
+                        textColor = NjMetronomeLed.copy(alpha = 0.7f)
+                    )
+                    Text(
+                        text = "${bpm.toInt()} BPM",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = NjMetronomeLed.copy(alpha = 0.8f),
+                        modifier = Modifier.padding(horizontal = 4.dp)
+                    )
+                    NjButton(
+                        text = "+",
+                        onClick = { onAction(RecordAction.SetMetronomeBpm(bpm + 1.0)) },
+                        textColor = NjMetronomeLed.copy(alpha = 0.7f)
+                    )
+
+                    Spacer(Modifier.weight(1f))
+
+                    NjButton(
+                        text = "Tap",
+                        onClick = { onAction(RecordAction.TapTempo) },
+                        textColor = NjMetronomeLed.copy(alpha = 0.7f)
+                    )
+                }
+            }
         }
     }
 }

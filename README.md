@@ -90,7 +90,7 @@ Nightjar is in active development, working toward a v1.0 Play Store release.
 - Take mini-drawer with rename and delete (long-press take header to open)
 - Unified hardware-style UI components (NjButton, NjCard, NjRecessedPanel, NjLedDot) across all screens
 - Unified indigo color palette (base and Studio tokens merged)
-- Record screen with knurled record button, LCD status readout, transforming waveform panel, embossed text
+- Record screen with knurled record button, LCD status readout, transforming waveform panel, embossed text, visual button hierarchy (feature buttons with LED glow, groove-bordered button well, expandable metronome panel), matte grain texture on all interactive surfaces
 - Library with tag filtering, sort options, and audio preview playback
 - Overview with playback, waveform visualization, auto-saving notes, tags, sharing, and delete. Studio entry button with perimeter-tracing teal outline animation.
 
