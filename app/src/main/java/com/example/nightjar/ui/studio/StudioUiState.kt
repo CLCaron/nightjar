@@ -254,6 +254,7 @@ data class StudioUiState(
 
 /** User-initiated actions on the Studio screen. */
 sealed interface StudioAction {
+    data object NavigateBack : StudioAction
     data class Load(val ideaId: Long) : StudioAction
     data object ShowAddTrackSheet : StudioAction
     data object DismissAddTrackSheet : StudioAction

@@ -70,7 +70,7 @@ Both levels stay in sync -- edits in the drawer reflect in the full-screen edito
 
 #### Library
 
-- [ ] **[Bug] Refresh after delete** — Deleted ideas still appear in the list until next load. Must reflect state immediately.
+- [x] **[Bug] Refresh after delete** — Deleted ideas still appear in the list until next load. Must reflect state immediately.
 
 #### Cross-Screen
 
@@ -84,8 +84,8 @@ Both levels stay in sync -- edits in the drawer reflect in the full-screen edito
 
 ### Studio - Piano Roll
 
-- [ ] **[Bug] MiniPianoRoll resize inconsistent** — Dragging the right edge of a note to resize works but is unreliable. The right-half-of-note detection zone may not be triggering consistently, possibly due to gesture race conditions with horizontal scroll or stale hit-test data after notes are moved by the Flow observer. Needs on-device debugging.
-- [ ] **[Bug] Snapping inaccuracy** — Trim snaps to the beat line before the intended one. Also need user-selectable snap resolution (1/8, 1/4, etc.).
+- [ ] **[Bug] MiniPianoRoll note move/resize inconsistent** — Dragging the right edge of a note to resize works but is unreliable. The right-half-of-note detection zone may not be triggering consistently, possibly due to gesture race conditions with horizontal scroll or stale hit-test data after notes are moved by the Flow observer. Needs on-device debugging.
+- [x] **[Bug] Snapping inaccuracy** — Trim snaps to the beat line before the intended one. Also need user-selectable snap resolution (1/8, 1/4, etc.).
 - [ ] **[Bug] Restart button** — Resets the playhead but does not restart audio playback.
 - [ ] **[Feature] Adaptive key widths** — Piano key panel (fixed 48dp) may be too narrow in portrait. Responsive widths via `BoxWithConstraints`.
 - [ ] **[Feature] Notes visual redesign** — Flat rectangles need more character: subtle bevel/shadow, different color than amber/orange. Should feel like physical objects on the grid.
@@ -101,17 +101,17 @@ Both levels stay in sync -- edits in the drawer reflect in the full-screen edito
 
 - [ ] **[Bug] Loop state persists across ideas** — Loop stuck "on" after navigating to a new idea. UI showed loop off with no visible region, but playback looped. State may not clear on navigation.
 - [ ] **[Bug] Track lane drag highlight stuck** — After repositioning, track retains the highlight color instead of reverting on release.
-- [ ] **[Feature] Header pins on scroll** — Top buttons should stay visible when scrolling through tracks.
-- [ ] **[Feature] BPM press-and-hold + tap-to-type** — Hold +/- to accelerate. Tap the number to type directly.
+- [x] **[Feature] Header pins on scroll** — Top buttons should stay visible when scrolling through tracks.
+- [ ] **[Feature] BPM press-and-hold + tap-to-type** — Hold +/- to accelerate. Tap the number to type directly. "Tap" button to tap your tempo (this already exists on the Record screen)
 - [ ] **[Feature] Zoomable timeline** — Pinch-to-zoom or zoom control for seeing more of the arrangement.
 - [ ] **[Feature] Drag to reorder tracks** — Long-press track name, drag to new position.
 - [ ] **[Feature] Inline idea rename** — Tap the title in Studio to rename without navigating away.
-- [ ] **[Feature] Button size consistency** — MIDI drawer Edit/Instrument buttons are slightly larger than others. Unify.
+- [ ] **[Feature] Button order and size consistency** — We need a full audit of all of the buttons in the studio. There are size differences, different purposes for the same icon, color inconsistencies. Let's discuss the best UI/UX for consistency and intuitive experience for the user.
 - [ ] **[Feature] Rename button color** — Needs a distinct color in the track drawer so it reads as an action.
 
 ### Overview
 
-- [ ] **[Feature] Play button consistency** — Should match Studio's style.
+- [x] **[Feature] Play button consistency** — Should match Studio's style.
 
 ### Cross-Screen
 
