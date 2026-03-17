@@ -1,7 +1,9 @@
 package com.example.nightjar
 
+import com.example.nightjar.audio.ThemePreferences
 import com.example.nightjar.ui.library.LibraryScreen
 import com.example.nightjar.ui.overview.OverviewScreen
+import com.example.nightjar.ui.settings.SettingsScreen
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -18,11 +20,17 @@ import com.example.nightjar.ui.studio.DrumEditorScreen
 import com.example.nightjar.ui.studio.PianoRollScreen
 import com.example.nightjar.ui.studio.StudioScreen
 import com.example.nightjar.ui.record.RecordScreen
+import com.example.nightjar.ui.theme.IndigoPalette
+import com.example.nightjar.ui.theme.WarmPlumPalette
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
 /** Single-activity host. Sets up the Compose theme and [NightjarApp] navigation graph. */
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+
+    @Inject lateinit var themePrefs: ThemePreferences
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(
@@ -30,16 +38,23 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
         )
         setContent {
-            com.example.nightjar.ui.theme.NightjarTheme {
+            var themeKey by remember { mutableStateOf(themePrefs.themeKey) }
+            val palette = when (themeKey) {
+                ThemePreferences.WARM_PLUM -> WarmPlumPalette
+                else -> IndigoPalette
+            }
+
+            com.example.nightjar.ui.theme.NightjarTheme(palette = palette) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    NightjarApp()
+                    NightjarApp(
+                        onThemeChanged = { themeKey = it }
+                    )
                 }
             }
         }
-
     }
 }
 
@@ -51,11 +66,12 @@ private object Routes {
     const val STUDIO = "studio"
     const val PIANO_ROLL = "piano_roll"
     const val DRUM_EDITOR = "drum_editor"
+    const val SETTINGS = "settings"
 }
 
-/** Top-level navigation graph: Record → Library → Overview → Studio. */
+/** Top-level navigation graph: Record -> Library -> Overview -> Studio. */
 @Composable
-fun NightjarApp() {
+fun NightjarApp(onThemeChanged: (String) -> Unit) {
     val navController = rememberNavController()
 
     NavHost(navController = navController, startDestination = Routes.RECORD) {
@@ -67,7 +83,8 @@ fun NightjarApp() {
                 },
                 onOpenStudio = { ideaId ->
                     navController.navigate("${Routes.STUDIO}/$ideaId")
-                }
+                },
+                onOpenSettings = { navController.navigate(Routes.SETTINGS) }
             )
         }
         composable(Routes.LIBRARY) {
@@ -129,6 +146,12 @@ fun NightjarApp() {
         ) {
             DrumEditorScreen(
                 onBack = { navController.popBackStack() }
+            )
+        }
+        composable(Routes.SETTINGS) {
+            SettingsScreen(
+                onBack = { navController.popBackStack() },
+                onThemeChanged = onThemeChanged
             )
         }
     }

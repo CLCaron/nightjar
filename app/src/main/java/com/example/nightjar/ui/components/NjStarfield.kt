@@ -25,7 +25,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import com.example.nightjar.ui.theme.NjStardust
+import com.example.nightjar.ui.theme.NjStarfieldTint
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.pow
@@ -49,19 +49,19 @@ private data class Star(
     val shape: StarShape
 )
 
-/** Stars per dp-squared — yields ~2,400 on a Fold 4 cover, ~3,900 unfolded. */
+/** Stars per dp-squared -- yields ~2,400 on a Fold 4 cover, ~3,900 unfolded. */
 private const val DENSITY_FACTOR = 0.0078f
 
 /** Baseline count used to scale minimum distance proportionally. */
 private const val BASE_COUNT = 2400f
 
-/** Minimum distance (normalized 0–1) between stars at the baseline count. */
+/** Minimum distance (normalized 0-1) between stars at the baseline count. */
 private const val BASE_MIN_DIST = 0.009f
 
 /**
  * Pre-computed unit-circle vertices for the 8-point starburst shape.
  * 4 cardinal points at distance 1.0, 4 diagonal points at 0.32.
- * Starting at north (-90°), stepping 45° each.
+ * Starting at north (-90deg), stepping 45deg each.
  */
 private val STARBURST_UNIT_VERTICES: List<Pair<Float, Float>> = buildList {
     for (i in 0 until 8) {
@@ -80,9 +80,9 @@ private val STARBURST_UNIT_VERTICES: List<Pair<Float, Float>> = buildList {
  * consistent across phones, tablets, and foldables. Particles regenerate
  * only when the canvas dimensions change (e.g. fold/unfold).
  *
- * Each particle gets a slight random hue shift from [NjStardust] with a
- * warm bias (~65% lean cream/candlelight, ~35% lean cool) so the field
- * reads as natural variation with an overall warm cast.
+ * Each particle gets a slight random hue shift from the theme's starfield
+ * tint with a warm bias (~65% lean cream/candlelight, ~35% lean cool) so
+ * the field reads as natural variation with an overall warm cast.
  *
  * Particles are positioned with minimum-distance rejection sampling so
  * none overlap or clump together. Positions are deterministic (fixed seed)
@@ -102,14 +102,17 @@ fun NjStarfield(modifier: Modifier = Modifier, isRecording: Boolean = false) {
     val density = LocalDensity.current
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
 
-    val stars = remember(canvasSize) {
+    // Hoist composable color before entering non-composable contexts
+    val starfieldTint = NjStarfieldTint
+
+    val stars = remember(canvasSize, starfieldTint) {
         if (canvasSize.width == 0 || canvasSize.height == 0) {
             emptyList()
         } else {
             val widthDp = with(density) { canvasSize.width.toDp().value }
             val heightDp = with(density) { canvasSize.height.toDp().value }
             val count = (widthDp * heightDp * DENSITY_FACTOR).toInt().coerceAtLeast(200)
-            generateStars(count)
+            generateStars(count, starfieldTint)
         }
     }
 
@@ -131,7 +134,7 @@ fun NjStarfield(modifier: Modifier = Modifier, isRecording: Boolean = false) {
         label = "settle"
     )
 
-    // Reusable Path for starburst drawing — avoids allocation per frame
+    // Reusable Path for starburst drawing -- avoids allocation per frame
     val starburstPath = remember { Path() }
 
     Canvas(modifier.onSizeChanged { canvasSize = it }) {
@@ -171,7 +174,7 @@ fun NjStarfield(modifier: Modifier = Modifier, isRecording: Boolean = false) {
 
                 StarShape.STARBURST -> {
                     if (star.beacon) {
-                        // Beacon glow — warm-tinted halo, always visible
+                        // Beacon glow -- warm-tinted halo, always visible
                         val glowRadius = radiusPx * 2.2f
                         val warmGlow = Color(
                             red = (star.color.red * 0.95f + 0.05f).coerceAtMost(1f),
@@ -192,7 +195,7 @@ fun NjStarfield(modifier: Modifier = Modifier, isRecording: Boolean = false) {
                             center = center
                         )
                     } else if (star.anchor && settle > 0f) {
-                        // Anchor glow during recording — soft radial gradient behind the star
+                        // Anchor glow during recording -- soft radial gradient behind the star
                         val glowRadius = radiusPx * 1.4f
                         drawCircle(
                             brush = Brush.radialGradient(
@@ -258,28 +261,28 @@ private fun computeAlpha(star: Star, time: Float, settle: Float): Float {
 }
 
 /**
- * Tint [NjStardust] along a warm-cool axis with a +0.5 warm bias.
+ * Tint the given [baseTint] along a warm-cool axis with a +0.5 warm bias.
  *
  * [shift] ranges from -1 (cool lean) to +1 (warm gold-cream lean).
  * The strong bias means ~75% of particles lean warm gold/candlelight,
  * ~25% lean neutral -- almost none read as cool. Dust motes caught
  * in warm lamplight, not stars in a night sky.
  */
-private fun tintStardust(shift: Float): Color {
+private fun tintStardust(shift: Float, baseTint: Color): Color {
     val biased = (shift + 0.5f).coerceIn(-1f, 1f)
-    val r = (NjStardust.red * 255f + biased * 20f).coerceIn(0f, 255f)
-    val g = (NjStardust.green * 255f - biased * 4f).coerceIn(0f, 255f)
-    val b = (NjStardust.blue * 255f - biased * 18f).coerceIn(0f, 255f)
+    val r = (baseTint.red * 255f + biased * 20f).coerceIn(0f, 255f)
+    val g = (baseTint.green * 255f - biased * 4f).coerceIn(0f, 255f)
+    val b = (baseTint.blue * 255f - biased * 18f).coerceIn(0f, 255f)
     return Color(r / 255f, g / 255f, b / 255f)
 }
 
 /**
  * Generate [targetCount] star positions using rejection sampling to enforce
- * minimum spacing. Coordinates are normalized 0–1. Minimum distance scales
+ * minimum spacing. Coordinates are normalized 0-1. Minimum distance scales
  * inversely with the square root of [targetCount] so higher density still
  * allows stars to spread without excessive rejection.
  */
-private fun generateStars(targetCount: Int): List<Star> {
+private fun generateStars(targetCount: Int, starfieldTint: Color): List<Star> {
     val rng = Random(42)
     val placed = mutableListOf<Star>()
     val minDist = BASE_MIN_DIST / sqrt(targetCount / BASE_COUNT)
@@ -337,7 +340,7 @@ private fun generateStars(targetCount: Int): List<Star> {
             speed = if (twinkles)
                 rng.nextFloat() * 0.6f + 0.5f
             else 1f,
-            color = tintStardust(shift),
+            color = tintStardust(shift, starfieldTint),
             shape = shape
         )
     }

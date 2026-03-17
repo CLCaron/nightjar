@@ -14,6 +14,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -31,14 +32,16 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
-import com.example.nightjar.ui.theme.NjMuted2
-import com.example.nightjar.ui.theme.NjStudioAccent
+import com.example.nightjar.ui.theme.LocalNjColors
+import com.example.nightjar.ui.theme.NjAmber
 
-// Pressed-in body -- slightly darker than NjSurface2 (0xFF1C1824).
-internal val PressedBodyColor = Color(0xFF12101A)
+// Pressed-in body -- reads from active palette.
+internal val PressedBodyColor: Color
+    @Composable @ReadOnlyComposable get() = LocalNjColors.current.pressedBody
 
-// Raised body -- semi-transparent muted surface.
-internal val RaisedBodyColor = NjMuted2.copy(alpha = 0.12f)
+// Raised body -- reads from active palette.
+internal val RaisedBodyColor: Color
+    @Composable @ReadOnlyComposable get() = LocalNjColors.current.raisedBody
 
 /**
  * Hardware-style button used across the entire app.
@@ -68,7 +71,7 @@ fun NjButton(
     modifier: Modifier = Modifier,
     icon: ImageVector? = null,
     isActive: Boolean = false,
-    activeAccent: Color = NjStudioAccent,
+    activeAccent: Color = NjAmber,
     textColor: Color? = null,
     ledColor: Color? = null,
     activeGlow: Boolean = true,

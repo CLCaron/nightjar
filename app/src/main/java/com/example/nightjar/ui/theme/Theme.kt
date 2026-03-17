@@ -1,54 +1,42 @@
 package com.example.nightjar.ui.theme
 
 import androidx.compose.foundation.LocalIndication
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import com.example.nightjar.ui.components.NjStarTouchIndication
 
-private val DarkColorScheme = darkColorScheme(
-    primary = NjPrimary,
-    secondary = NjPrimary2,
-    tertiary = NjAccent,
-
-    background = NjBg,
-    surface = NjSurface,
-    surfaceVariant = NjSurface2,
-
-    onPrimary = NjOnSurface,
-    onSecondary = NjOnSurface,
-    onTertiary = NjBg,
-    onBackground = NjOnBg,
-    onSurface = NjOnSurface,
-    onSurfaceVariant = NjOnSurface,
-
-    outline = NjOutline,
-    error = NjError,
-    onError = NjBg
-)
-
-private val LightColorScheme = lightColorScheme(
-    primary = NjPrimary,
-    secondary = NjPrimary2,
-    tertiary = NjAccent
-)
-
-/** Applies the Nightjar Material 3 color scheme and typography. Defaults to dark theme. */
+/** Applies the Nightjar Material 3 color scheme, typography, and custom palette. */
 @Composable
 fun NightjarTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    palette: NjColors = IndigoPalette,
     content: @Composable () -> Unit
 ) {
-    val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
+    val colorScheme = darkColorScheme(
+        primary = palette.primary,
+        secondary = palette.primary2,
+        tertiary = palette.accent,
+        background = palette.bg,
+        surface = palette.surface,
+        surfaceVariant = palette.surface2,
+        onPrimary = palette.onBg,
+        onSecondary = palette.onBg,
+        onTertiary = palette.bg,
+        onBackground = palette.onBg,
+        onSurface = palette.onBg,
+        onSurfaceVariant = palette.onBg,
+        outline = palette.outline,
+        error = NjError,
+        onError = palette.bg
+    )
 
     MaterialTheme(
         colorScheme = colorScheme,
         typography = Typography
     ) {
         CompositionLocalProvider(
+            LocalNjColors provides palette,
             LocalIndication provides NjStarTouchIndication,
             content = content
         )

@@ -28,8 +28,11 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.nightjar.ui.theme.NjDrumRowColors
 import com.example.nightjar.ui.theme.NjMuted2
-import com.example.nightjar.ui.theme.NjStudioAccent
+import com.example.nightjar.ui.theme.NjAmber
+import com.example.nightjar.ui.theme.NjSurface
+import com.example.nightjar.ui.theme.NjSurface2
 
 /** GM drum instruments shown in the pattern editor, ordered top to bottom. */
 val GM_DRUM_ROWS = listOf(
@@ -46,20 +49,6 @@ val GM_DRUM_ROWS = listOf(
 )
 
 data class GmDrumRow(val note: Int, val label: String)
-
-// Per-instrument accent colors for active step cells (internal for timeline mini-grid reuse)
-val DRUM_ROW_COLORS = listOf(
-    Color(0xFFCCB35A),  // Crash  -- warm yellow
-    Color(0xFF5EA8A3),  // Ride   -- teal
-    Color(0xFFBE7B4A),  // OH     -- amber
-    Color(0xFFBE7B4A),  // CH     -- amber
-    Color(0xFF6A9E8F),  // HiTom  -- sage
-    Color(0xFF6A9E8F),  // MdTom  -- sage
-    Color(0xFF6A9E8F),  // LoTom  -- sage
-    Color(0xFF8B7EC8),  // Clap   -- lavender
-    Color(0xFFC48560),  // Snare  -- coral
-    Color(0xFFCB6B6B)   // Kick   -- brick
-)
 
 private val CELL_SIZE = 28.dp
 private val CELL_GAP = 2.dp
@@ -88,9 +77,10 @@ fun DrumPatternEditor(
 
     val scrollState = rememberScrollState()
 
-    // Beat step colors: downbeat (first step of each beat) is lighter
-    val downbeatColor = Color(0xFF211C2C)  // first step of beat -- lighter, stands out
-    val offbeatColor = Color(0xFF16131E)   // remaining steps -- darker base
+    // Hoist theme colors for use in drawBehind (non-composable DrawScope)
+    val drumRowColors = NjDrumRowColors
+    val downbeatColor = NjSurface2  // first step of beat -- lighter, stands out
+    val offbeatColor = NjSurface    // remaining steps -- darker base
 
     Row(modifier = modifier.padding(vertical = 4.dp)) {
         // Instrument labels (fixed left column) with header spacer
@@ -142,7 +132,7 @@ fun DrumPatternEditor(
                     Text(
                         text = "$beatInBar",
                         fontSize = 10.sp,
-                        color = NjStudioAccent.copy(alpha = 0.5f),
+                        color = NjAmber.copy(alpha = 0.5f),
                         modifier = Modifier.height(16.dp).padding(start = 2.dp)
                     )
                     Spacer(Modifier.height(CELL_GAP))
@@ -163,7 +153,7 @@ fun DrumPatternEditor(
                                 GM_DRUM_ROWS.forEachIndexed { rowIndex, drumRow ->
                                     val isActive = (step to drumRow.note) in activeSteps
                                     val fillColor = if (isActive) {
-                                        DRUM_ROW_COLORS[rowIndex].copy(alpha = 0.85f)
+                                        drumRowColors[rowIndex].copy(alpha = 0.85f)
                                     } else if (isDownbeat) {
                                         downbeatColor
                                     } else {

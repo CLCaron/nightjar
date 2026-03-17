@@ -26,10 +26,10 @@ import com.example.nightjar.data.db.entity.TrackEntity
 import com.example.nightjar.ui.components.NjKnob
 import com.example.nightjar.ui.theme.NjError
 import com.example.nightjar.ui.theme.NjMuted2
-import com.example.nightjar.ui.theme.NjStudioAccent
+import com.example.nightjar.ui.theme.NjAmber
 import com.example.nightjar.ui.theme.NjSurface2
-import com.example.nightjar.ui.theme.NjStudioTeal
-import com.example.nightjar.ui.theme.NjStudioYellow
+import com.example.nightjar.ui.theme.NjLedTeal
+import com.example.nightjar.ui.theme.NjLedYellow
 
 private val NARROW_BREAKPOINT = 320.dp
 
@@ -51,7 +51,7 @@ fun DrumTrackDrawer(
     timeSignatureNumerator: Int = 4,
     timeSignatureDenominator: Int = 4
 ) {
-    val goldBorderColor = NjStudioAccent.copy(alpha = 0.5f)
+    val goldBorderColor = NjAmber.copy(alpha = 0.5f)
 
     BoxWithConstraints(
         modifier = modifier
@@ -97,13 +97,13 @@ fun DrumTrackDrawer(
                         DrawerToggleButton(
                             label = "S",
                             isActive = isSoloed,
-                            ledColor = NjStudioTeal,
+                            ledColor = NjLedTeal,
                             onClick = { onAction(StudioAction.ToggleSolo(track.id)) }
                         )
                         DrawerToggleButton(
                             label = "M",
                             isActive = track.isMuted,
-                            ledColor = NjStudioYellow,
+                            ledColor = NjLedYellow,
                             onClick = {
                                 onAction(StudioAction.SetTrackMuted(track.id, !track.isMuted))
                             }
@@ -133,7 +133,7 @@ fun DrumTrackDrawer(
                                     }
                                 },
                                 textColor = if (resIndex > 0) {
-                                    NjStudioAccent.copy(alpha = 0.7f)
+                                    NjAmber.copy(alpha = 0.7f)
                                 } else {
                                     NjMuted2.copy(alpha = 0.3f)
                                 }
@@ -141,7 +141,7 @@ fun DrumTrackDrawer(
                             Text(
                                 text = "1/$currentRes",
                                 style = MaterialTheme.typography.labelMedium,
-                                color = NjStudioAccent.copy(alpha = 0.7f),
+                                color = NjAmber.copy(alpha = 0.7f),
                                 modifier = Modifier.padding(horizontal = 4.dp)
                             )
                             NjButton(
@@ -153,7 +153,7 @@ fun DrumTrackDrawer(
                                     }
                                 },
                                 textColor = if (resIndex < resPresets.size - 1) {
-                                    NjStudioAccent.copy(alpha = 0.7f)
+                                    NjAmber.copy(alpha = 0.7f)
                                 } else {
                                     NjMuted2.copy(alpha = 0.3f)
                                 }
@@ -175,7 +175,7 @@ fun DrumTrackDrawer(
                                     }
                                 },
                                 textColor = if (pattern.bars > 1) {
-                                    NjStudioAccent.copy(alpha = 0.7f)
+                                    NjAmber.copy(alpha = 0.7f)
                                 } else {
                                     NjMuted2.copy(alpha = 0.3f)
                                 }
@@ -183,7 +183,7 @@ fun DrumTrackDrawer(
                             Text(
                                 text = "${pattern.bars} bar${if (pattern.bars > 1) "s" else ""}",
                                 style = MaterialTheme.typography.labelMedium,
-                                color = NjStudioAccent.copy(alpha = 0.7f),
+                                color = NjAmber.copy(alpha = 0.7f),
                                 modifier = Modifier.padding(horizontal = 4.dp)
                             )
                             NjButton(
@@ -194,7 +194,7 @@ fun DrumTrackDrawer(
                                     }
                                 },
                                 textColor = if (pattern.bars < 8) {
-                                    NjStudioAccent.copy(alpha = 0.7f)
+                                    NjAmber.copy(alpha = 0.7f)
                                 } else {
                                     NjMuted2.copy(alpha = 0.3f)
                                 }
@@ -215,7 +215,7 @@ fun DrumTrackDrawer(
                         onClick = {
                             onAction(StudioAction.OpenDrumEditor(track.id))
                         },
-                        textColor = NjStudioAccent.copy(alpha = 0.8f)
+                        textColor = NjAmber.copy(alpha = 0.8f)
                     )
                     Spacer(Modifier.width(8.dp))
                     NjButton(
@@ -264,13 +264,13 @@ fun DrumTrackDrawer(
                         DrawerToggleButton(
                             label = "S",
                             isActive = isSoloed,
-                            ledColor = NjStudioTeal,
+                            ledColor = NjLedTeal,
                             onClick = { onAction(StudioAction.ToggleSolo(track.id)) }
                         )
                         DrawerToggleButton(
                             label = "M",
                             isActive = track.isMuted,
-                            ledColor = NjStudioYellow,
+                            ledColor = NjLedYellow,
                             onClick = {
                                 onAction(StudioAction.SetTrackMuted(track.id, !track.isMuted))
                             }
@@ -301,7 +301,7 @@ fun DrumTrackDrawer(
                                     }
                                 },
                                 textColor = if (resIndex > 0) {
-                                    NjStudioAccent.copy(alpha = 0.7f)
+                                    NjAmber.copy(alpha = 0.7f)
                                 } else {
                                     NjMuted2.copy(alpha = 0.3f)
                                 }
@@ -309,7 +309,7 @@ fun DrumTrackDrawer(
                             Text(
                                 text = "1/$currentRes",
                                 style = MaterialTheme.typography.labelMedium,
-                                color = NjStudioAccent.copy(alpha = 0.7f),
+                                color = NjAmber.copy(alpha = 0.7f),
                                 modifier = Modifier.padding(horizontal = 4.dp)
                             )
                             NjButton(
@@ -321,7 +321,7 @@ fun DrumTrackDrawer(
                                     }
                                 },
                                 textColor = if (resIndex < resPresets.size - 1) {
-                                    NjStudioAccent.copy(alpha = 0.7f)
+                                    NjAmber.copy(alpha = 0.7f)
                                 } else {
                                     NjMuted2.copy(alpha = 0.3f)
                                 }
@@ -343,7 +343,7 @@ fun DrumTrackDrawer(
                                     }
                                 },
                                 textColor = if (pattern.bars > 1) {
-                                    NjStudioAccent.copy(alpha = 0.7f)
+                                    NjAmber.copy(alpha = 0.7f)
                                 } else {
                                     NjMuted2.copy(alpha = 0.3f)
                                 }
@@ -351,7 +351,7 @@ fun DrumTrackDrawer(
                             Text(
                                 text = "${pattern.bars} bar${if (pattern.bars > 1) "s" else ""}",
                                 style = MaterialTheme.typography.labelMedium,
-                                color = NjStudioAccent.copy(alpha = 0.7f),
+                                color = NjAmber.copy(alpha = 0.7f),
                                 modifier = Modifier.padding(horizontal = 4.dp)
                             )
                             NjButton(
@@ -362,7 +362,7 @@ fun DrumTrackDrawer(
                                     }
                                 },
                                 textColor = if (pattern.bars < 8) {
-                                    NjStudioAccent.copy(alpha = 0.7f)
+                                    NjAmber.copy(alpha = 0.7f)
                                 } else {
                                     NjMuted2.copy(alpha = 0.3f)
                                 }
@@ -385,7 +385,7 @@ fun DrumTrackDrawer(
                             onClick = {
                                 onAction(StudioAction.OpenDrumEditor(track.id))
                             },
-                            textColor = NjStudioAccent.copy(alpha = 0.8f)
+                            textColor = NjAmber.copy(alpha = 0.8f)
                         )
                         NjButton(
                             text = "Rename",

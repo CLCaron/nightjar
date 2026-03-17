@@ -65,12 +65,12 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.nightjar.ui.components.NjTopBar
 import com.example.nightjar.ui.theme.NjMuted2
-import com.example.nightjar.ui.theme.NjStudioAccent
+import com.example.nightjar.ui.theme.NjAmber
 import com.example.nightjar.ui.theme.NjBg
 import com.example.nightjar.ui.theme.NjRecordCoral
-import com.example.nightjar.ui.theme.NjStudioGreen
+import com.example.nightjar.ui.theme.NjLedGreen
 import com.example.nightjar.ui.theme.NjOutline
-import com.example.nightjar.ui.theme.NjStudioWaveform
+
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.SkipPrevious
@@ -302,13 +302,14 @@ fun StudioScreen(
                 ) {
                     TransportAndControls(state = state, onAction = vm::onAction)
                     Spacer(Modifier.height(4.dp))
+                    val dividerColor = NjOutline
                     Canvas(Modifier.fillMaxWidth().height(1.dp)) {
                         drawLine(
                             brush = Brush.horizontalGradient(
                                 listOf(
                                     Color.Transparent,
-                                    NjOutline.copy(alpha = 0.5f),
-                                    NjOutline.copy(alpha = 0.5f),
+                                    dividerColor.copy(alpha = 0.5f),
+                                    dividerColor.copy(alpha = 0.5f),
                                     Color.Transparent
                                 )
                             ),
@@ -456,7 +457,7 @@ private fun TransportAndControls(
                     icon = Icons.Outlined.Repeat,
                     onClick = { if (hasTracksAndNotRecording) onAction(StudioAction.ToggleLoop) },
                     isActive = state.isLoopEnabled,
-                    ledColor = NjStudioAccent,
+                    ledColor = NjAmber,
                 )
 
                 Box(
@@ -493,7 +494,7 @@ private fun TransportAndControls(
                     icon = Icons.Filled.SkipPrevious,
                     onClick = { if (hasTracksAndNotRecording) onAction(StudioAction.RestartPlayback) },
                     modifier = Modifier.alpha(if (hasTracksAndNotRecording) 1f else 0.35f),
-                    textColor = NjStudioGreen.copy(alpha = 0.5f),
+                    textColor = NjLedGreen.copy(alpha = 0.5f),
                 )
 
                 // Play / Pause -- always visible, dimmed when no tracks or recording
@@ -510,7 +511,7 @@ private fun TransportAndControls(
                         }
                     },
                     isActive = state.isPlaying,
-                    ledColor = NjStudioGreen,
+                    ledColor = NjLedGreen,
                     modifier = Modifier.alpha(if (hasTracksAndNotRecording) 1f else 0.35f),
                 )
 
@@ -570,7 +571,7 @@ private fun LatencySetupDialog(
                     Text(
                         text = diagnostics.deviceType.displayName,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = NjStudioAccent
+                        color = NjAmber
                     )
 
                     // Auto-estimated latency breakdown
@@ -600,7 +601,7 @@ private fun LatencySetupDialog(
                     Text(
                         text = "${manualOffsetMs}ms",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = if (manualOffsetMs != 0L) NjStudioAccent
+                        color = if (manualOffsetMs != 0L) NjAmber
                             else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                     )
 
@@ -650,6 +651,10 @@ private fun OffsetSlider(
     // Map -500..+500 to 0.0..1.0
     val fraction = ((offsetMs + 500f) / 1000f).coerceIn(0f, 1f)
 
+    // Hoist theme colors before Canvas (DrawScope is not composable)
+    val sliderTrackColor = NjMuted
+    val sliderFillColor = NjAmber
+
     Canvas(
         modifier = modifier
             .height(40.dp)
@@ -683,7 +688,7 @@ private fun OffsetSlider(
 
         // Full track background
         drawLine(
-            color = NjStudioWaveform.copy(alpha = 0.15f),
+            color = sliderTrackColor.copy(alpha = 0.15f),
             start = Offset(0f, centerY),
             end = Offset(size.width, centerY),
             strokeWidth = trackHeight
@@ -691,7 +696,7 @@ private fun OffsetSlider(
 
         // Center tick mark
         drawLine(
-            color = NjStudioWaveform.copy(alpha = 0.3f),
+            color = sliderTrackColor.copy(alpha = 0.3f),
             start = Offset(centerX, centerY - 6.dp.toPx()),
             end = Offset(centerX, centerY + 6.dp.toPx()),
             strokeWidth = 1.dp.toPx()
@@ -702,7 +707,7 @@ private fun OffsetSlider(
             val fillStart = minOf(centerX, thumbX)
             val fillEnd = maxOf(centerX, thumbX)
             drawLine(
-                color = NjStudioAccent.copy(alpha = 0.6f),
+                color = sliderFillColor.copy(alpha = 0.6f),
                 start = Offset(fillStart, centerY),
                 end = Offset(fillEnd, centerY),
                 strokeWidth = trackHeight
@@ -711,7 +716,7 @@ private fun OffsetSlider(
 
         // Thumb
         drawCircle(
-            color = NjStudioAccent,
+            color = sliderFillColor,
             radius = thumbRadius,
             center = Offset(thumbX, centerY)
         )
@@ -818,7 +823,7 @@ private fun ProjectControlsBar(
                     val next = TIME_SIGNATURE_PRESETS[(idx + 1) % TIME_SIGNATURE_PRESETS.size]
                     onAction(StudioAction.SetTimeSignature(next.first, next.second))
                 },
-                textColor = NjStudioAccent.copy(alpha = 0.8f)
+                textColor = NjAmber.copy(alpha = 0.8f)
             )
 
             // BPM with +/- buttons
@@ -829,18 +834,18 @@ private fun ProjectControlsBar(
                 NjButton(
                     text = "-",
                     onClick = { onAction(StudioAction.SetBpm(bpm - 1.0)) },
-                    textColor = NjStudioAccent.copy(alpha = 0.7f)
+                    textColor = NjAmber.copy(alpha = 0.7f)
                 )
                 Text(
                     text = "${bpm.toInt()} BPM",
                     style = MaterialTheme.typography.labelMedium,
-                    color = NjStudioAccent.copy(alpha = 0.8f),
+                    color = NjAmber.copy(alpha = 0.8f),
                     modifier = Modifier.padding(horizontal = 4.dp)
                 )
                 NjButton(
                     text = "+",
                     onClick = { onAction(StudioAction.SetBpm(bpm + 1.0)) },
-                    textColor = NjStudioAccent.copy(alpha = 0.7f)
+                    textColor = NjAmber.copy(alpha = 0.7f)
                 )
             }
 
@@ -849,7 +854,7 @@ private fun ProjectControlsBar(
                 text = "Snap",
                 onClick = { onAction(StudioAction.ToggleSnap) },
                 isActive = isSnapEnabled,
-                ledColor = NjStudioAccent,
+                ledColor = NjAmber,
             )
 
             // Metronome + Gear rocker pill
@@ -868,7 +873,7 @@ private fun ProjectControlsBar(
             Text(
                 text = position.format(),
                 style = MaterialTheme.typography.labelMedium,
-                color = NjStudioWaveform.copy(alpha = 0.7f)
+                color = NjMuted.copy(alpha = 0.7f)
             )
         }
 

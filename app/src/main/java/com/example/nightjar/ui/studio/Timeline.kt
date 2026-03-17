@@ -86,13 +86,14 @@ import com.example.nightjar.data.db.entity.MidiNoteEntity
 import com.example.nightjar.data.db.entity.TakeEntity
 import com.example.nightjar.data.db.entity.TrackEntity
 import com.example.nightjar.ui.components.NjWaveform
+import com.example.nightjar.ui.theme.NjDrumRowColors
 import com.example.nightjar.ui.theme.NjRecordCoral
 import com.example.nightjar.ui.theme.NjError
 import com.example.nightjar.ui.theme.NjMuted2
-import com.example.nightjar.ui.theme.NjStudioAccent
-import com.example.nightjar.ui.theme.NjStudioLane
+import com.example.nightjar.ui.theme.NjAmber
+import com.example.nightjar.ui.theme.NjLane
 import com.example.nightjar.ui.theme.NjSurface2
-import com.example.nightjar.ui.theme.NjStudioWaveform
+import com.example.nightjar.ui.theme.NjMuted
 import com.example.nightjar.ui.theme.NjTrackColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -542,7 +543,7 @@ fun TimelinePanel(
             val lineXPx = with(density) {
                 HEADER_WIDTH.toPx() + scrollState.viewportSize / 4f
             }
-            val lineColor = NjStudioAccent
+            val lineColor = NjAmber
             Canvas(modifier = Modifier.matchParentSize()) {
                 drawLine(
                     color = lineColor,
@@ -747,7 +748,7 @@ private fun TimelineTrackLane(
                 .width(widthDp)
                 .fillMaxHeight()
                 .clip(RoundedCornerShape(6.dp))
-                .background(NjStudioLane.copy(alpha = bgAlpha))
+                .background(NjLane.copy(alpha = bgAlpha))
                 .then(
                     if (isDragging) Modifier
                         .graphicsLayer { shadowElevation = 8f }
@@ -1133,6 +1134,7 @@ private fun DrumTrackLane(
     val density = LocalDensity.current
     val beatsPerBar = timeSignatureNumerator
     val bgAlpha = if (effectivelyMuted) 0.25f else 0.5f
+    val drumRowColors = NjDrumRowColors
 
     // Build a map: drumNote -> rowIndex for per-instrument rendering
     val noteToRowIndex = remember {
@@ -1199,7 +1201,7 @@ private fun DrumTrackLane(
                     .width(clipWidthDp)
                     .fillMaxHeight()
                     .clip(RoundedCornerShape(6.dp))
-                    .background(NjStudioLane.copy(alpha = if (isDragging) 0.8f else bgAlpha))
+                    .background(NjLane.copy(alpha = if (isDragging) 0.8f else bgAlpha))
                     .then(
                         if (isDragging) Modifier
                             .graphicsLayer { shadowElevation = 8f }
@@ -1250,6 +1252,7 @@ private fun DrumTrackLane(
                     modifier = Modifier.matchParentSize(),
                     front = {
                         // Mini step grid -- per-instrument colored dots
+                        val gridLineColor = NjMuted
                         Canvas(modifier = Modifier.fillMaxSize()) {
                             val canvasW = size.width
                             val canvasH = size.height
@@ -1265,9 +1268,9 @@ private fun DrumTrackLane(
                                 rowIndices.forEach { rowIdx ->
                                     val cy = rowIdx * rowH + rowH / 2f
                                     val dotColor = if (effectivelyMuted) {
-                                        DRUM_ROW_COLORS[rowIdx].copy(alpha = 0.3f)
+                                        drumRowColors[rowIdx].copy(alpha = 0.3f)
                                     } else {
-                                        DRUM_ROW_COLORS[rowIdx].copy(alpha = 0.9f)
+                                        drumRowColors[rowIdx].copy(alpha = 0.9f)
                                     }
                                     drawCircle(
                                         color = dotColor,
@@ -1284,7 +1287,7 @@ private fun DrumTrackLane(
                                 val x = s * stepW
                                 val isBar = s % clipStepsPerBar == 0
                                 drawLine(
-                                    color = NjStudioWaveform.copy(
+                                    color = gridLineColor.copy(
                                         alpha = if (isBar) 0.3f else 0.12f
                                     ),
                                     start = Offset(x, 0f),
@@ -1425,7 +1428,7 @@ private fun ClipActionButtons(
             text = "",
             icon = Icons.Filled.ContentCopy,
             onClick = { onDuplicate(); onDismiss() },
-            textColor = NjStudioAccent.copy(alpha = 0.9f)
+            textColor = NjAmber.copy(alpha = 0.9f)
         )
         Spacer(Modifier.width(12.dp))
         if (onEdit != null) {
@@ -1433,7 +1436,7 @@ private fun ClipActionButtons(
                 text = "",
                 icon = Icons.Filled.Edit,
                 onClick = { onEdit(); onDismiss() },
-                textColor = NjStudioWaveform.copy(alpha = 0.9f)
+                textColor = NjMuted.copy(alpha = 0.9f)
             )
             Spacer(Modifier.width(12.dp))
         }
@@ -1537,7 +1540,7 @@ private fun TrimHandle(modifier: Modifier = Modifier) {
             .fillMaxHeight()
             .padding(vertical = 8.dp)
             .clip(RoundedCornerShape(4.dp))
-            .background(NjStudioWaveform.copy(alpha = 0.45f))
+            .background(NjMuted.copy(alpha = 0.45f))
     )
 }
 
@@ -1579,8 +1582,8 @@ private fun TrackHeader(
 ) {
     val borderColor = when {
         isArmed -> NjRecordCoral.copy(alpha = 0.6f)
-        isExpanded -> NjStudioAccent.copy(alpha = 0.5f)
-        else -> NjStudioAccent.copy(alpha = 0f)
+        isExpanded -> NjAmber.copy(alpha = 0.5f)
+        else -> NjAmber.copy(alpha = 0f)
     }
 
     Column(
@@ -1636,7 +1639,7 @@ private fun TrackHeader(
                 style = MaterialTheme.typography.labelSmall,
                 color = when {
                     isArmed -> NjRecordCoral.copy(alpha = 0.7f)
-                    isSoloed -> NjStudioAccent.copy(alpha = 0.7f)
+                    isSoloed -> NjAmber.copy(alpha = 0.7f)
                     else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
                 }
             )
@@ -1652,7 +1655,7 @@ fun TimelinePlaceholder(message: String) {
             .fillMaxWidth()
             .height(200.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(NjStudioLane.copy(alpha = 0.55f)),
+            .background(NjLane.copy(alpha = 0.55f)),
         contentAlignment = Alignment.Center
     ) {
         Text(
@@ -1677,7 +1680,7 @@ private fun PlayheadSegment(
             .offset(x = offsetDp)
             .width(2.dp)
             .height(height)
-            .background(NjStudioAccent)
+            .background(NjAmber)
     )
 }
 
@@ -1711,7 +1714,7 @@ private fun LoopOverlaySegment(
         Box(
             modifier = Modifier
                 .matchParentSize()
-                .background(NjStudioAccent.copy(alpha = fillAlpha))
+                .background(NjAmber.copy(alpha = fillAlpha))
         )
 
         // Left boundary line
@@ -1720,7 +1723,7 @@ private fun LoopOverlaySegment(
                 .align(Alignment.CenterStart)
                 .width(2.dp)
                 .fillMaxHeight()
-                .background(NjStudioAccent.copy(alpha = borderAlpha))
+                .background(NjAmber.copy(alpha = borderAlpha))
         )
 
         // Right boundary line
@@ -1729,15 +1732,16 @@ private fun LoopOverlaySegment(
                 .align(Alignment.CenterEnd)
                 .width(2.dp)
                 .fillMaxHeight()
-                .background(NjStudioAccent.copy(alpha = borderAlpha))
+                .background(NjAmber.copy(alpha = borderAlpha))
         )
 
         // Triangle handle indicators at the top corners (ruler only)
         if (showHandles) {
+            val handleBaseColor = NjAmber
             Canvas(modifier = Modifier.matchParentSize()) {
                 val triW = 10.dp.toPx()
                 val triH = 8.dp.toPx()
-                val handleColor = NjStudioAccent.copy(alpha = handleAlpha)
+                val handleColor = handleBaseColor.copy(alpha = handleAlpha)
 
                 val leftPath = Path().apply {
                     moveTo(0f, 0f)
@@ -1960,7 +1964,7 @@ private fun TakeRow(
                         .fillMaxHeight()
                         .clip(RoundedCornerShape(4.dp))
                         .background(
-                            NjStudioLane.copy(
+                            NjLane.copy(
                                 alpha = if (take.isMuted) 0.2f else 0.45f
                             )
                         )
@@ -2000,7 +2004,7 @@ private fun TakeMiniDrawer(
     take: TakeEntity,
     onAction: (StudioAction) -> Unit
 ) {
-    val goldBorderColor = NjStudioAccent.copy(alpha = 0.3f)
+    val goldBorderColor = NjAmber.copy(alpha = 0.3f)
 
     Row(
         modifier = Modifier
@@ -2142,6 +2146,7 @@ private fun RecordingHeader(
     val totalSeconds = elapsedMs / 1000
     val min = totalSeconds / 60
     val sec = totalSeconds % 60
+    val recordCoral = NjRecordCoral
 
     Column(
         modifier = Modifier
@@ -2149,7 +2154,7 @@ private fun RecordingHeader(
             .height(height)
             .drawBehind {
                 drawLine(
-                    color = NjRecordCoral.copy(alpha = 0.6f),
+                    color = recordCoral.copy(alpha = 0.6f),
                     start = Offset(0f, 0f),
                     end = Offset(0f, size.height),
                     strokeWidth = 2.dp.toPx()
@@ -2203,7 +2208,7 @@ private fun RecordingWaveformBlock(
             .width(widthDp)
             .height(height)
             .clip(RoundedCornerShape(4.dp))
-            .background(NjStudioLane.copy(alpha = 0.45f))
+            .background(NjLane.copy(alpha = 0.45f))
             .padding(vertical = 2.dp)
     ) {
         Canvas(

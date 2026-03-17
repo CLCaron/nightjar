@@ -12,15 +12,18 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
+import androidx.compose.ui.node.CompositionLocalConsumerModifierNode
 import androidx.compose.ui.node.DrawModifierNode
+import androidx.compose.ui.node.currentValueOf
 import androidx.compose.ui.node.invalidateDraw
 import androidx.compose.ui.unit.dp
-import com.example.nightjar.ui.theme.NjPrimary
+import com.example.nightjar.ui.theme.LocalNjColors
 import com.example.nightjar.ui.theme.NjStarlight
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -29,7 +32,7 @@ import kotlinx.coroutines.launch
 // ── Star-touch indication ───────────────────────────────────────────────
 
 /**
- * Soft radial glow at the press point — replaces Material ripple.
+ * Soft radial glow at the press point -- replaces Material ripple.
  * Press expands ~250 ms, release fades ~350 ms.
  * Provide as [LocalIndication] in the theme.
  */
@@ -43,7 +46,7 @@ object NjStarTouchIndication : IndicationNodeFactory {
 
 private class StarTouchNode(
     private val interactionSource: InteractionSource
-) : Modifier.Node(), DrawModifierNode {
+) : Modifier.Node(), DrawModifierNode, CompositionLocalConsumerModifierNode {
 
     private var touchCenter = Offset.Zero
     private var radiusProgress = 0f
@@ -103,10 +106,11 @@ private class StarTouchNode(
         if (alphaProgress > 0.001f) {
             val radius = 64.dp.toPx() * radiusProgress
             if (radius > 0f) {
+                val primaryColor = currentValueOf(LocalNjColors).primary
                 drawCircle(
                     brush = Brush.radialGradient(
                         colors = listOf(
-                            NjPrimary.copy(alpha = 0.08f * alphaProgress),
+                            primaryColor.copy(alpha = 0.08f * alphaProgress),
                             Color.Transparent
                         ),
                         center = touchCenter,
@@ -168,43 +172,51 @@ fun InteractionSource.collectIsPressedWithMinDuration(
 // ── Bevel modifier ──────────────────────────────────────────────────────
 
 /**
- * Raised bevel — bright top/left, dark bottom/right.
+ * Raised bevel -- bright top/left, dark bottom/right.
  * When [isPressed] is true the bevel inverts and inset shadow
  * gradients appear from the top and left edges, making the
  * surface look physically pushed in like a hardware key.
  */
 fun Modifier.njBevel(
     isPressed: Boolean = false,
-    highlight: Color = NjStarlight.copy(alpha = 0.30f),
+    highlight: Color = Color.Unspecified,
     shadow: Color = Color.Black.copy(alpha = 0.50f)
-): Modifier = drawWithContent {
-    drawContent()
-
-    val s = 1.dp.toPx()
-
-    if (isPressed) {
-        // Inset shadow gradients — light blocked by the rim above and left
-        drawRect(
-            brush = Brush.verticalGradient(
-                0f to Color.Black.copy(alpha = 0.22f),
-                0.30f to Color.Transparent
-            )
-        )
-        drawRect(
-            brush = Brush.horizontalGradient(
-                0f to Color.Black.copy(alpha = 0.15f),
-                0.25f to Color.Transparent
-            )
-        )
+): Modifier = composed {
+    val resolvedHighlight = if (highlight == Color.Unspecified) {
+        NjStarlight.copy(alpha = 0.30f)
+    } else {
+        highlight
     }
 
-    // Bevel edge lines
-    val top = if (isPressed) shadow else highlight
-    val bot = if (isPressed) highlight else shadow
-    // Top + left
-    drawLine(top, Offset(0f, s / 2), Offset(size.width, s / 2), s)
-    drawLine(top, Offset(s / 2, 0f), Offset(s / 2, size.height), s)
-    // Bottom + right
-    drawLine(bot, Offset(0f, size.height - s / 2), Offset(size.width, size.height - s / 2), s)
-    drawLine(bot, Offset(size.width - s / 2, 0f), Offset(size.width - s / 2, size.height), s)
+    drawWithContent {
+        drawContent()
+
+        val s = 1.dp.toPx()
+
+        if (isPressed) {
+            // Inset shadow gradients -- light blocked by the rim above and left
+            drawRect(
+                brush = Brush.verticalGradient(
+                    0f to Color.Black.copy(alpha = 0.22f),
+                    0.30f to Color.Transparent
+                )
+            )
+            drawRect(
+                brush = Brush.horizontalGradient(
+                    0f to Color.Black.copy(alpha = 0.15f),
+                    0.25f to Color.Transparent
+                )
+            )
+        }
+
+        // Bevel edge lines
+        val top = if (isPressed) shadow else resolvedHighlight
+        val bot = if (isPressed) resolvedHighlight else shadow
+        // Top + left
+        drawLine(top, Offset(0f, s / 2), Offset(size.width, s / 2), s)
+        drawLine(top, Offset(s / 2, 0f), Offset(s / 2, size.height), s)
+        // Bottom + right
+        drawLine(bot, Offset(0f, size.height - s / 2), Offset(size.width, size.height - s / 2), s)
+        drawLine(bot, Offset(size.width - s / 2, 0f), Offset(size.width - s / 2, size.height), s)
+    }
 }

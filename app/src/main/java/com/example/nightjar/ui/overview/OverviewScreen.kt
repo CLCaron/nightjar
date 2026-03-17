@@ -64,6 +64,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathMeasure
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.addOutline
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -86,10 +87,11 @@ import com.example.nightjar.ui.components.NjTextField
 import com.example.nightjar.ui.components.NjTopBar
 import com.example.nightjar.ui.components.NjWaveform
 import com.example.nightjar.ui.theme.NjAccent
+import com.example.nightjar.ui.theme.NjBg
 import com.example.nightjar.ui.theme.NjError
 import com.example.nightjar.ui.theme.NjMuted2
-import com.example.nightjar.ui.theme.NjStudioGreen
-import com.example.nightjar.ui.theme.NjStudioTeal
+import com.example.nightjar.ui.theme.NjLedGreen
+import com.example.nightjar.ui.theme.NjLedTeal
 import com.example.nightjar.ui.theme.NjSurface2
 import com.example.nightjar.ui.theme.NjTrackColors
 import kotlinx.coroutines.flow.collectLatest
@@ -333,7 +335,7 @@ fun OverviewScreen(
                 text = if (isPlaying) "Pause" else "Play",
                 icon = NjIcons.PlayPause,
                 isActive = isPlaying,
-                ledColor = NjStudioGreen,
+                ledColor = NjLedGreen,
                 onClick = {
                     if (isPlaying) {
                         vm.onAction(OverviewAction.Pause)
@@ -428,9 +430,6 @@ private fun formatMs(ms: Long): String {
     return "%d:%02d".format(m, s)
 }
 
-/** Muted teal used for the Studio entry button text and glow. */
-private val StudioEntryTeal = Color(0xFF367C7C)
-
 /**
  * Content-width Studio entry button with hardware aesthetic.
  *
@@ -443,6 +442,7 @@ private fun NjStudioEntryButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val studioEntryAccent = lerp(NjBg, NjLedTeal, 0.55f)
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedWithMinDuration()
     val view = LocalView.current
@@ -465,7 +465,7 @@ private fun NjStudioEntryButton(
     }
 
     val glowShadow = Shadow(
-        color = StudioEntryTeal.copy(alpha = 0.25f),
+        color = studioEntryAccent.copy(alpha = 0.25f),
         offset = Offset.Zero,
         blurRadius = 10f
     )
@@ -484,8 +484,8 @@ private fun NjStudioEntryButton(
 
     val cornerRadius = 2.dp
     val strokeWidthDp = 1.5.dp
-    val mutedOutlineColor = StudioEntryTeal.copy(alpha = 0.15f)
-    val litTraceColor = StudioEntryTeal.copy(alpha = 0.6f)
+    val mutedOutlineColor = studioEntryAccent.copy(alpha = 0.15f)
+    val litTraceColor = studioEntryAccent.copy(alpha = 0.6f)
 
     // Outer box draws static muted outline + animated lit trace
     Box(
@@ -634,7 +634,7 @@ private fun NjStudioEntryButton(
                 Icon(
                     imageVector = Icons.Filled.Tune,
                     contentDescription = null,
-                    tint = StudioEntryTeal,
+                    tint = studioEntryAccent,
                     modifier = Modifier.size(20.dp)
                 )
                 Spacer(Modifier.width(8.dp))
@@ -644,7 +644,7 @@ private fun NjStudioEntryButton(
                         fontWeight = FontWeight.Bold,
                         shadow = glowShadow
                     ),
-                    color = StudioEntryTeal
+                    color = studioEntryAccent
                 )
             }
         }

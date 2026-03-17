@@ -40,8 +40,8 @@ import com.example.nightjar.ui.components.NjCard
 import com.example.nightjar.ui.components.NjIcons
 import com.example.nightjar.ui.components.NjTopBar
 import com.example.nightjar.ui.theme.NjAccent
-import com.example.nightjar.ui.theme.NjStudioAccent
-import com.example.nightjar.ui.theme.NjStudioGreen
+import com.example.nightjar.ui.theme.NjAmber
+import com.example.nightjar.ui.theme.NjLedGreen
 import kotlinx.coroutines.flow.collectLatest
 
 /** A single idea card in the library list with hardware-style press feel. */
@@ -59,17 +59,18 @@ private fun IdeaRow(
     ) {
         // Gold star for favorites
         if (idea.isFavorite) {
+            val accentColor = NjAccent
             Icon(
                 imageVector = Icons.Filled.Star,
                 contentDescription = "Favorite",
-                tint = NjAccent,
+                tint = accentColor,
                 modifier = Modifier
                     .size(18.dp)
                     .drawBehind {
                         drawCircle(
                             brush = Brush.radialGradient(
                                 colors = listOf(
-                                    NjAccent.copy(alpha = 0.3f),
+                                    accentColor.copy(alpha = 0.3f),
                                     Color.Transparent
                                 ),
                                 center = center,
@@ -120,7 +121,7 @@ private fun IdeaRow(
                 text = "",
                 icon = NjIcons.PlayPause,
                 isActive = isPreviewing,
-                ledColor = NjStudioGreen,
+                ledColor = NjLedGreen,
                 onClick = onPlayClick
             )
         }
@@ -208,7 +209,7 @@ fun LibraryScreen(
                                 NjButton(
                                     text = "All",
                                     isActive = state.selectedTagNormalized == null,
-                                    ledColor = NjStudioAccent,
+                                    ledColor = NjAmber,
                                     onClick = { vm.onAction(LibraryAction.ClearTagFilter) }
                                 )
                             }
@@ -217,7 +218,7 @@ fun LibraryScreen(
                                 NjButton(
                                     text = tag.name,
                                     isActive = state.selectedTagNormalized == tag.nameNormalized,
-                                    ledColor = NjStudioAccent,
+                                    ledColor = NjAmber,
                                     onClick = { vm.onAction(LibraryAction.SelectTag(tag.nameNormalized)) }
                                 )
                             }
@@ -250,7 +251,7 @@ fun LibraryScreen(
                             NjButton(
                                 text = "Newest",
                                 isActive = state.sortMode == SortMode.NEWEST,
-                                ledColor = NjStudioAccent,
+                                ledColor = NjAmber,
                                 onClick = { vm.onAction(LibraryAction.SetSortMode(SortMode.NEWEST)) }
                             )
                         }
@@ -258,7 +259,7 @@ fun LibraryScreen(
                             NjButton(
                                 text = "Oldest",
                                 isActive = state.sortMode == SortMode.OLDEST,
-                                ledColor = NjStudioAccent,
+                                ledColor = NjAmber,
                                 onClick = { vm.onAction(LibraryAction.SetSortMode(SortMode.OLDEST)) }
                             )
                         }
