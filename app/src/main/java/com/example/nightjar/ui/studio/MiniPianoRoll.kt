@@ -50,7 +50,9 @@ import com.example.nightjar.audio.MusicalTimeConverter
 import com.example.nightjar.data.db.entity.MidiNoteEntity
 import com.example.nightjar.ui.components.NjButton
 import com.example.nightjar.ui.theme.NjMuted2
-import com.example.nightjar.ui.theme.NjStudioAccent
+import com.example.nightjar.ui.theme.NjAmber
+import com.example.nightjar.ui.theme.NjPanelInset
+import com.example.nightjar.ui.theme.NjSurface
 import com.example.nightjar.ui.theme.NjTrackColors
 import kotlin.math.abs
 
@@ -88,6 +90,9 @@ fun MiniPianoRoll(
     val density = LocalDensity.current
     val view = LocalView.current
     val textMeasurer = rememberTextMeasurer()
+    val miniRollMuted2 = NjMuted2
+    val panelInset = NjPanelInset
+    val surfaceColor = NjSurface
 
     // Current base octave (MIDI octave, where octave 4 = C4 = MIDI 60).
     // Shows 2 octaves: currentOctave and currentOctave+1.
@@ -125,6 +130,10 @@ fun MiniPianoRoll(
     var lastTapTimeMs by remember { mutableLongStateOf(0L) }
     var lastTapNoteId by remember { mutableStateOf<Long?>(null) }
 
+    // Sticky note duration: captures last resize for subsequent placements
+    var stickyDuration by remember { mutableStateOf<Long?>(null) }
+    LaunchedEffect(gridResolution) { stickyDuration = null }
+
     // Notes outside visible range (for button indicators)
     val lowPitch = (currentOctave + 1) * 12
     val highPitch = lowPitch + VISIBLE_PITCHES - 1
@@ -144,13 +153,13 @@ fun MiniPianoRoll(
                 text = "",
                 icon = Icons.Filled.KeyboardArrowUp,
                 onClick = { currentOctave = (currentOctave + 1).coerceAtMost(7) },
-                textColor = if (notesAbove > 0) NjStudioAccent else NjMuted2
+                textColor = if (notesAbove > 0) NjAmber else NjMuted2
             )
             NjButton(
                 text = "",
                 icon = Icons.Filled.KeyboardArrowDown,
                 onClick = { currentOctave = (currentOctave - 1).coerceAtLeast(0) },
-                textColor = if (notesBelow > 0) NjStudioAccent else NjMuted2
+                textColor = if (notesBelow > 0) NjAmber else NjMuted2
             )
         }
 
@@ -186,7 +195,7 @@ fun MiniPianoRoll(
                         modifier = Modifier
                             .width(KEY_LABEL_WIDTH)
                             .fillMaxHeight()
-                            .background(Color(0xFF0C0A14))
+                            .background(panelInset)
                     ) {
                         val labelStyle = TextStyle(fontSize = 8.sp, color = Color.White.copy(alpha = 0.6f))
                         for (i in 0 until VISIBLE_PITCHES) {
@@ -198,7 +207,7 @@ fun MiniPianoRoll(
 
                             if (isBlack) {
                                 drawRect(
-                                    color = Color(0xFF14101E),
+                                    color = surfaceColor,
                                     topLeft = Offset(0f, y),
                                     size = Size(size.width, rowHeightPx)
                                 )
@@ -216,7 +225,7 @@ fun MiniPianoRoll(
 
                             val isC = (pitch % 12) == 0
                             drawLine(
-                                color = NjMuted2.copy(alpha = if (isC) 0.6f else 0.3f),
+                                color = miniRollMuted2.copy(alpha = if (isC) 0.6f else 0.3f),
                                 start = Offset(0f, y),
                                 end = Offset(size.width, y),
                                 strokeWidth = if (isC) 1f else 0.5f
@@ -234,7 +243,7 @@ fun MiniPianoRoll(
                             modifier = Modifier
                                 .width(canvasWidthDp)
                                 .height(gridHeight)
-                                .background(Color(0xFF0C0A14))
+                                .background(panelInset)
                                 .pointerInput(clip, pitchRange, pxPerMs, rowHeightPx, isSnapEnabled, gridStepMs, msPerBeat) {
                                     awaitEachGesture {
                                         val down = awaitFirstDown(requireUnconsumed = false)
@@ -291,7 +300,8 @@ fun MiniPianoRoll(
                                                         val snappedMs = if (isSnapEnabled && gridStepMs > 0) {
                                                             MusicalTimeConverter.snapToGrid(tappedMs, bpm, gridResolution, timeSignatureDenominator)
                                                         } else tappedMs
-                                                        val noteDuration = if (gridStepMs > 0) gridStepMs.toLong() else msPerBeat.toLong()
+                                                        val noteDuration = stickyDuration
+                                                            ?: if (gridStepMs > 0) gridStepMs.toLong() else msPerBeat.toLong()
                                                         view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                                                         onAction(
                                                             StudioAction.InlinePlaceNote(
@@ -330,6 +340,7 @@ fun MiniPianoRoll(
                                                         (snappedEnd - hitNote.startMs).coerceAtLeast(gridStepMs.toLong().coerceAtLeast(50))
                                                     } else newDuration
                                                     onAction(StudioAction.InlineResizeNote(trackId, hitNote.id, snappedDuration))
+                                                    stickyDuration = snappedDuration
                                                 } else {
                                                     val newMs = (change.position.x / pxPerMs - hitNote.durationMs / 2f / 1f).toLong()
                                                     val newPitch = high - (change.position.y / rowHeightPx).toInt()
@@ -357,7 +368,9 @@ fun MiniPianoRoll(
                                 msPerBeat = msPerBeat,
                                 msPerMeasure = msPerMeasure,
                                 gridStepMs = gridStepMs,
-                                isSnapEnabled = isSnapEnabled
+                                isSnapEnabled = isSnapEnabled,
+                                muted2Color = miniRollMuted2,
+                                blackKeyBgColor = surfaceColor
                             )
 
                             // Draw notes with beveled edges
@@ -409,7 +422,9 @@ private fun DrawScope.drawMiniRollGrid(
     msPerBeat: Double,
     msPerMeasure: Double,
     gridStepMs: Double,
-    isSnapEnabled: Boolean
+    isSnapEnabled: Boolean,
+    muted2Color: Color,
+    blackKeyBgColor: Color
 ) {
     // Match full-screen piano roll grid colors
     for (i in 0 until VISIBLE_PITCHES) {
@@ -419,7 +434,7 @@ private fun DrawScope.drawMiniRollGrid(
 
         if (isBlack) {
             drawRect(
-                color = Color(0xFF14101E),
+                color = blackKeyBgColor,
                 topLeft = Offset(0f, y),
                 size = Size(size.width, rowHeightPx)
             )
@@ -428,7 +443,7 @@ private fun DrawScope.drawMiniRollGrid(
         // Row separator -- stronger at C notes (octave boundaries)
         val isC = (pitch % 12) == 0
         drawLine(
-            color = NjMuted2.copy(alpha = if (isC) 0.6f else 0.3f),
+            color = muted2Color.copy(alpha = if (isC) 0.6f else 0.3f),
             start = Offset(0f, y),
             end = Offset(size.width, y),
             strokeWidth = if (isC) 1f else 0.5f
@@ -449,7 +464,7 @@ private fun DrawScope.drawMiniRollGrid(
                 isBeat -> { alpha = 0.3f; width = 1f }
                 else -> { alpha = 0.2f; width = 0.5f }
             }
-            val color = NjMuted2.copy(alpha = alpha)
+            val color = muted2Color.copy(alpha = alpha)
 
             drawLine(
                 color = color,

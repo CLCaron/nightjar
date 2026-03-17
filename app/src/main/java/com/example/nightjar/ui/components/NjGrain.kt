@@ -6,10 +6,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
+import com.example.nightjar.ui.theme.NjStarfieldTint
 import kotlin.random.Random
 
 /**
@@ -17,18 +20,21 @@ import kotlin.random.Random
  *
  * Generates a small [ImageBitmap] (64x64 pixels of warm-tinted random
  * alpha values) once, then tiles it across the surface. GPU-friendly since
- * no per-frame random generation occurs. The noise is tinted gold-cream
- * (NjStardust) so it reinforces warmth rather than pushing toward gray.
+ * no per-frame random generation occurs. The noise is tinted with the
+ * theme's starfield tint so it reinforces warmth rather than pushing toward gray.
  *
  * @param alpha Intensity of the noise overlay. 0.04-0.06 is subliminal.
- * @param tintColor Base RGB color for noise pixels. Default is warm gold-cream.
+ * @param tintColor Base color for noise pixels. Defaults to theme starfield tint.
  */
 fun Modifier.njGrain(
     alpha: Float = 0.06f,
-    tintColor: Long = 0x00ECE0D4  // NjStardust RGB without alpha
+    tintColor: Color = Color.Unspecified
 ): Modifier = composed {
-    val noiseBitmap = remember(alpha, tintColor) {
-        createNoiseBitmap(size = 64, alpha = alpha, tintRgb = tintColor)
+    val resolved = if (tintColor == Color.Unspecified) NjStarfieldTint else tintColor
+    val tintRgb = (resolved.toArgb().toLong() and 0x00FFFFFF)
+
+    val noiseBitmap = remember(alpha, tintRgb) {
+        createNoiseBitmap(size = 64, alpha = alpha, tintRgb = tintRgb)
     }
 
     drawWithContent {

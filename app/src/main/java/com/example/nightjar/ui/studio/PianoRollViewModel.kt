@@ -50,6 +50,7 @@ data class PianoRollState(
     val timeSignatureDenominator: Int = 4,
     val gridResolution: Int = 16,
     val isSnapEnabled: Boolean = true,
+    val stickyNoteDurationMs: Long? = null,
     val isLoading: Boolean = true
 )
 
@@ -320,6 +321,7 @@ class PianoRollViewModel @Inject constructor(
                 val clamped = newDurationMs.coerceAtLeast(50L)
                 midiRepo.updateNoteTiming(noteId, clipRelativeMs, clamped)
                 midiRepo.recomputeTrackDuration(trackId)
+                _state.update { it.copy(stickyNoteDurationMs = clamped) }
             } catch (e: Exception) {
                 _effects.emit(PianoRollEffect.ShowError("Failed to resize note"))
             }
@@ -356,7 +358,7 @@ class PianoRollViewModel @Inject constructor(
         val presets = listOf(4, 8, 16, 32)
         val current = _state.value.gridResolution
         val nextIndex = (presets.indexOf(current) + 1) % presets.size
-        _state.update { it.copy(gridResolution = presets[nextIndex]) }
+        _state.update { it.copy(gridResolution = presets[nextIndex], stickyNoteDurationMs = null) }
     }
 
     private fun previewPitch(pitch: Int) {

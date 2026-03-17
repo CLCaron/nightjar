@@ -62,10 +62,11 @@ import com.example.nightjar.ui.components.NjButton
 import com.example.nightjar.ui.theme.NjBg
 import com.example.nightjar.ui.theme.NjMuted2
 import com.example.nightjar.ui.theme.NjOnBg
-import com.example.nightjar.ui.theme.NjStudioAccent
-import com.example.nightjar.ui.theme.NjStudioGreen
+import com.example.nightjar.ui.theme.NjAmber
+import com.example.nightjar.ui.theme.NjLedGreen
 import com.example.nightjar.ui.theme.NjSurface
-import com.example.nightjar.ui.theme.NjStudioLane
+import com.example.nightjar.ui.theme.NjLane
+import com.example.nightjar.ui.theme.NjPanelInset
 import com.example.nightjar.ui.theme.NjTrackColors
 import kotlin.math.abs
 
@@ -136,6 +137,14 @@ fun PianoRollScreen(
     val horizontalScrollState = rememberScrollState()
     val textMeasurer = rememberTextMeasurer()
 
+    // Hoist theme colors for use in non-composable DrawScope functions
+    val pianoMuted2 = NjMuted2
+    val pianoAmber = NjAmber
+    val pianoOnBg = NjOnBg
+    val pianoLane = NjLane
+    val panelInset = NjPanelInset
+    val surfaceColor = NjSurface
+
     // Track color for notes
     val noteColor = NjTrackColors[state.trackSortIndex % NjTrackColors.size]
 
@@ -192,21 +201,21 @@ fun PianoRollScreen(
                 NjButton(
                     text = "1/${state.gridResolution}",
                     onClick = { viewModel.onAction(PianoRollAction.CycleGridResolution) },
-                    textColor = NjStudioAccent.copy(alpha = 0.8f)
+                    textColor = NjAmber.copy(alpha = 0.8f)
                 )
                 Spacer(Modifier.width(4.dp))
                 NjButton(
                     text = "Snap",
                     onClick = { viewModel.onAction(PianoRollAction.ToggleSnap) },
                     isActive = state.isSnapEnabled,
-                    ledColor = NjStudioAccent
+                    ledColor = NjAmber
                 )
                 Spacer(Modifier.width(4.dp))
                 NjButton(
                     text = "Restart",
                     icon = Icons.Filled.SkipPrevious,
                     onClick = { viewModel.onAction(PianoRollAction.SeekTo(0L)) },
-                    textColor = NjStudioGreen.copy(alpha = 0.5f),
+                    textColor = NjLedGreen.copy(alpha = 0.5f),
                 )
                 Spacer(Modifier.width(4.dp))
                 NjButton(
@@ -217,7 +226,7 @@ fun PianoRollScreen(
                         else viewModel.onAction(PianoRollAction.Play)
                     },
                     isActive = state.isPlaying,
-                    ledColor = NjStudioGreen
+                    ledColor = NjLedGreen
                 )
                 Spacer(Modifier.width(8.dp))
             },
@@ -240,7 +249,7 @@ fun PianoRollScreen(
                         .width(KEYS_WIDTH_DP.dp)
                         .height(totalGridHeight)
                 ) {
-                    drawPianoKeys(rowHeightPx, textMeasurer)
+                    drawPianoKeys(rowHeightPx, textMeasurer, pianoMuted2, pianoOnBg, surfaceColor)
                 }
             }
 
@@ -257,7 +266,7 @@ fun PianoRollScreen(
                         modifier = Modifier
                             .width(gridWidthDp)
                             .height(totalGridHeight)
-                            .background(Color(0xFF0C0A14))
+                            .background(panelInset)
                             .pointerInput(state.notes, state.isSnapEnabled, state.bpm) {
                                 val pxPerMs = PX_PER_MS * density.density
                                 val edgeZonePx = EDGE_TOUCH_ZONE.toPx()
@@ -377,12 +386,18 @@ fun PianoRollScreen(
                                                         state.timeSignatureDenominator
                                                     )
                                                 } else tapMs
-                                                val beatMs = (60_000.0 / state.bpm).toLong()
+                                                val gridStepMs = MusicalTimeConverter.msPerGridStep(
+                                                    state.bpm, state.gridResolution,
+                                                    state.timeSignatureDenominator
+                                                ).toLong().coerceAtLeast(50L)
+                                                val noteDuration = state.stickyNoteDurationMs
+                                                    ?: if (state.isSnapEnabled && gridStepMs > 0) gridStepMs
+                                                    else (60_000.0 / state.bpm).toLong()
                                                 viewModel.onAction(
                                                     PianoRollAction.PlaceNote(
                                                         pitch = pitch.coerceIn(0, 127),
                                                         startMs = snapMs.coerceAtLeast(0L),
-                                                        durationMs = beatMs
+                                                        durationMs = noteDuration
                                                     )
                                                 )
                                                 lastTapInfo = null
@@ -406,7 +421,11 @@ fun PianoRollScreen(
                             beatsPerBar = state.timeSignatureNumerator,
                             gridResolution = state.gridResolution,
                             contentMs = contentMs,
-                            dragPreview = dragPreview
+                            dragPreview = dragPreview,
+                            muted2Color = pianoMuted2,
+                            laneColor = pianoLane,
+                            amberColor = pianoAmber,
+                            blackKeyBgColor = surfaceColor
                         )
                     }
                 }
@@ -418,7 +437,10 @@ fun PianoRollScreen(
 /** Draw the piano key strip on the left side. */
 private fun DrawScope.drawPianoKeys(
     rowHeightPx: Float,
-    textMeasurer: TextMeasurer
+    textMeasurer: TextMeasurer,
+    muted2Color: Color,
+    onBgColor: Color,
+    blackKeyBgColor: Color
 ) {
     val width = size.width
 
@@ -429,7 +451,7 @@ private fun DrawScope.drawPianoKeys(
         val isBlack = octaveIndex in BLACK_KEYS
 
         // Key background -- matches grid row tints (dark=dark, light=light)
-        val keyColor = if (isBlack) Color(0xFF14101E) else Color(0xFF0C0A14)
+        val keyColor = if (isBlack) blackKeyBgColor else Color.Transparent
         drawRect(
             color = keyColor,
             topLeft = Offset(0f, y),
@@ -439,7 +461,7 @@ private fun DrawScope.drawPianoKeys(
         // Separator -- stronger at C notes (octave boundaries)
         val isC = octaveIndex == 0
         drawLine(
-            color = NjMuted2.copy(alpha = if (isC) 0.6f else 0.3f),
+            color = muted2Color.copy(alpha = if (isC) 0.6f else 0.3f),
             start = Offset(0f, y),
             end = Offset(width, y),
             strokeWidth = if (isC) 1f else 0.5f
@@ -448,7 +470,7 @@ private fun DrawScope.drawPianoKeys(
         // Note label for every key
         val noteName = NOTE_NAMES[octaveIndex]
         val label = if (octaveIndex == 0) "C${displayNote / 12 - 1}" else noteName
-        val labelColor = if (octaveIndex == 0) NjOnBg else NjMuted2.copy(alpha = 0.6f)
+        val labelColor = if (octaveIndex == 0) onBgColor else muted2Color.copy(alpha = 0.6f)
         val result = textMeasurer.measure(
             text = label,
             style = TextStyle(color = labelColor, fontSize = 10.sp)
@@ -475,7 +497,11 @@ private fun DrawScope.drawGrid(
     beatsPerBar: Int,
     gridResolution: Int,
     contentMs: Long,
-    dragPreview: NoteDragPreview? = null
+    dragPreview: NoteDragPreview? = null,
+    muted2Color: Color,
+    laneColor: Color,
+    amberColor: Color,
+    blackKeyBgColor: Color = Color(0xFF14101E)
 ) {
     val totalHeight = TOTAL_NOTES * rowHeightPx
     val beatMs = 60_000.0 / bpm
@@ -493,7 +519,7 @@ private fun DrawScope.drawGrid(
 
         if (isBlack) {
             drawRect(
-                color = Color(0xFF14101E),
+                color = blackKeyBgColor,
                 topLeft = Offset(0f, y),
                 size = Size(size.width, rowHeightPx)
             )
@@ -502,7 +528,7 @@ private fun DrawScope.drawGrid(
         // Row separator -- stronger at C notes (octave boundaries)
         val isC = octaveIndex == 0
         drawLine(
-            color = NjMuted2.copy(alpha = if (isC) 0.6f else 0.3f),
+            color = muted2Color.copy(alpha = if (isC) 0.6f else 0.3f),
             start = Offset(0f, y),
             end = Offset(size.width, y),
             strokeWidth = if (isC) 1f else 0.5f
@@ -517,14 +543,14 @@ private fun DrawScope.drawGrid(
 
         // Subtle tinted background for clip region (slightly brighter for highlighted)
         drawRect(
-            color = NjStudioLane.copy(alpha = if (isHighlighted) 0.12f else 0.06f),
+            color = laneColor.copy(alpha = if (isHighlighted) 0.12f else 0.06f),
             topLeft = Offset(clipStartPx, 0f),
             size = Size(clipWidthPx, totalHeight)
         )
 
         // Clip start boundary
-        val borderColor = if (isHighlighted) NjStudioAccent.copy(alpha = 0.45f)
-            else NjStudioAccent.copy(alpha = 0.2f)
+        val borderColor = if (isHighlighted) amberColor.copy(alpha = 0.45f)
+            else amberColor.copy(alpha = 0.2f)
         drawLine(
             color = borderColor,
             start = Offset(clipStartPx, 0f),
@@ -535,8 +561,8 @@ private fun DrawScope.drawGrid(
         // Clip end boundary
         val clipEndPx = clipStartPx + clipWidthPx
         drawLine(
-            color = if (isHighlighted) NjStudioAccent.copy(alpha = 0.3f)
-                else NjStudioAccent.copy(alpha = 0.1f),
+            color = if (isHighlighted) amberColor.copy(alpha = 0.3f)
+                else amberColor.copy(alpha = 0.1f),
             start = Offset(clipEndPx, 0f),
             end = Offset(clipEndPx, totalHeight),
             strokeWidth = if (isHighlighted) 2.5f else 1f
@@ -545,13 +571,13 @@ private fun DrawScope.drawGrid(
         // Highlight: top and bottom borders for source clip
         if (isHighlighted) {
             drawLine(
-                color = NjStudioAccent.copy(alpha = 0.35f),
+                color = amberColor.copy(alpha = 0.35f),
                 start = Offset(clipStartPx, 0f),
                 end = Offset(clipEndPx, 0f),
                 strokeWidth = 2f
             )
             drawLine(
-                color = NjStudioAccent.copy(alpha = 0.35f),
+                color = amberColor.copy(alpha = 0.35f),
                 start = Offset(clipStartPx, totalHeight),
                 end = Offset(clipEndPx, totalHeight),
                 strokeWidth = 2f
@@ -579,7 +605,7 @@ private fun DrawScope.drawGrid(
             }
 
             drawLine(
-                color = NjMuted2.copy(alpha = alpha),
+                color = muted2Color.copy(alpha = alpha),
                 start = Offset(x, 0f),
                 end = Offset(x, totalHeight),
                 strokeWidth = strokeWidth
@@ -658,7 +684,7 @@ private fun DrawScope.drawGrid(
     if (isPlaying || positionMs > 0) {
         val playheadX = positionMs * pxPerMs
         drawLine(
-            color = NjStudioAccent,
+            color = amberColor,
             start = Offset(playheadX, 0f),
             end = Offset(playheadX, totalHeight),
             strokeWidth = 2f

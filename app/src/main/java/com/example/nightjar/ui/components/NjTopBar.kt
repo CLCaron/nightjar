@@ -37,6 +37,8 @@ fun NjTopBar(
     modifier: Modifier = Modifier,
     trailing: @Composable (() -> Unit)? = null
 ) {
+    val starlight = NjStarlight
+
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -78,8 +80,8 @@ fun NjTopBar(
                 brush = Brush.horizontalGradient(
                     colors = listOf(
                         Color.Transparent,
-                        NjStarlight.copy(alpha = 0.12f),
-                        NjStarlight.copy(alpha = 0.12f),
+                        starlight.copy(alpha = 0.12f),
+                        starlight.copy(alpha = 0.12f),
                         Color.Transparent
                     ),
                     startX = 0f,
@@ -94,7 +96,7 @@ fun NjTopBar(
 }
 
 /**
- * Soft rounded chevron pointing left — the Nightjar back button.
+ * Soft rounded chevron pointing left -- the Nightjar back button.
  *
  * Two lines meeting at a rounded point, drawn with [StrokeCap.Round]
  * and [StrokeJoin.Round] for a gentle, hand-crafted feel. Starlight
@@ -105,6 +107,8 @@ private fun BackChevron(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val starlight = NjStarlight
+
     Box(
         modifier = modifier
             .size(32.dp)
@@ -117,7 +121,7 @@ private fun BackChevron(
         contentAlignment = Alignment.Center
     ) {
         Canvas(Modifier.size(18.dp)) {
-            val color = NjStarlight.copy(alpha = 0.7f)
+            val color = starlight.copy(alpha = 0.7f)
             val strokePx = 2.dp.toPx()
 
             val cx = size.width * 0.42f   // tip sits slightly left of center
@@ -125,7 +129,7 @@ private fun BackChevron(
             val armX = size.width * 0.82f  // right end of both arms
             val armY = size.height * 0.38f // vertical spread from center
 
-            // Upper arm: top-right → center-left
+            // Upper arm: top-right -> center-left
             drawLine(
                 color = color,
                 start = Offset(armX, cy - armY),
@@ -133,7 +137,7 @@ private fun BackChevron(
                 strokeWidth = strokePx,
                 cap = StrokeCap.Round
             )
-            // Lower arm: center-left → bottom-right
+            // Lower arm: center-left -> bottom-right
             drawLine(
                 color = color,
                 start = Offset(cx, cy),

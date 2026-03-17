@@ -18,7 +18,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * Four-pointed starburst icon — Nightjar's favorite indicator.
+ * Four-pointed starburst icon -- Nightjar's favorite indicator.
  *
  * Cardinal points are elongated (like a bright star seen through
  * squinted eyes), diagonal points are shorter. When [filled] is true
@@ -34,6 +34,9 @@ fun NjStarburst(
     modifier: Modifier = Modifier,
     size: Dp = 18.dp
 ) {
+    val accentColor = NjAccent
+    val starlightColor = NjStarlight
+
     Canvas(modifier = modifier.size(size)) {
         val cx = this.size.width / 2f
         val cy = this.size.height / 2f
@@ -60,7 +63,7 @@ fun NjStarburst(
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
-                        NjAccent.copy(alpha = 0.25f),
+                        accentColor.copy(alpha = 0.25f),
                         Color.Transparent
                     ),
                     center = Offset(cx, cy),
@@ -69,11 +72,11 @@ fun NjStarburst(
                 radius = outerRadius * 1.4f,
                 center = Offset(cx, cy)
             )
-            drawPath(path, color = NjAccent, style = Fill)
+            drawPath(path, color = accentColor, style = Fill)
         } else {
             drawPath(
                 path,
-                color = NjStarlight.copy(alpha = 0.45f),
+                color = starlightColor.copy(alpha = 0.45f),
                 style = Stroke(width = 1.2.dp.toPx())
             )
         }

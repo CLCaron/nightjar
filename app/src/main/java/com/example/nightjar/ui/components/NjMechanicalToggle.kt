@@ -6,15 +6,18 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
+import com.example.nightjar.ui.theme.LocalNjColors
 import kotlinx.coroutines.launch
 
-/** Deepest press color -- used at depth 1.0. */
-internal val DeepPressColor = Color(0xFF0A0810)
+/** Deepest press color -- reads from active palette. */
+internal val DeepPressColor: Color
+    @Composable @ReadOnlyComposable get() = LocalNjColors.current.deepPress
 
 /**
  * Observable state for a three-state mechanical latching toggle.

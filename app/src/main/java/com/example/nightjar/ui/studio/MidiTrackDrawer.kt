@@ -29,9 +29,9 @@ import com.example.nightjar.ui.theme.NjAccent
 import com.example.nightjar.ui.theme.NjError
 import com.example.nightjar.ui.theme.NjMuted
 import com.example.nightjar.ui.theme.NjMuted2
-import com.example.nightjar.ui.theme.NjStudioAccent
-import com.example.nightjar.ui.theme.NjStudioTeal
-import com.example.nightjar.ui.theme.NjStudioYellow
+import com.example.nightjar.ui.theme.NjAmber
+import com.example.nightjar.ui.theme.NjLedTeal
+import com.example.nightjar.ui.theme.NjLedYellow
 import com.example.nightjar.ui.theme.NjSurface2
 
 /**
@@ -56,7 +56,7 @@ fun MidiTrackDrawer(
     onAction: (StudioAction) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val goldBorderColor = NjStudioAccent.copy(alpha = 0.5f)
+    val goldBorderColor = NjAmber.copy(alpha = 0.5f)
     val instrumentName = midiState?.instrumentName ?: "Unknown"
 
     Column(
@@ -102,13 +102,13 @@ fun MidiTrackDrawer(
                         text = "S",
                         onClick = { onAction(StudioAction.ToggleSolo(track.id)) },
                         isActive = isSoloed,
-                        ledColor = NjStudioTeal
+                        ledColor = NjLedTeal
                     )
                     NjButton(
                         text = "M",
                         onClick = { onAction(StudioAction.SetTrackMuted(track.id, !track.isMuted)) },
                         isActive = track.isMuted,
-                        ledColor = NjStudioYellow
+                        ledColor = NjLedYellow
                     )
                 }
 

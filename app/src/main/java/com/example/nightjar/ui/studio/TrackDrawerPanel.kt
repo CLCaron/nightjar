@@ -44,12 +44,12 @@ import com.example.nightjar.ui.components.PressedBodyColor
 import com.example.nightjar.ui.components.RaisedBodyColor
 import com.example.nightjar.ui.components.rememberMechanicalToggleState
 import com.example.nightjar.ui.theme.NjRecordCoral
-import com.example.nightjar.ui.theme.NjStudioAccent
-import com.example.nightjar.ui.theme.NjStudioTeal
+import com.example.nightjar.ui.theme.NjAmber
+import com.example.nightjar.ui.theme.NjLedTeal
 import com.example.nightjar.ui.theme.NjError
 import com.example.nightjar.ui.theme.NjMuted2
 import com.example.nightjar.ui.theme.NjSurface2
-import com.example.nightjar.ui.theme.NjStudioYellow
+import com.example.nightjar.ui.theme.NjLedYellow
 
 // Width threshold below which the drawer wraps to two rows.
 private val NARROW_BREAKPOINT = 320.dp
@@ -72,7 +72,7 @@ fun TrackDrawerPanel(
     onAction: (StudioAction) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val goldBorderColor = NjStudioAccent.copy(alpha = 0.5f)
+    val goldBorderColor = NjAmber.copy(alpha = 0.5f)
 
     BoxWithConstraints(
         modifier = modifier
@@ -126,13 +126,13 @@ fun TrackDrawerPanel(
                     DrawerToggleButton(
                         label = "S",
                         isActive = isSoloed,
-                        ledColor = NjStudioTeal,
+                        ledColor = NjLedTeal,
                         onClick = { onAction(StudioAction.ToggleSolo(track.id)) }
                     )
                     DrawerToggleButton(
                         label = "M",
                         isActive = track.isMuted,
-                        ledColor = NjStudioYellow,
+                        ledColor = NjLedYellow,
                         onClick = {
                             onAction(StudioAction.SetTrackMuted(track.id, !track.isMuted))
                         }
@@ -141,7 +141,7 @@ fun TrackDrawerPanel(
                         DrawerToggleButton(
                             label = "T",
                             isActive = takesExpanded,
-                            ledColor = NjStudioAccent,
+                            ledColor = NjAmber,
                             onClick = { onAction(StudioAction.ToggleTakesView(track.id)) }
                         )
                     }
@@ -213,13 +213,13 @@ fun TrackDrawerPanel(
                     DrawerToggleButton(
                         label = "S",
                         isActive = isSoloed,
-                        ledColor = NjStudioTeal,
+                        ledColor = NjLedTeal,
                         onClick = { onAction(StudioAction.ToggleSolo(track.id)) }
                     )
                     DrawerToggleButton(
                         label = "M",
                         isActive = track.isMuted,
-                        ledColor = NjStudioYellow,
+                        ledColor = NjLedYellow,
                         onClick = {
                             onAction(StudioAction.SetTrackMuted(track.id, !track.isMuted))
                         }
@@ -228,7 +228,7 @@ fun TrackDrawerPanel(
                         DrawerToggleButton(
                             label = "T",
                             isActive = takesExpanded,
-                            ledColor = NjStudioAccent,
+                            ledColor = NjAmber,
                             onClick = { onAction(StudioAction.ToggleTakesView(track.id)) }
                         )
                     }

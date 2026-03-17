@@ -19,6 +19,8 @@ import com.example.nightjar.ui.theme.NjMuted2
 import com.example.nightjar.ui.theme.NjPanelInset
 import com.example.nightjar.ui.theme.NjRecordCoral
 import com.example.nightjar.ui.theme.NjStarlight
+import com.example.nightjar.ui.theme.NjStarfieldTint
+import com.example.nightjar.ui.theme.NjSurface
 import com.example.nightjar.ui.theme.NjTrackColors
 import android.content.res.Configuration
 import android.Manifest
@@ -57,6 +59,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -99,7 +102,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.example.nightjar.ui.theme.NjStudioAccent
+import com.example.nightjar.ui.theme.NjAmber
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlinx.coroutines.flow.collectLatest
@@ -117,7 +120,8 @@ import kotlinx.coroutines.flow.collectLatest
 fun RecordScreen(
     onOpenLibrary: () -> Unit,
     onOpenOverview: (Long) -> Unit,
-    onOpenStudio: (Long) -> Unit
+    onOpenStudio: (Long) -> Unit,
+    onOpenSettings: () -> Unit = {}
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
@@ -242,6 +246,7 @@ fun RecordScreen(
                             else vm.onAction(RecordAction.CreateStudioIdea)
                         },
                         onLibrary = onOpenLibrary,
+                        onSettings = onOpenSettings,
                         onAction = { vm.onAction(it) },
                         metronomeState = state,
                         modifier = contentModifier
@@ -266,6 +271,7 @@ fun RecordScreen(
                             else vm.onAction(RecordAction.CreateStudioIdea)
                         },
                         onLibrary = onOpenLibrary,
+                        onSettings = onOpenSettings,
                         onAction = { vm.onAction(it) },
                         metronomeState = state,
                         modifier = contentModifier
@@ -286,22 +292,24 @@ fun RecordScreen(
  */
 @Composable
 private fun RecordScreenBackground() {
+    val panelInsetColor = NjPanelInset
+    val starfieldTintColor = NjStarfieldTint
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .njGrain(alpha = 0.015f, tintColor = 0x009E8CB0) // NjStarlight (warm lilac)
+            .njGrain(alpha = 0.015f, tintColor = NjStarlight)
             .drawBehind {
                 // Vignette: transparent center, warm dark edges
                 // Uses deep indigo rather than pure black to preserve warmth
                 val diagonal = kotlin.math.sqrt(
                     size.width * size.width + size.height * size.height
                 )
-                val vignetteEdge = Color(0xFF060410) // very dark indigo
                 drawRect(
                     brush = Brush.radialGradient(
                         colors = listOf(
                             Color.Transparent,
-                            vignetteEdge.copy(alpha = 0.35f)
+                            panelInsetColor.copy(alpha = 0.35f)
                         ),
                         center = Offset(size.width / 2f, size.height / 2f),
                         radius = diagonal * 0.375f
@@ -313,7 +321,7 @@ private fun RecordScreenBackground() {
                 drawRect(
                     brush = Brush.linearGradient(
                         colors = listOf(
-                            Color(0xFFECE0D4).copy(alpha = 0.02f),
+                            starfieldTintColor.copy(alpha = 0.02f),
                             Color.Transparent
                         ),
                         start = Offset.Zero,
@@ -338,6 +346,7 @@ private fun PortraitRecordLayout(
     onWrite: () -> Unit,
     onStudio: () -> Unit,
     onLibrary: () -> Unit,
+    onSettings: () -> Unit,
     onAction: (RecordAction) -> Unit,
     metronomeState: RecordUiState,
     modifier: Modifier = Modifier
@@ -429,7 +438,7 @@ private fun PortraitRecordLayout(
                     FeatureButton(
                         icon = Icons.Filled.Tune,
                         label = "Studio",
-                        accentColor = NjStudioAccent,
+                        accentColor = NjAmber,
                         onClick = onStudio,
                         enabled = !isBusy,
                         modifier = Modifier.weight(1f)
@@ -445,18 +454,30 @@ private fun PortraitRecordLayout(
             )
         }
 
-        // Bottom-anchored metronome panel -- always visible, expands in place
-        MetronomePanel(
-            isEnabled = metronomeState.isMetronomeEnabled,
-            isOpen = metronomeState.isMetronomeSettingsOpen,
-            bpm = metronomeState.metronomeBpm,
-            volume = metronomeState.metronomeVolume,
-            countInBars = metronomeState.countInBars,
-            onAction = onAction,
+        // Bottom-anchored metronome panel + settings gear
+        Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 4.dp)
-        )
+                .padding(bottom = 4.dp),
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            MetronomePanel(
+                isEnabled = metronomeState.isMetronomeEnabled,
+                isOpen = metronomeState.isMetronomeSettingsOpen,
+                bpm = metronomeState.metronomeBpm,
+                volume = metronomeState.metronomeVolume,
+                countInBars = metronomeState.countInBars,
+                onAction = onAction,
+                modifier = Modifier.weight(1f)
+            )
+            NjButton(
+                text = "",
+                icon = Icons.Filled.Settings,
+                onClick = onSettings,
+                textColor = NjMuted
+            )
+        }
     }
 }
 
@@ -474,6 +495,7 @@ private fun LandscapeRecordLayout(
     onWrite: () -> Unit,
     onStudio: () -> Unit,
     onLibrary: () -> Unit,
+    onSettings: () -> Unit,
     onAction: (RecordAction) -> Unit,
     metronomeState: RecordUiState,
     modifier: Modifier = Modifier
@@ -492,17 +514,29 @@ private fun LandscapeRecordLayout(
                 onClick = onRecord
             )
 
-            MetronomePanel(
-                isEnabled = metronomeState.isMetronomeEnabled,
-                isOpen = metronomeState.isMetronomeSettingsOpen,
-                bpm = metronomeState.metronomeBpm,
-                volume = metronomeState.metronomeVolume,
-                countInBars = metronomeState.countInBars,
-                onAction = onAction,
+            Row(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 4.dp, start = 4.dp, end = 4.dp)
-            )
+                    .padding(bottom = 4.dp, start = 4.dp, end = 4.dp),
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                MetronomePanel(
+                    isEnabled = metronomeState.isMetronomeEnabled,
+                    isOpen = metronomeState.isMetronomeSettingsOpen,
+                    bpm = metronomeState.metronomeBpm,
+                    volume = metronomeState.metronomeVolume,
+                    countInBars = metronomeState.countInBars,
+                    onAction = onAction,
+                    modifier = Modifier.weight(1f)
+                )
+                NjButton(
+                    text = "",
+                    icon = Icons.Filled.Settings,
+                    onClick = onSettings,
+                    textColor = NjMuted
+                )
+            }
         }
 
         // Right: LCD + Waveform + Action buttons
@@ -539,7 +573,7 @@ private fun LandscapeRecordLayout(
                     FeatureButton(
                         icon = Icons.Filled.Tune,
                         label = "Studio",
-                        accentColor = NjStudioAccent,
+                        accentColor = NjAmber,
                         onClick = onStudio,
                         enabled = !isBusy,
                         minHeight = 68.dp,
@@ -618,8 +652,14 @@ private fun HardwareRecordButton(
     // Depth-based scale: 1.0 raised, 0.965 latched, 0.93 deep press
     val pressScale = 1.0f - (depth * 0.07f)
 
+    // Hoist theme colors before Canvas (DrawScope is not composable)
+    val njBg = NjBg
+    val njMuted2 = NjMuted2
+    val njRecordCoral = NjRecordCoral
+    val njSurface = NjSurface
+
     // Body blends toward background as depth increases
-    val bodyColor = lerp(Color(0xFF151220), NjBg, depth * 2f)
+    val bodyColor = lerp(njSurface, njBg, depth * 2f)
 
     // Haptics on raw press/release events
     LaunchedEffect(toggleState.interactionSource) {
@@ -697,7 +737,7 @@ private fun HardwareRecordButton(
                 drawCircle(
                     brush = Brush.radialGradient(
                         colors = listOf(
-                            NjRecordCoral.copy(alpha = 0.12f),
+                            njRecordCoral.copy(alpha = 0.12f),
                             Color.Transparent
                         ),
                         center = center,
@@ -710,7 +750,7 @@ private fun HardwareRecordButton(
 
             // Opaque backing circle
             drawCircle(
-                color = NjBg,
+                color = njBg,
                 radius = outerRadius,
                 center = center
             )
@@ -719,7 +759,7 @@ private fun HardwareRecordButton(
             if (isDraining) {
                 val ringDiameter = ringRadius * 2f
                 drawArc(
-                    color = NjRecordCoral.copy(alpha = ringAlpha),
+                    color = njRecordCoral.copy(alpha = ringAlpha),
                     startAngle = -90f,
                     sweepAngle = -drainSweep.value,
                     useCenter = false,
@@ -734,7 +774,7 @@ private fun HardwareRecordButton(
                 )
             } else {
                 drawCircle(
-                    color = NjRecordCoral.copy(alpha = ringAlpha),
+                    color = njRecordCoral.copy(alpha = ringAlpha),
                     radius = ringRadius,
                     style = Stroke(width = ringStroke)
                 )
@@ -745,7 +785,7 @@ private fun HardwareRecordButton(
             val knurlInner = bodyRadius + 1.dp.toPx()
             val knurlOuter = outerRadius - ringStroke - 1.dp.toPx()
             val knurlStroke = 1.dp.toPx()
-            val knurlColor = NjMuted2.copy(alpha = 0.25f)
+            val knurlColor = njMuted2.copy(alpha = 0.25f)
 
             for (i in 0 until knurlCount) {
                 val angle = (360f / knurlCount) * i
@@ -842,7 +882,7 @@ private fun HardwareRecordButton(
             // Coral LED dot -- always circular, constant size
             val dotRadius = outerRadius * 0.35f * pressScale * 0.5f
             drawCircle(
-                color = NjRecordCoral,
+                color = njRecordCoral,
                 radius = dotRadius,
                 center = center
             )
@@ -866,7 +906,7 @@ private fun StatusLcd(
 ) {
     NjRecessedPanel(
         modifier = modifier.fillMaxWidth(0.5f),
-        backgroundColor = Color(0xFF080610)
+        backgroundColor = NjPanelInset
     ) {
         Box(
             modifier = Modifier.fillMaxWidth(),
@@ -879,7 +919,7 @@ private fun StatusLcd(
                     fontSize = 12.sp,
                     letterSpacing = 1.5.sp
                 ),
-                color = NjStudioAccent.copy(alpha = 0.7f)
+                color = NjAmber.copy(alpha = 0.7f)
             )
         }
     }
@@ -1265,10 +1305,10 @@ private fun MetronomePanel(
     // Opaque body color -- NjBg base with the RaisedBodyColor tint composited on top.
     // RaisedBodyColor is 12% alpha so buttons/cards are see-through by design,
     // but this panel needs to be solid when it overlaps content.
-    val panelColor = remember {
-        val bg = NjBg // 0xFF0F0D18
-        val tint = RaisedBodyColor // NjMuted2 at 12%
-        lerp(bg, Color(tint.red, tint.green, tint.blue), tint.alpha)
+    val panelBg = NjPanelInset
+    val panelTint = RaisedBodyColor
+    val panelColor = remember(panelBg, panelTint) {
+        lerp(panelBg, Color(panelTint.red, panelTint.green, panelTint.blue), panelTint.alpha)
     }
 
     Column(

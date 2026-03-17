@@ -22,7 +22,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.example.nightjar.ui.theme.NjMidnight2
+import com.example.nightjar.ui.theme.NjPanelInset
 import com.example.nightjar.ui.theme.NjMuted2
 import com.example.nightjar.ui.theme.NjOutline
 import kotlin.math.cos
@@ -62,6 +62,11 @@ fun NjKnob(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        // Hoist theme colors before Canvas (DrawScope is not composable)
+        val knobBodyColor = NjPanelInset
+        val knobBorderColor = NjOutline
+        val knobRidgeBase = NjMuted2
+
         Canvas(
             modifier = Modifier
                 .size(knobSize)
@@ -111,8 +116,8 @@ fun NjKnob(
             val currentAngle = START_ANGLE + SWEEP_DEGREES * value.coerceIn(0f, 1f)
 
             // --- Ridges (knurled edge) ---
-            val ridgeColor = if (enabled) NjMuted2.copy(alpha = 0.45f)
-                else NjMuted2.copy(alpha = 0.2f)
+            val ridgeColor = if (enabled) knobRidgeBase.copy(alpha = 0.45f)
+                else knobRidgeBase.copy(alpha = 0.2f)
 
             for (i in 0 until RIDGE_COUNT) {
                 val angle = (360f / RIDGE_COUNT) * i
@@ -135,14 +140,14 @@ fun NjKnob(
 
             // --- Knob body ---
             drawCircle(
-                color = NjMidnight2,
+                color = knobBodyColor,
                 radius = bodyRadius,
                 center = center
             )
 
             // --- Border ring ---
             drawCircle(
-                color = NjOutline,
+                color = knobBorderColor,
                 radius = bodyRadius,
                 center = center,
                 style = Stroke(width = 1.dp.toPx())
