@@ -42,6 +42,9 @@ interface IdeaDao {
     @Query("UPDATE ideas SET gridResolution = :gridResolution WHERE id = :id")
     suspend fun updateGridResolution(id: Long, gridResolution: Int)
 
+    @Query("UPDATE ideas SET scaleRoot = :root, scaleType = :type WHERE id = :id")
+    suspend fun updateScale(id: Long, root: Int, type: String)
+
     @Query("DELETE FROM ideas WHERE id = :id")
     suspend fun deleteIdeaById(id: Long)
 

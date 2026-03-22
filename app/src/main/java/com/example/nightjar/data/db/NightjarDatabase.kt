@@ -39,6 +39,8 @@ import com.example.nightjar.data.db.entity.TrackEntity
  * - **v10** — Added `gridResolution` to ideas, `midi_clips` table for arrangeable MIDI
  *             clip blocks, `clipId` FK on `midi_notes`, removed UNIQUE on
  *             `drum_patterns.trackId` index (allows multiple patterns per track).
+ * - **v11** — Added `scaleRoot` and `scaleType` to ideas for project-level
+ *             musical scale and key signature.
  */
 @Database(
     entities = [
@@ -48,7 +50,7 @@ import com.example.nightjar.data.db.entity.TrackEntity
         DrumClipEntity::class,
         MidiClipEntity::class, MidiNoteEntity::class
     ],
-    version = 10,
+    version = 11,
     exportSchema = false
 )
 abstract class NightjarDatabase : RoomDatabase() {
@@ -409,6 +411,17 @@ abstract class NightjarDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_10_11 = object : androidx.room.migration.Migration(10, 11) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE ideas ADD COLUMN scaleRoot INTEGER NOT NULL DEFAULT 0"
+                )
+                db.execSQL(
+                    "ALTER TABLE ideas ADD COLUMN scaleType TEXT NOT NULL DEFAULT 'MAJOR'"
+                )
+            }
+        }
+
         fun getInstance(context: Context): NightjarDatabase {
             return INSTANCE ?: synchronized(this) {
                 val db = Room.databaseBuilder(
@@ -418,7 +431,8 @@ abstract class NightjarDatabase : RoomDatabase() {
                 ).addMigrations(
                     MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4,
                     MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
-                    MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10
+                    MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10,
+                    MIGRATION_10_11
                 ).build()
                 INSTANCE = db
                 db

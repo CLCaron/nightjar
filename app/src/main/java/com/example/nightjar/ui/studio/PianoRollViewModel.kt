@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.nightjar.audio.MusicalScaleHelper
 import com.example.nightjar.audio.MusicalTimeConverter
 import com.example.nightjar.audio.OboeAudioEngine
 import com.example.nightjar.data.db.entity.MidiClipEntity
@@ -51,6 +52,13 @@ data class PianoRollState(
     val gridResolution: Int = 16,
     val isSnapEnabled: Boolean = true,
     val stickyNoteDurationMs: Long? = null,
+    // Scale & chord
+    val scaleRoot: Int = 0,
+    val scaleType: MusicalScaleHelper.ScaleType = MusicalScaleHelper.ScaleType.MAJOR,
+    val isScaleEnabled: Boolean = false,
+    val isChordMode: Boolean = false,
+    val chordType: MusicalScaleHelper.ChordType = MusicalScaleHelper.ChordType.TRIAD,
+    val diatonicChords: List<MusicalScaleHelper.ChordInfo> = emptyList(),
     val isLoading: Boolean = true
 )
 
@@ -68,6 +76,12 @@ sealed interface PianoRollAction {
     data object Play : PianoRollAction
     data object Pause : PianoRollAction
     data class SeekTo(val positionMs: Long) : PianoRollAction
+    // Scale & chord
+    data object ToggleScale : PianoRollAction
+    data class SetScaleRoot(val root: Int) : PianoRollAction
+    data class SetScaleType(val type: MusicalScaleHelper.ScaleType) : PianoRollAction
+    data object ToggleChordMode : PianoRollAction
+    data object CycleChordType : PianoRollAction
 }
 
 /** One-shot effects from the piano roll. */
@@ -156,6 +170,11 @@ class PianoRollViewModel @Inject constructor(
 
                 noteClipMap = clipMap
 
+                val scaleRoot = idea?.scaleRoot ?: 0
+                val scaleType = MusicalScaleHelper.ScaleType.fromName(
+                    idea?.scaleType ?: "MAJOR"
+                )
+
                 _state.update {
                     it.copy(
                         trackId = trackId,
@@ -172,6 +191,8 @@ class PianoRollViewModel @Inject constructor(
                         timeSignatureNumerator = numerator,
                         timeSignatureDenominator = denominator,
                         gridResolution = idea?.gridResolution ?: 16,
+                        scaleRoot = scaleRoot,
+                        scaleType = scaleType,
                         isLoading = false
                     )
                 }
@@ -256,6 +277,12 @@ class PianoRollViewModel @Inject constructor(
             PianoRollAction.Play -> audioEngine.play()
             PianoRollAction.Pause -> audioEngine.pause()
             is PianoRollAction.SeekTo -> audioEngine.seekTo(action.positionMs)
+            // Scale & chord
+            PianoRollAction.ToggleScale -> toggleScale()
+            is PianoRollAction.SetScaleRoot -> setScaleRoot(action.root)
+            is PianoRollAction.SetScaleType -> setScaleType(action.type)
+            PianoRollAction.ToggleChordMode -> _state.update { it.copy(isChordMode = !it.isChordMode) }
+            PianoRollAction.CycleChordType -> cycleChordType()
         }
     }
 
@@ -286,12 +313,25 @@ class PianoRollViewModel @Inject constructor(
     private fun placeNote(pitch: Int, absoluteStartMs: Long, durationMs: Long) {
         viewModelScope.launch {
             try {
+                val st = _state.value
                 val clip = findClipForPosition(absoluteStartMs)
                 val clipRelativeMs = absoluteStartMs - clip.offsetMs
-                val noteId = midiRepo.addNote(clip.id, trackId, pitch, clipRelativeMs, durationMs)
+
+                val pitches = if (st.isChordMode && st.isScaleEnabled) {
+                    MusicalScaleHelper.getChordPitches(
+                        pitch, st.scaleRoot, st.scaleType, st.chordType
+                    )
+                } else {
+                    listOf(pitch)
+                }
+
+                var lastNoteId = 0L
+                for (p in pitches) {
+                    lastNoteId = midiRepo.addNote(clip.id, trackId, p, clipRelativeMs, durationMs)
+                }
                 midiRepo.recomputeTrackDuration(trackId)
                 previewPitch(pitch)
-                _state.update { it.copy(selectedNoteId = noteId) }
+                _state.update { it.copy(selectedNoteId = lastNoteId) }
             } catch (e: Exception) {
                 _effects.emit(PianoRollEffect.ShowError("Failed to add note"))
             }
@@ -353,6 +393,71 @@ class PianoRollViewModel @Inject constructor(
             }
         }
     }
+
+    // ── Scale & chord handlers ──────────────────────────────────────
+
+    private fun toggleScale() {
+        _state.update {
+            val enabled = !it.isScaleEnabled
+            val chords = if (enabled) {
+                MusicalScaleHelper.getDiatonicChords(it.scaleRoot, it.scaleType, it.chordType)
+            } else {
+                emptyList()
+            }
+            it.copy(
+                isScaleEnabled = enabled,
+                diatonicChords = chords,
+                // Turning scale off also disables chord mode
+                isChordMode = if (!enabled) false else it.isChordMode
+            )
+        }
+    }
+
+    private fun setScaleRoot(root: Int) {
+        val clamped = root.coerceIn(0, 11)
+        _state.update {
+            val chords = if (it.isScaleEnabled) {
+                MusicalScaleHelper.getDiatonicChords(clamped, it.scaleType, it.chordType)
+            } else emptyList()
+            it.copy(scaleRoot = clamped, diatonicChords = chords)
+        }
+        persistScale()
+    }
+
+    private fun setScaleType(type: MusicalScaleHelper.ScaleType) {
+        _state.update {
+            val chords = if (it.isScaleEnabled) {
+                MusicalScaleHelper.getDiatonicChords(it.scaleRoot, type, it.chordType)
+            } else emptyList()
+            it.copy(scaleType = type, diatonicChords = chords)
+        }
+        persistScale()
+    }
+
+    private fun cycleChordType() {
+        val types = MusicalScaleHelper.ChordType.entries
+        _state.update {
+            val nextIndex = (types.indexOf(it.chordType) + 1) % types.size
+            val newType = types[nextIndex]
+            val chords = if (it.isScaleEnabled) {
+                MusicalScaleHelper.getDiatonicChords(it.scaleRoot, it.scaleType, newType)
+            } else emptyList()
+            it.copy(chordType = newType, diatonicChords = chords)
+        }
+    }
+
+    private fun persistScale() {
+        viewModelScope.launch {
+            try {
+                val st = _state.value
+                ideaRepo.updateScale(ideaId, st.scaleRoot, st.scaleType.name)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to persist scale", e)
+            }
+        }
+    }
+
+    // ── Grid ─────────────────────────────────────────────────────────
 
     private fun cycleGridResolution() {
         val presets = listOf(4, 8, 16, 32)

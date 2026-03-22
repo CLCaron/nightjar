@@ -19,6 +19,9 @@ import androidx.room.PrimaryKey
  * @property timeSignatureDenominator Beat unit (bottom number of time signature, default 4).
  * @property gridResolution Sub-beat grid density for snap and editing (default 16 = sixteenth notes).
  *                          Valid values: 4 (quarter), 8 (eighth), 16 (sixteenth), 32 (thirty-second).
+ * @property scaleRoot      Root note of the project scale (0=C through 11=B, default 0).
+ * @property scaleType      Scale type name matching [com.example.nightjar.audio.MusicalScaleHelper.ScaleType].
+ *                          Default "MAJOR". Stored as the enum name, not display name.
  * @property createdAtEpochMs Unix timestamp of when the idea was first recorded.
  */
 @Entity(tableName = "ideas")
@@ -31,5 +34,7 @@ data class IdeaEntity(
     val timeSignatureNumerator: Int = 4,
     val timeSignatureDenominator: Int = 4,
     val gridResolution: Int = 16,
+    val scaleRoot: Int = 0,
+    val scaleType: String = "MAJOR",
     val createdAtEpochMs: Long = System.currentTimeMillis()
 )

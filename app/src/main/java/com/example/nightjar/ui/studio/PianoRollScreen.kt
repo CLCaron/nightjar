@@ -68,6 +68,13 @@ import com.example.nightjar.ui.theme.NjSurface
 import com.example.nightjar.ui.theme.NjLane
 import com.example.nightjar.ui.theme.NjPanelInset
 import com.example.nightjar.ui.theme.NjTrackColors
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.ui.Alignment
+import com.example.nightjar.audio.MusicalScaleHelper
 import kotlin.math.abs
 
 /** Height of each semitone row in dp. */
@@ -235,6 +242,12 @@ fun PianoRollScreen(
             )
         )
 
+        // Scale & chord controls
+        ScaleChordControls(state = state, onAction = viewModel::onAction)
+
+        // Diatonic chord reference strip (visible when scale is enabled)
+        ChordReferenceStrip(chords = state.diatonicChords)
+
         // Piano keys + Grid
         Row(modifier = Modifier.fillMaxSize()) {
             // Piano keys column (scrolls vertically with the grid)
@@ -249,7 +262,13 @@ fun PianoRollScreen(
                         .width(KEYS_WIDTH_DP.dp)
                         .height(totalGridHeight)
                 ) {
-                    drawPianoKeys(rowHeightPx, textMeasurer, pianoMuted2, pianoOnBg, surfaceColor)
+                    drawPianoKeys(
+                        rowHeightPx, textMeasurer, pianoMuted2, pianoOnBg, surfaceColor,
+                        isScaleEnabled = state.isScaleEnabled,
+                        scaleRoot = state.scaleRoot,
+                        scaleType = state.scaleType,
+                        scaleHighlightColor = pianoAmber
+                    )
                 }
             }
 
@@ -425,7 +444,11 @@ fun PianoRollScreen(
                             muted2Color = pianoMuted2,
                             laneColor = pianoLane,
                             amberColor = pianoAmber,
-                            blackKeyBgColor = surfaceColor
+                            blackKeyBgColor = surfaceColor,
+                            isScaleEnabled = state.isScaleEnabled,
+                            scaleRoot = state.scaleRoot,
+                            scaleType = state.scaleType,
+                            scaleHighlightColor = pianoAmber
                         )
                     }
                 }
@@ -434,13 +457,143 @@ fun PianoRollScreen(
     }
 }
 
+// ── Scale & chord controls ──────────────────────────────────────────
+
+@Composable
+private fun ScaleChordControls(
+    state: PianoRollState,
+    onAction: (PianoRollAction) -> Unit
+) {
+    var scaleDropdownExpanded by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(NjSurface)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Scale on/off toggle
+        NjButton(
+            text = "Scale",
+            onClick = { onAction(PianoRollAction.ToggleScale) },
+            isActive = state.isScaleEnabled,
+            ledColor = NjAmber
+        )
+
+        // Root note (tap to cycle C → C# → D → ...)
+        NjButton(
+            text = MusicalScaleHelper.NOTE_NAMES[state.scaleRoot],
+            onClick = { onAction(PianoRollAction.SetScaleRoot((state.scaleRoot + 1) % 12)) },
+            textColor = NjAmber.copy(alpha = 0.8f)
+        )
+
+        // Scale type (tap to open dropdown)
+        Box {
+            NjButton(
+                text = state.scaleType.displayName,
+                onClick = { scaleDropdownExpanded = true },
+                textColor = NjAmber.copy(alpha = 0.8f)
+            )
+            DropdownMenu(
+                expanded = scaleDropdownExpanded,
+                onDismissRequest = { scaleDropdownExpanded = false },
+                modifier = Modifier.background(NjSurface)
+            ) {
+                for (group in MusicalScaleHelper.ScaleGroup.entries) {
+                    // Group header
+                    Text(
+                        text = group.displayName,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = NjMuted2
+                    )
+                    // Scales in this group
+                    for (scale in MusicalScaleHelper.ScaleType.entries.filter { it.group == group }) {
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = scale.displayName,
+                                    color = if (scale == state.scaleType) NjAmber else NjOnBg
+                                )
+                            },
+                            onClick = {
+                                onAction(PianoRollAction.SetScaleType(scale))
+                                scaleDropdownExpanded = false
+                            }
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.weight(1f))
+
+        // Chord on/off toggle
+        NjButton(
+            text = "Chord",
+            onClick = { onAction(PianoRollAction.ToggleChordMode) },
+            isActive = state.isChordMode,
+            ledColor = NjAmber
+        )
+
+        // Chord type (tap to cycle Triad → 7th → 9th)
+        NjButton(
+            text = state.chordType.displayName,
+            onClick = { onAction(PianoRollAction.CycleChordType) },
+            textColor = NjAmber.copy(alpha = 0.8f)
+        )
+    }
+}
+
+/** Passive diatonic chord reference strip showing roman numerals and chord names. */
+@Composable
+private fun ChordReferenceStrip(
+    chords: List<MusicalScaleHelper.ChordInfo>
+) {
+    if (chords.isEmpty()) return
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(NjSurface)
+            .padding(horizontal = 8.dp, vertical = 2.dp)
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        for (chord in chords) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = chord.romanNumeral,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = NjMuted2,
+                    fontSize = 10.sp
+                )
+                Text(
+                    text = chord.name,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = NjOnBg.copy(alpha = 0.7f),
+                    fontSize = 11.sp
+                )
+            }
+        }
+    }
+}
+
+// ── Drawing functions ───────────────────────────────────────────────
+
 /** Draw the piano key strip on the left side. */
 private fun DrawScope.drawPianoKeys(
     rowHeightPx: Float,
     textMeasurer: TextMeasurer,
     muted2Color: Color,
     onBgColor: Color,
-    blackKeyBgColor: Color
+    blackKeyBgColor: Color,
+    isScaleEnabled: Boolean = false,
+    scaleRoot: Int = 0,
+    scaleType: MusicalScaleHelper.ScaleType = MusicalScaleHelper.ScaleType.MAJOR,
+    scaleHighlightColor: Color = Color.Transparent
 ) {
     val width = size.width
 
@@ -457,6 +610,26 @@ private fun DrawScope.drawPianoKeys(
             topLeft = Offset(0f, y),
             size = Size(width, rowHeightPx)
         )
+
+        // Scale indicators on the right edge of each key
+        if (isScaleEnabled) {
+            val isRoot = MusicalScaleHelper.isRoot(displayNote, scaleRoot)
+            val isInScale = MusicalScaleHelper.isInScale(displayNote, scaleRoot, scaleType)
+
+            if (isRoot) {
+                drawRect(
+                    color = scaleHighlightColor.copy(alpha = 0.7f),
+                    topLeft = Offset(width - 5f, y),
+                    size = Size(5f, rowHeightPx)
+                )
+            } else if (isInScale) {
+                drawRect(
+                    color = scaleHighlightColor.copy(alpha = 0.25f),
+                    topLeft = Offset(width - 5f, y),
+                    size = Size(5f, rowHeightPx)
+                )
+            }
+        }
 
         // Separator -- stronger at C notes (octave boundaries)
         val isC = octaveIndex == 0
@@ -501,7 +674,11 @@ private fun DrawScope.drawGrid(
     muted2Color: Color,
     laneColor: Color,
     amberColor: Color,
-    blackKeyBgColor: Color = Color(0xFF14101E)
+    blackKeyBgColor: Color = Color(0xFF14101E),
+    isScaleEnabled: Boolean = false,
+    scaleRoot: Int = 0,
+    scaleType: MusicalScaleHelper.ScaleType = MusicalScaleHelper.ScaleType.MAJOR,
+    scaleHighlightColor: Color = Color.Transparent
 ) {
     val totalHeight = TOTAL_NOTES * rowHeightPx
     val beatMs = 60_000.0 / bpm
@@ -533,6 +710,30 @@ private fun DrawScope.drawGrid(
             end = Offset(size.width, y),
             strokeWidth = if (isC) 1f else 0.5f
         )
+    }
+
+    // Scale row tinting: subtle highlights for in-scale pitches
+    if (isScaleEnabled) {
+        for (note in 0 until TOTAL_NOTES) {
+            val displayNote = TOTAL_NOTES - 1 - note
+            val y = note * rowHeightPx
+            val isRoot = MusicalScaleHelper.isRoot(displayNote, scaleRoot)
+            val isInScale = MusicalScaleHelper.isInScale(displayNote, scaleRoot, scaleType)
+
+            if (isRoot) {
+                drawRect(
+                    color = scaleHighlightColor.copy(alpha = 0.07f),
+                    topLeft = Offset(0f, y),
+                    size = Size(size.width, rowHeightPx)
+                )
+            } else if (isInScale) {
+                drawRect(
+                    color = scaleHighlightColor.copy(alpha = 0.035f),
+                    topLeft = Offset(0f, y),
+                    size = Size(size.width, rowHeightPx)
+                )
+            }
+        }
     }
 
     // Clip region backgrounds and boundary lines

@@ -100,6 +100,9 @@ class IdeaRepository(
     suspend fun updateGridResolution(id: Long, gridResolution: Int) =
         ideaDao.updateGridResolution(id, gridResolution)
 
+    suspend fun updateScale(id: Long, root: Int, type: String) =
+        ideaDao.updateScale(id, root, type)
+
     suspend fun addTagToIdea(ideaId: Long, rawName: String) {
         val name = rawName.trim()
         if (name.isBlank()) return
