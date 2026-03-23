@@ -13,6 +13,9 @@ interface MidiNoteDao {
     @Insert
     suspend fun insertNote(note: MidiNoteEntity): Long
 
+    @Insert
+    suspend fun insertNotes(notes: List<MidiNoteEntity>): List<Long>
+
     @Query("SELECT * FROM midi_notes WHERE trackId = :trackId ORDER BY startMs, pitch")
     suspend fun getNotesForTrack(trackId: Long): List<MidiNoteEntity>
 
@@ -39,6 +42,12 @@ interface MidiNoteDao {
 
     @Query("DELETE FROM midi_notes WHERE id = :noteId")
     suspend fun deleteNote(noteId: Long)
+
+    @Query("DELETE FROM midi_notes WHERE id IN (:noteIds)")
+    suspend fun deleteNotes(noteIds: List<Long>)
+
+    @Query("SELECT * FROM midi_notes WHERE id IN (:noteIds)")
+    suspend fun getNotesByIds(noteIds: List<Long>): List<MidiNoteEntity>
 
     @Query("DELETE FROM midi_notes WHERE trackId = :trackId")
     suspend fun deleteAllNotesForTrack(trackId: Long)

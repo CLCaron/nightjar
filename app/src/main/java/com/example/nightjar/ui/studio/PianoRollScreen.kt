@@ -20,6 +20,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Redo
+import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.SkipPrevious
 import com.example.nightjar.ui.components.NjIcons
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -67,6 +70,7 @@ import com.example.nightjar.ui.theme.NjLedGreen
 import com.example.nightjar.ui.theme.NjSurface
 import com.example.nightjar.ui.theme.NjLane
 import com.example.nightjar.ui.theme.NjPanelInset
+import com.example.nightjar.ui.theme.NjError
 import com.example.nightjar.ui.theme.NjTrackColors
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -93,26 +97,22 @@ private val EDGE_TOUCH_ZONE = 16.dp
 
 /** Fast long-press threshold in ms (matches Timeline). */
 private const val FAST_LONG_PRESS_MS = 200L
-/** Double-tap detection window in ms. */
-private const val DOUBLE_TAP_TIMEOUT_MS = 300L
 
 private val NOTE_NAMES = arrayOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 private val BLACK_KEYS = setOf(1, 3, 6, 8, 10) // indices within octave
 
 /** Local preview state for an in-progress note drag (move or resize). */
-private data class NoteDragPreview(
-    val noteId: Long,
-    val previewStartMs: Long,
-    val previewDurationMs: Long,
-    val previewPitch: Int
+private data class GroupDragState(
+    val noteIds: Set<Long>,       // all notes being dragged
+    val anchorNoteId: Long,       // the note the user touched
+    val deltaMs: Long = 0L,       // time offset (move mode)
+    val deltaPitch: Int = 0,      // pitch offset (move mode)
+    val deltaDurationMs: Long = 0L, // duration offset (resize mode)
+    val isResize: Boolean = false
 )
 
-/** Records the last tap for double-tap detection across gesture cycles. */
-private data class TapInfo(
-    val timeMs: Long,
-    val position: Offset,
-    val noteId: Long?
-)
+/** Timeout for double-tap-to-delete detection. */
+private const val DOUBLE_TAP_TIMEOUT_MS = 300L
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -158,10 +158,11 @@ fun PianoRollScreen(
     val view = LocalView.current
 
     // Drag preview state (local to composable, not in ViewModel)
-    var dragPreview by remember { mutableStateOf<NoteDragPreview?>(null) }
+    var dragState by remember { mutableStateOf<GroupDragState?>(null) }
 
-    // Double-tap detection state (persists across gesture cycles)
-    var lastTapInfo by remember { mutableStateOf<TapInfo?>(null) }
+    // Double-tap detection state
+    var lastTapNoteId by remember { mutableStateOf<Long?>(null) }
+    var lastTapTimeMs by remember { mutableStateOf(0L) }
 
     // Faster long-press for note drag -- 200ms instead of the default 400ms
     val baseViewConfig = LocalViewConfiguration.current
@@ -205,6 +206,27 @@ fun PianoRollScreen(
                 }
             },
             actions = {
+                NjButton(
+                    text = "",
+                    icon = Icons.AutoMirrored.Filled.Undo,
+                    onClick = { viewModel.onAction(PianoRollAction.Undo) },
+                    textColor = if (state.canUndo) NjOnBg else NjMuted2.copy(alpha = 0.3f)
+                )
+                Spacer(Modifier.width(2.dp))
+                NjButton(
+                    text = "",
+                    icon = Icons.AutoMirrored.Filled.Redo,
+                    onClick = { viewModel.onAction(PianoRollAction.Redo) },
+                    textColor = if (state.canRedo) NjOnBg else NjMuted2.copy(alpha = 0.3f)
+                )
+                Spacer(Modifier.width(2.dp))
+                NjButton(
+                    text = "",
+                    icon = Icons.Filled.Delete,
+                    onClick = { viewModel.onAction(PianoRollAction.DeleteSelected) },
+                    textColor = if (state.selectedNoteIds.isNotEmpty()) NjError else NjMuted2.copy(alpha = 0.3f)
+                )
+                Spacer(Modifier.width(8.dp))
                 NjButton(
                     text = "1/${state.gridResolution}",
                     onClick = { viewModel.onAction(PianoRollAction.CycleGridResolution) },
@@ -286,7 +308,10 @@ fun PianoRollScreen(
                             .width(gridWidthDp)
                             .height(totalGridHeight)
                             .background(panelInset)
-                            .pointerInput(state.notes, state.isSnapEnabled, state.bpm) {
+                            .pointerInput(
+                                state.notes, state.isSnapEnabled, state.bpm,
+                                state.selectedNoteIds
+                            ) {
                                 val pxPerMs = PX_PER_MS * density.density
                                 val edgeZonePx = EDGE_TOUCH_ZONE.toPx()
 
@@ -308,118 +333,136 @@ fun PianoRollScreen(
                                         if (longPress != null) {
                                             longPress.consume()
                                             view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                            val dragIds = if (edgeNote.id in state.selectedNoteIds) {
+                                                state.selectedNoteIds
+                                            } else {
+                                                setOf(edgeNote.id)
+                                            }
                                             handleResizeDrag(
-                                                edgeNote, longPress.id, pxPerMs, rowHeightPx,
+                                                edgeNote, dragIds, longPress.id, pxPerMs, rowHeightPx,
                                                 state.isSnapEnabled, state.bpm,
                                                 state.gridResolution, state.timeSignatureDenominator,
                                                 scrollX = { horizontalScrollState.value },
-                                                onPreview = { dragPreview = it },
-                                                onCommit = { noteId, newDurationMs ->
-                                                    dragPreview = null
+                                                onPreview = { dragState = it },
+                                                onCommit = { noteIds, deltaDurationMs ->
+                                                    dragState = null
                                                     viewModel.onAction(
-                                                        PianoRollAction.ResizeNote(noteId, newDurationMs)
+                                                        PianoRollAction.ResizeNotes(noteIds, deltaDurationMs)
                                                     )
                                                 },
-                                                onCancel = { dragPreview = null }
+                                                onCancel = { dragState = null }
                                             )
                                         } else {
-                                            // Tap on edge = select the note
+                                            // Tap on edge = double-tap or toggle selection
                                             val fingerLifted = currentEvent.changes
                                                 .none { it.id == down.id && it.pressed }
                                             if (fingerLifted) {
-                                                viewModel.onAction(
-                                                    PianoRollAction.SelectNote(edgeNote.id)
-                                                )
-                                                lastTapInfo = TapInfo(
-                                                    System.currentTimeMillis(), down.position, edgeNote.id
-                                                )
+                                                val now = System.currentTimeMillis()
+                                                if (lastTapNoteId == edgeNote.id &&
+                                                    now - lastTapTimeMs < DOUBLE_TAP_TIMEOUT_MS
+                                                ) {
+                                                    view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                                    viewModel.onAction(PianoRollAction.QuickDeleteNote(edgeNote.id))
+                                                    lastTapNoteId = null
+                                                    lastTapTimeMs = 0L
+                                                } else {
+                                                    viewModel.onAction(
+                                                        PianoRollAction.ToggleNoteSelection(edgeNote.id)
+                                                    )
+                                                    lastTapNoteId = edgeNote.id
+                                                    lastTapTimeMs = now
+                                                }
                                             }
                                         }
                                     } else if (hitNote != null) {
-                                        // ── NOTE BODY: hold to move, tap to select, double-tap to delete ──
+                                        // ── NOTE BODY: hold to move, tap to toggle selection / double-tap to delete ──
                                         val longPress = awaitLongPressOrCancellation(down.id)
                                         if (longPress != null) {
                                             longPress.consume()
                                             view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                            val dragIds = if (hitNote.id in state.selectedNoteIds) {
+                                                state.selectedNoteIds
+                                            } else {
+                                                setOf(hitNote.id)
+                                            }
                                             handleMoveDrag(
-                                                hitNote, longPress.id, pxPerMs, rowHeightPx,
+                                                hitNote, dragIds, longPress.id, pxPerMs, rowHeightPx,
                                                 state.isSnapEnabled, state.bpm,
                                                 state.gridResolution, state.timeSignatureDenominator,
                                                 scrollX = { horizontalScrollState.value },
                                                 scrollY = { verticalScrollState.value },
-                                                onPreview = { dragPreview = it },
+                                                onPreview = { dragState = it },
                                                 onPitchCrossed = { pitch ->
                                                     viewModel.onAction(
                                                         PianoRollAction.PreviewPitch(pitch)
                                                     )
                                                 },
-                                                onCommit = { noteId, newStartMs, newPitch ->
-                                                    dragPreview = null
+                                                onCommit = { noteIds, deltaMs, deltaPitch ->
+                                                    dragState = null
                                                     viewModel.onAction(
-                                                        PianoRollAction.MoveNote(noteId, newStartMs)
+                                                        PianoRollAction.MoveNotes(noteIds, deltaMs, deltaPitch)
                                                     )
-                                                    if (newPitch != hitNote.pitch) {
-                                                        viewModel.onAction(
-                                                            PianoRollAction.ChangeNotePitch(noteId, newPitch)
-                                                        )
-                                                    }
                                                 },
-                                                onCancel = { dragPreview = null }
+                                                onCancel = { dragState = null }
                                             )
                                         } else {
                                             val fingerLifted = currentEvent.changes
                                                 .none { it.id == down.id && it.pressed }
                                             if (fingerLifted) {
                                                 val now = System.currentTimeMillis()
-                                                val prev = lastTapInfo
-                                                val isDoubleTap = prev != null &&
-                                                    prev.noteId == hitNote.id &&
-                                                    (now - prev.timeMs) < DOUBLE_TAP_TIMEOUT_MS
-                                                if (isDoubleTap) {
-                                                    viewModel.onAction(
-                                                        PianoRollAction.DeleteNote(hitNote.id)
-                                                    )
-                                                    lastTapInfo = null
+                                                if (lastTapNoteId == hitNote.id &&
+                                                    now - lastTapTimeMs < DOUBLE_TAP_TIMEOUT_MS
+                                                ) {
+                                                    view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                                    viewModel.onAction(PianoRollAction.QuickDeleteNote(hitNote.id))
+                                                    lastTapNoteId = null
+                                                    lastTapTimeMs = 0L
                                                 } else {
                                                     viewModel.onAction(
-                                                        PianoRollAction.SelectNote(hitNote.id)
+                                                        PianoRollAction.ToggleNoteSelection(hitNote.id)
                                                     )
-                                                    lastTapInfo = TapInfo(now, down.position, hitNote.id)
+                                                    lastTapNoteId = hitNote.id
+                                                    lastTapTimeMs = now
                                                 }
                                             }
                                         }
                                     } else {
-                                        // ── EMPTY CELL: tap to place note ──
+                                        // ── EMPTY CELL: tap to clear selection or place note ──
                                         val longPress = awaitLongPressOrCancellation(down.id)
                                         if (longPress == null) {
                                             val fingerLifted = currentEvent.changes
                                                 .none { it.id == down.id && it.pressed }
                                             if (fingerLifted) {
-                                                val pitch = TOTAL_NOTES - 1 -
-                                                    (down.position.y / rowHeightPx).toInt()
-                                                val tapMs = (down.position.x / pxPerMs).toLong()
-                                                val snapMs = if (state.isSnapEnabled) {
-                                                    MusicalTimeConverter.snapToGrid(
-                                                        tapMs, state.bpm,
-                                                        state.gridResolution,
+                                                lastTapNoteId = null
+                                                lastTapTimeMs = 0L
+                                                if (state.selectedNoteIds.isNotEmpty()) {
+                                                    viewModel.onAction(PianoRollAction.ClearSelection)
+                                                } else {
+                                                    val pitch = TOTAL_NOTES - 1 -
+                                                        (down.position.y / rowHeightPx).toInt()
+                                                    val tapMs = (down.position.x / pxPerMs).toLong()
+                                                    val snapMs = if (state.isSnapEnabled) {
+                                                        MusicalTimeConverter.snapToGrid(
+                                                            tapMs, state.bpm,
+                                                            state.gridResolution,
+                                                            state.timeSignatureDenominator
+                                                        )
+                                                    } else tapMs
+                                                    val gridStepMs = MusicalTimeConverter.msPerGridStep(
+                                                        state.bpm, state.gridResolution,
                                                         state.timeSignatureDenominator
+                                                    ).toLong().coerceAtLeast(50L)
+                                                    val noteDuration = state.stickyNoteDurationMs
+                                                        ?: if (state.isSnapEnabled && gridStepMs > 0) gridStepMs
+                                                        else (60_000.0 / state.bpm).toLong()
+                                                    viewModel.onAction(
+                                                        PianoRollAction.PlaceNote(
+                                                            pitch = pitch.coerceIn(0, 127),
+                                                            startMs = snapMs.coerceAtLeast(0L),
+                                                            durationMs = noteDuration
+                                                        )
                                                     )
-                                                } else tapMs
-                                                val gridStepMs = MusicalTimeConverter.msPerGridStep(
-                                                    state.bpm, state.gridResolution,
-                                                    state.timeSignatureDenominator
-                                                ).toLong().coerceAtLeast(50L)
-                                                val noteDuration = state.stickyNoteDurationMs
-                                                    ?: if (state.isSnapEnabled && gridStepMs > 0) gridStepMs
-                                                    else (60_000.0 / state.bpm).toLong()
-                                                viewModel.onAction(
-                                                    PianoRollAction.PlaceNote(
-                                                        pitch = pitch.coerceIn(0, 127),
-                                                        startMs = snapMs.coerceAtLeast(0L),
-                                                        durationMs = noteDuration
-                                                    )
-                                                )
-                                                lastTapInfo = null
+                                                }
                                             }
                                         }
                                     }
@@ -432,7 +475,7 @@ fun PianoRollScreen(
                             notes = state.notes,
                             clips = state.clips,
                             highlightClipId = state.highlightClipId,
-                            selectedNoteId = state.selectedNoteId,
+                            selectedNoteIds = state.selectedNoteIds,
                             noteColor = noteColor,
                             positionMs = state.positionMs,
                             isPlaying = state.isPlaying,
@@ -440,7 +483,7 @@ fun PianoRollScreen(
                             beatsPerBar = state.timeSignatureNumerator,
                             gridResolution = state.gridResolution,
                             contentMs = contentMs,
-                            dragPreview = dragPreview,
+                            dragState = dragState,
                             muted2Color = pianoMuted2,
                             laneColor = pianoLane,
                             amberColor = pianoAmber,
@@ -664,7 +707,7 @@ private fun DrawScope.drawGrid(
     notes: List<MidiNoteEntity>,
     clips: List<PianoRollClipInfo>,
     highlightClipId: Long = 0L,
-    selectedNoteId: Long?,
+    selectedNoteIds: Set<Long>,
     noteColor: Color,
     positionMs: Long,
     isPlaying: Boolean,
@@ -672,7 +715,7 @@ private fun DrawScope.drawGrid(
     beatsPerBar: Int,
     gridResolution: Int,
     contentMs: Long,
-    dragPreview: NoteDragPreview? = null,
+    dragState: GroupDragState? = null,
     muted2Color: Color,
     laneColor: Color,
     amberColor: Color,
@@ -811,10 +854,27 @@ private fun DrawScope.drawGrid(
     // Draw notes with beveled edges
     val bw = 1f // bevel line width
     for (note in notes) {
-        val isDragging = dragPreview != null && note.id == dragPreview.noteId
-        val drawPitch = if (isDragging) dragPreview!!.previewPitch else note.pitch
-        val drawStartMs = if (isDragging) dragPreview!!.previewStartMs else note.startMs
-        val drawDurationMs = if (isDragging) dragPreview!!.previewDurationMs else note.durationMs
+        val isDragging = dragState != null && note.id in dragState.noteIds
+        val isAnchor = dragState != null && note.id == dragState.anchorNoteId
+
+        val drawPitch: Int
+        val drawStartMs: Long
+        val drawDurationMs: Long
+        if (isDragging) {
+            if (dragState!!.isResize) {
+                drawPitch = note.pitch
+                drawStartMs = note.startMs
+                drawDurationMs = (note.durationMs + dragState.deltaDurationMs).coerceAtLeast(50L)
+            } else {
+                drawPitch = (note.pitch + dragState.deltaPitch).coerceIn(0, 127)
+                drawStartMs = (note.startMs + dragState.deltaMs).coerceAtLeast(0L)
+                drawDurationMs = note.durationMs
+            }
+        } else {
+            drawPitch = note.pitch
+            drawStartMs = note.startMs
+            drawDurationMs = note.durationMs
+        }
 
         val rowIndex = TOTAL_NOTES - 1 - drawPitch
         val y = rowIndex * rowHeightPx + 1f
@@ -822,7 +882,7 @@ private fun DrawScope.drawGrid(
         val w = (drawDurationMs * pxPerMs).coerceAtLeast(4f)
         val h = rowHeightPx - 2f
 
-        val isSelected = note.id == selectedNoteId
+        val isSelected = note.id in selectedNoteIds
         val cornerRadius = CornerRadius(3f, 3f)
         val bevelW = 3f
 
@@ -860,8 +920,8 @@ private fun DrawScope.drawGrid(
             drawLine(Color.Black.copy(alpha = 0.4f), Offset(x + w, y), Offset(x + w, y + h), bevelW)
         }
 
-        // Drag border (brighter outline during active drag)
-        if (isDragging) {
+        // Drag border -- anchor note gets white outline during active drag
+        if (isAnchor) {
             drawRoundRect(
                 color = Color.White.copy(alpha = 0.6f),
                 topLeft = Offset(x, y),
@@ -916,7 +976,7 @@ private fun findNoteAt(
 }
 
 /**
- * Handle resize drag on a note's right edge.
+ * Handle resize drag on a note's right edge (group-aware).
  * Called AFTER long-press is confirmed -- only handles the drag phase.
  *
  * Uses absolute position tracking (canvas position + scroll offset) instead of
@@ -925,7 +985,8 @@ private fun findNoteAt(
  * relative deltas. Absolute coordinates are invariant to scroll movement.
  */
 private suspend fun AwaitPointerEventScope.handleResizeDrag(
-    note: MidiNoteEntity,
+    anchorNote: MidiNoteEntity,
+    dragNoteIds: Set<Long>,
     pointerId: PointerId,
     pxPerMs: Float,
     rowHeightPx: Float,
@@ -934,12 +995,14 @@ private suspend fun AwaitPointerEventScope.handleResizeDrag(
     gridResolution: Int,
     timeSignatureDenominator: Int,
     scrollX: () -> Int,
-    onPreview: (NoteDragPreview) -> Unit,
-    onCommit: (noteId: Long, newDurationMs: Long) -> Unit,
+    onPreview: (GroupDragState) -> Unit,
+    onCommit: (noteIds: Set<Long>, deltaDurationMs: Long) -> Unit,
     onCancel: () -> Unit
 ) {
     onPreview(
-        NoteDragPreview(note.id, note.startMs, note.durationMs, note.pitch)
+        GroupDragState(
+            noteIds = dragNoteIds, anchorNoteId = anchorNote.id, isResize = true
+        )
     )
 
     // Track absolute position (canvas position + scroll offset) to stay
@@ -959,15 +1022,19 @@ private suspend fun AwaitPointerEventScope.handleResizeDrag(
         change.consume()
         val accumulatedPx = change.position.x + scrollX() - startAbsX
         val deltaMs = (accumulatedPx / pxPerMs).toLong()
-        val rawDurationMs = (note.durationMs + deltaMs).coerceAtLeast(50L)
-        val newDurationMs = if (isSnapEnabled) {
-            val snappedEndMs = MusicalTimeConverter.snapToGrid(
-                note.startMs + rawDurationMs, bpm, gridResolution, timeSignatureDenominator
+        // Snap: compute snapped delta from the anchor note
+        val rawEndMs = anchorNote.startMs + anchorNote.durationMs + deltaMs
+        val snappedDelta = if (isSnapEnabled) {
+            val snappedEnd = MusicalTimeConverter.snapToGrid(
+                rawEndMs, bpm, gridResolution, timeSignatureDenominator
             )
-            (snappedEndMs - note.startMs).coerceAtLeast(50L)
-        } else rawDurationMs
+            snappedEnd - (anchorNote.startMs + anchorNote.durationMs)
+        } else deltaMs
         onPreview(
-            NoteDragPreview(note.id, note.startMs, newDurationMs, note.pitch)
+            GroupDragState(
+                noteIds = dragNoteIds, anchorNoteId = anchorNote.id,
+                deltaDurationMs = snappedDelta, isResize = true
+            )
         )
     }
 
@@ -976,28 +1043,32 @@ private suspend fun AwaitPointerEventScope.handleResizeDrag(
         val finalAbsX = if (lastEvent != null) lastEvent.position.x + scrollX() else startAbsX
         val accumulatedPx = finalAbsX - startAbsX
         val deltaMs = (accumulatedPx / pxPerMs).toLong()
-        var finalDurationMs = (note.durationMs + deltaMs).coerceAtLeast(50L)
-        if (isSnapEnabled) {
-            val snappedEndMs = MusicalTimeConverter.snapToGrid(
-                note.startMs + finalDurationMs, bpm, gridResolution, timeSignatureDenominator
+        val rawEndMs = anchorNote.startMs + anchorNote.durationMs + deltaMs
+        val finalDelta = if (isSnapEnabled) {
+            val snappedEnd = MusicalTimeConverter.snapToGrid(
+                rawEndMs, bpm, gridResolution, timeSignatureDenominator
             )
-            finalDurationMs = (snappedEndMs - note.startMs).coerceAtLeast(50L)
-        }
-        onCommit(note.id, finalDurationMs)
+            snappedEnd - (anchorNote.startMs + anchorNote.durationMs)
+        } else deltaMs
+        onCommit(dragNoteIds, finalDelta)
     } else {
         onCancel()
     }
 }
 
 /**
- * Handle move drag on a note body (time + pitch).
+ * Handle move drag on a note body (time + pitch, group-aware).
  * Called AFTER long-press is confirmed -- only handles the drag phase.
  *
  * Uses absolute position tracking for the same reason as [handleResizeDrag]:
  * scroll containers move the canvas under the finger, neutralizing relative deltas.
+ *
+ * Computes deltas from the anchor note only, then the same delta is applied to all
+ * notes in [dragNoteIds] via the ViewModel batch action.
  */
 private suspend fun AwaitPointerEventScope.handleMoveDrag(
-    note: MidiNoteEntity,
+    anchorNote: MidiNoteEntity,
+    dragNoteIds: Set<Long>,
     pointerId: PointerId,
     pxPerMs: Float,
     rowHeightPx: Float,
@@ -1007,15 +1078,15 @@ private suspend fun AwaitPointerEventScope.handleMoveDrag(
     timeSignatureDenominator: Int,
     scrollX: () -> Int,
     scrollY: () -> Int,
-    onPreview: (NoteDragPreview) -> Unit,
+    onPreview: (GroupDragState) -> Unit,
     onPitchCrossed: (Int) -> Unit,
-    onCommit: (noteId: Long, newStartMs: Long, newPitch: Int) -> Unit,
+    onCommit: (noteIds: Set<Long>, deltaMs: Long, deltaPitch: Int) -> Unit,
     onCancel: () -> Unit
 ) {
-    var lastPreviewPitch = note.pitch
+    var lastPreviewPitch = anchorNote.pitch
 
     onPreview(
-        NoteDragPreview(note.id, note.startMs, note.durationMs, note.pitch)
+        GroupDragState(noteIds = dragNoteIds, anchorNoteId = anchorNote.id)
     )
 
     // Track absolute position (canvas position + scroll offset) to stay
@@ -1040,18 +1111,24 @@ private suspend fun AwaitPointerEventScope.handleMoveDrag(
         val totalDx = change.position.x + scrollX() - startAbsX
         val totalDy = change.position.y + scrollY() - startAbsY!!
 
-        val deltaMs = (totalDx / pxPerMs).toLong()
-        val rawStartMs = (note.startMs + deltaMs).coerceAtLeast(0L)
-        val newStartMs = if (isSnapEnabled) {
-            MusicalTimeConverter.snapToGrid(rawStartMs, bpm, gridResolution, timeSignatureDenominator)
-        } else rawStartMs
+        // Compute delta from anchor note position
+        val rawDeltaMs = (totalDx / pxPerMs).toLong()
+        val snappedDeltaMs = if (isSnapEnabled) {
+            val snappedStart = MusicalTimeConverter.snapToGrid(
+                anchorNote.startMs + rawDeltaMs, bpm, gridResolution, timeSignatureDenominator
+            )
+            snappedStart - anchorNote.startMs
+        } else rawDeltaMs
         val pitchDelta = -(totalDy / rowHeightPx).toInt()
-        val newPitch = (note.pitch + pitchDelta).coerceIn(0, 127)
 
         onPreview(
-            NoteDragPreview(note.id, newStartMs, note.durationMs, newPitch)
+            GroupDragState(
+                noteIds = dragNoteIds, anchorNoteId = anchorNote.id,
+                deltaMs = snappedDeltaMs, deltaPitch = pitchDelta
+            )
         )
 
+        val newPitch = (anchorNote.pitch + pitchDelta).coerceIn(0, 127)
         if (newPitch != lastPreviewPitch) {
             onPitchCrossed(newPitch)
             lastPreviewPitch = newPitch
@@ -1065,17 +1142,16 @@ private suspend fun AwaitPointerEventScope.handleMoveDrag(
         val totalDx = finalAbsX - startAbsX
         val totalDy = finalAbsY - startAbsY!!
 
-        val deltaMs = (totalDx / pxPerMs).toLong()
-        var finalStartMs = (note.startMs + deltaMs).coerceAtLeast(0L)
-        val pitchDelta = -(totalDy / rowHeightPx).toInt()
-        val finalPitch = (note.pitch + pitchDelta).coerceIn(0, 127)
-
-        if (isSnapEnabled) {
-            finalStartMs = MusicalTimeConverter.snapToGrid(
-                finalStartMs, bpm, gridResolution, timeSignatureDenominator
+        val rawDeltaMs = (totalDx / pxPerMs).toLong()
+        val snappedDeltaMs = if (isSnapEnabled) {
+            val snappedStart = MusicalTimeConverter.snapToGrid(
+                anchorNote.startMs + rawDeltaMs, bpm, gridResolution, timeSignatureDenominator
             )
-        }
-        onCommit(note.id, finalStartMs, finalPitch)
+            snappedStart - anchorNote.startMs
+        } else rawDeltaMs
+        val pitchDelta = -(totalDy / rowHeightPx).toInt()
+
+        onCommit(dragNoteIds, snappedDeltaMs, pitchDelta)
     } else {
         onCancel()
     }

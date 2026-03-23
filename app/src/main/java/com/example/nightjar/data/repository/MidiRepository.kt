@@ -144,6 +144,16 @@ class MidiRepository(
         midiNoteDao.deleteNote(noteId)
     }
 
+    suspend fun insertNotes(notes: List<MidiNoteEntity>): List<Long> =
+        midiNoteDao.insertNotes(notes)
+
+    suspend fun deleteNotes(noteIds: List<Long>) {
+        midiNoteDao.deleteNotes(noteIds)
+    }
+
+    suspend fun getNotesByIds(noteIds: List<Long>): List<MidiNoteEntity> =
+        midiNoteDao.getNotesByIds(noteIds)
+
     // -- Instrument --
 
     suspend fun setInstrument(trackId: Long, program: Int) {
