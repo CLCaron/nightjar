@@ -42,7 +42,9 @@ data class PianoRollState(
     val notes: List<MidiNoteEntity> = emptyList(),
     val clips: List<PianoRollClipInfo> = emptyList(),
     val highlightClipId: Long = 0L,
-    val selectedNoteId: Long? = null,
+    val selectedNoteIds: Set<Long> = emptySet(),
+    val canUndo: Boolean = false,
+    val canRedo: Boolean = false,
     val isPlaying: Boolean = false,
     val positionMs: Long = 0L,
     val totalDurationMs: Long = 0L,
@@ -65,11 +67,14 @@ data class PianoRollState(
 /** User-initiated actions on the piano roll editor. */
 sealed interface PianoRollAction {
     data class PlaceNote(val pitch: Int, val startMs: Long, val durationMs: Long) : PianoRollAction
-    data class MoveNote(val noteId: Long, val newStartMs: Long) : PianoRollAction
-    data class ResizeNote(val noteId: Long, val newDurationMs: Long) : PianoRollAction
-    data class ChangeNotePitch(val noteId: Long, val newPitch: Int) : PianoRollAction
-    data class DeleteNote(val noteId: Long) : PianoRollAction
-    data class SelectNote(val noteId: Long?) : PianoRollAction
+    data class MoveNotes(val noteIds: Set<Long>, val deltaMs: Long, val deltaPitch: Int) : PianoRollAction
+    data class ResizeNotes(val noteIds: Set<Long>, val deltaDurationMs: Long) : PianoRollAction
+    data class QuickDeleteNote(val noteId: Long) : PianoRollAction
+    data class ToggleNoteSelection(val noteId: Long) : PianoRollAction
+    data object ClearSelection : PianoRollAction
+    data object DeleteSelected : PianoRollAction
+    data object Undo : PianoRollAction
+    data object Redo : PianoRollAction
     data class PreviewPitch(val pitch: Int) : PianoRollAction
     data object ToggleSnap : PianoRollAction
     data object CycleGridResolution : PianoRollAction
@@ -128,6 +133,8 @@ class PianoRollViewModel @Inject constructor(
 
     /** Cached clip entities for resolving note placement. */
     private var clipEntities = listOf<MidiClipEntity>()
+
+    private val undoManager = PianoRollUndoManager()
 
     init {
         load()
@@ -266,11 +273,14 @@ class PianoRollViewModel @Inject constructor(
     fun onAction(action: PianoRollAction) {
         when (action) {
             is PianoRollAction.PlaceNote -> placeNote(action.pitch, action.startMs, action.durationMs)
-            is PianoRollAction.MoveNote -> moveNote(action.noteId, action.newStartMs)
-            is PianoRollAction.ResizeNote -> resizeNote(action.noteId, action.newDurationMs)
-            is PianoRollAction.ChangeNotePitch -> changeNotePitch(action.noteId, action.newPitch)
-            is PianoRollAction.DeleteNote -> deleteNote(action.noteId)
-            is PianoRollAction.SelectNote -> _state.update { it.copy(selectedNoteId = action.noteId) }
+            is PianoRollAction.MoveNotes -> moveNotes(action.noteIds, action.deltaMs, action.deltaPitch)
+            is PianoRollAction.ResizeNotes -> resizeNotes(action.noteIds, action.deltaDurationMs)
+            is PianoRollAction.QuickDeleteNote -> quickDeleteNote(action.noteId)
+            is PianoRollAction.ToggleNoteSelection -> toggleNoteSelection(action.noteId)
+            PianoRollAction.ClearSelection -> _state.update { it.copy(selectedNoteIds = emptySet()) }
+            PianoRollAction.DeleteSelected -> deleteSelected()
+            PianoRollAction.Undo -> undo()
+            PianoRollAction.Redo -> redo()
             is PianoRollAction.PreviewPitch -> previewPitch(action.pitch)
             PianoRollAction.ToggleSnap -> _state.update { it.copy(isSnapEnabled = !it.isSnapEnabled) }
             PianoRollAction.CycleGridResolution -> cycleGridResolution()
@@ -325,72 +335,239 @@ class PianoRollViewModel @Inject constructor(
                     listOf(pitch)
                 }
 
-                var lastNoteId = 0L
-                for (p in pitches) {
-                    lastNoteId = midiRepo.addNote(clip.id, trackId, p, clipRelativeMs, durationMs)
+                val noteEntities = pitches.map { p ->
+                    MidiNoteEntity(
+                        trackId = trackId,
+                        clipId = clip.id,
+                        pitch = p,
+                        startMs = clipRelativeMs,
+                        durationMs = durationMs
+                    )
                 }
+                val newIds = midiRepo.insertNotes(noteEntities)
+                val snapshots = midiRepo.getNotesByIds(newIds)
+
+                undoManager.push(NoteOperation.Place(noteIds = newIds, snapshots = snapshots))
+                syncUndoRedoState()
+
                 midiRepo.recomputeTrackDuration(trackId)
                 previewPitch(pitch)
-                _state.update { it.copy(selectedNoteId = lastNoteId) }
+                _state.update { it.copy(selectedNoteIds = newIds.toSet()) }
             } catch (e: Exception) {
                 _effects.emit(PianoRollEffect.ShowError("Failed to add note"))
             }
         }
     }
 
-    private fun moveNote(noteId: Long, newAbsoluteStartMs: Long) {
+    private fun moveNotes(noteIds: Set<Long>, deltaMs: Long, deltaPitch: Int) {
+        if (noteIds.isEmpty()) return
         viewModelScope.launch {
             try {
-                val note = _state.value.notes.find { it.id == noteId } ?: return@launch
-                val (clipId, clipOffset) = noteClipMap[noteId] ?: return@launch
-                val clipRelativeMs = newAbsoluteStartMs - clipOffset
-                midiRepo.updateNoteTiming(noteId, clipRelativeMs, note.durationMs)
+                val st = _state.value
+                val entries = mutableListOf<NoteOperation.MoveBatch.MoveEntry>()
+
+                for (id in noteIds) {
+                    val note = st.notes.find { it.id == id } ?: continue
+                    val (_, clipOffset) = noteClipMap[id] ?: continue
+                    val oldClipRelativeMs = note.startMs - clipOffset
+                    val newClipRelativeMs = (oldClipRelativeMs + deltaMs).coerceAtLeast(0L)
+                    val newPitch = (note.pitch + deltaPitch).coerceIn(0, 127)
+
+                    midiRepo.updateNoteTiming(id, newClipRelativeMs, note.durationMs)
+                    if (newPitch != note.pitch) {
+                        midiRepo.updateNotePitch(id, newPitch)
+                    }
+
+                    entries.add(
+                        NoteOperation.MoveBatch.MoveEntry(
+                            noteId = id,
+                            oldStartMs = oldClipRelativeMs,
+                            newStartMs = newClipRelativeMs,
+                            oldPitch = note.pitch,
+                            newPitch = newPitch
+                        )
+                    )
+                }
+
+                if (entries.isNotEmpty()) {
+                    undoManager.push(NoteOperation.MoveBatch(entries))
+                    syncUndoRedoState()
+                }
+
                 midiRepo.recomputeTrackDuration(trackId)
             } catch (e: Exception) {
-                _effects.emit(PianoRollEffect.ShowError("Failed to move note"))
+                _effects.emit(PianoRollEffect.ShowError("Failed to move notes"))
             }
         }
     }
 
-    private fun resizeNote(noteId: Long, newDurationMs: Long) {
+    private fun resizeNotes(noteIds: Set<Long>, deltaDurationMs: Long) {
+        if (noteIds.isEmpty()) return
         viewModelScope.launch {
             try {
-                val note = _state.value.notes.find { it.id == noteId } ?: return@launch
-                val (_, clipOffset) = noteClipMap[noteId] ?: return@launch
-                val clipRelativeMs = note.startMs - clipOffset
-                val clamped = newDurationMs.coerceAtLeast(50L)
-                midiRepo.updateNoteTiming(noteId, clipRelativeMs, clamped)
+                val st = _state.value
+                val entries = mutableListOf<NoteOperation.ResizeBatch.ResizeEntry>()
+                var lastClamped = 0L
+
+                for (id in noteIds) {
+                    val note = st.notes.find { it.id == id } ?: continue
+                    val (_, clipOffset) = noteClipMap[id] ?: continue
+                    val clipRelativeMs = note.startMs - clipOffset
+                    val clamped = (note.durationMs + deltaDurationMs).coerceAtLeast(50L)
+
+                    midiRepo.updateNoteTiming(id, clipRelativeMs, clamped)
+
+                    entries.add(
+                        NoteOperation.ResizeBatch.ResizeEntry(
+                            noteId = id,
+                            clipRelativeStartMs = clipRelativeMs,
+                            oldDurationMs = note.durationMs,
+                            newDurationMs = clamped
+                        )
+                    )
+                    lastClamped = clamped
+                }
+
+                if (entries.isNotEmpty()) {
+                    undoManager.push(NoteOperation.ResizeBatch(entries))
+                    syncUndoRedoState()
+                    _state.update { it.copy(stickyNoteDurationMs = lastClamped) }
+                }
+
                 midiRepo.recomputeTrackDuration(trackId)
-                _state.update { it.copy(stickyNoteDurationMs = clamped) }
             } catch (e: Exception) {
-                _effects.emit(PianoRollEffect.ShowError("Failed to resize note"))
+                _effects.emit(PianoRollEffect.ShowError("Failed to resize notes"))
             }
         }
     }
 
-    private fun changeNotePitch(noteId: Long, newPitch: Int) {
+    private fun quickDeleteNote(noteId: Long) {
         viewModelScope.launch {
             try {
-                val clamped = newPitch.coerceIn(0, 127)
-                midiRepo.updateNotePitch(noteId, clamped)
-                previewPitch(clamped)
-            } catch (e: Exception) {
-                _effects.emit(PianoRollEffect.ShowError("Failed to change pitch"))
-            }
-        }
-    }
+                val snapshots = midiRepo.getNotesByIds(listOf(noteId))
+                if (snapshots.isEmpty()) return@launch
 
-    private fun deleteNote(noteId: Long) {
-        viewModelScope.launch {
-            try {
-                midiRepo.deleteNote(noteId)
+                midiRepo.deleteNotes(listOf(noteId))
+
+                undoManager.push(NoteOperation.Delete(noteIds = listOf(noteId), snapshots = snapshots))
+                syncUndoRedoState()
+
                 midiRepo.recomputeTrackDuration(trackId)
-                if (_state.value.selectedNoteId == noteId) {
-                    _state.update { it.copy(selectedNoteId = null) }
+                _state.update {
+                    it.copy(selectedNoteIds = it.selectedNoteIds - noteId)
                 }
             } catch (e: Exception) {
                 _effects.emit(PianoRollEffect.ShowError("Failed to delete note"))
             }
+        }
+    }
+
+    private fun toggleNoteSelection(noteId: Long) {
+        _state.update {
+            val updated = it.selectedNoteIds.toMutableSet()
+            if (noteId in updated) updated.remove(noteId) else updated.add(noteId)
+            it.copy(selectedNoteIds = updated)
+        }
+    }
+
+    private fun deleteSelected() {
+        viewModelScope.launch {
+            try {
+                val ids = _state.value.selectedNoteIds.toList()
+                if (ids.isEmpty()) return@launch
+
+                val snapshots = midiRepo.getNotesByIds(ids)
+                midiRepo.deleteNotes(ids)
+
+                undoManager.push(NoteOperation.Delete(noteIds = ids, snapshots = snapshots))
+                syncUndoRedoState()
+
+                midiRepo.recomputeTrackDuration(trackId)
+                _state.update { it.copy(selectedNoteIds = emptySet()) }
+            } catch (e: Exception) {
+                _effects.emit(PianoRollEffect.ShowError("Failed to delete notes"))
+            }
+        }
+    }
+
+    private fun undo() {
+        viewModelScope.launch {
+            try {
+                val op = undoManager.popUndo() ?: return@launch
+                executeOperation(op, reverse = true)
+                syncUndoRedoState()
+                _state.update { it.copy(selectedNoteIds = emptySet()) }
+                midiRepo.recomputeTrackDuration(trackId)
+            } catch (e: Exception) {
+                Log.e(TAG, "Undo failed", e)
+                _effects.emit(PianoRollEffect.ShowError("Undo failed"))
+            }
+        }
+    }
+
+    private fun redo() {
+        viewModelScope.launch {
+            try {
+                val op = undoManager.popRedo() ?: return@launch
+                executeOperation(op, reverse = false)
+                syncUndoRedoState()
+                _state.update { it.copy(selectedNoteIds = emptySet()) }
+                midiRepo.recomputeTrackDuration(trackId)
+            } catch (e: Exception) {
+                Log.e(TAG, "Redo failed", e)
+                _effects.emit(PianoRollEffect.ShowError("Redo failed"))
+            }
+        }
+    }
+
+    private suspend fun executeOperation(op: NoteOperation, reverse: Boolean) {
+        when (op) {
+            is NoteOperation.Place -> {
+                if (reverse) {
+                    // Undo place = delete
+                    midiRepo.deleteNotes(op.noteIds)
+                } else {
+                    // Redo place = re-insert from snapshots
+                    val entities = op.snapshots.map { it.copy(id = 0L) }
+                    val newIds = midiRepo.insertNotes(entities)
+                    op.noteIds = newIds
+                }
+            }
+            is NoteOperation.Delete -> {
+                if (reverse) {
+                    // Undo delete = re-insert from snapshots
+                    val entities = op.snapshots.map { it.copy(id = 0L) }
+                    val newIds = midiRepo.insertNotes(entities)
+                    op.noteIds = newIds
+                } else {
+                    // Redo delete = delete again
+                    midiRepo.deleteNotes(op.noteIds)
+                }
+            }
+            is NoteOperation.MoveBatch -> {
+                for (entry in op.entries) {
+                    val targetMs = if (reverse) entry.oldStartMs else entry.newStartMs
+                    val targetPitch = if (reverse) entry.oldPitch else entry.newPitch
+                    val dbNote = midiRepo.getNotesByIds(listOf(entry.noteId)).firstOrNull()
+                        ?: continue
+                    midiRepo.updateNoteTiming(entry.noteId, targetMs, dbNote.durationMs)
+                    if (targetPitch != dbNote.pitch) {
+                        midiRepo.updateNotePitch(entry.noteId, targetPitch)
+                    }
+                }
+            }
+            is NoteOperation.ResizeBatch -> {
+                for (entry in op.entries) {
+                    val targetDuration = if (reverse) entry.oldDurationMs else entry.newDurationMs
+                    midiRepo.updateNoteTiming(entry.noteId, entry.clipRelativeStartMs, targetDuration)
+                }
+            }
+        }
+    }
+
+    private fun syncUndoRedoState() {
+        _state.update {
+            it.copy(canUndo = undoManager.canUndo, canRedo = undoManager.canRedo)
         }
     }
 
