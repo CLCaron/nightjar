@@ -404,12 +404,7 @@ class PianoRollViewModel @Inject constructor(
             } else {
                 emptyList()
             }
-            it.copy(
-                isScaleEnabled = enabled,
-                diatonicChords = chords,
-                // Turning scale off also disables chord mode
-                isChordMode = if (!enabled) false else it.isChordMode
-            )
+            it.copy(isScaleEnabled = enabled, diatonicChords = chords)
         }
     }
 
@@ -435,19 +430,7 @@ class PianoRollViewModel @Inject constructor(
     }
 
     private fun toggleChordMode() {
-        _state.update {
-            val newChordMode = !it.isChordMode
-            // Turning chord mode on also enables scale (chords need scale context)
-            val scaleEnabled = if (newChordMode) true else it.isScaleEnabled
-            val chords = if (scaleEnabled) {
-                MusicalScaleHelper.getDiatonicChords(it.scaleRoot, it.scaleType, it.chordType)
-            } else emptyList()
-            it.copy(
-                isChordMode = newChordMode,
-                isScaleEnabled = scaleEnabled,
-                diatonicChords = chords
-            )
-        }
+        _state.update { it.copy(isChordMode = !it.isChordMode) }
     }
 
     private fun cycleChordType() {

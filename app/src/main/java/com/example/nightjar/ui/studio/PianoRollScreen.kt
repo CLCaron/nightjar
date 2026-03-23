@@ -611,18 +611,20 @@ private fun DrawScope.drawPianoKeys(
             size = Size(width, rowHeightPx)
         )
 
-        // Scale indicators on the right edge of each key
+        // Scale indicators on piano keys
         if (isScaleEnabled) {
             val isRoot = MusicalScaleHelper.isRoot(displayNote, scaleRoot)
             val isInScale = MusicalScaleHelper.isInScale(displayNote, scaleRoot, scaleType)
 
             if (isRoot) {
+                // Strong full-width tint for root notes
                 drawRect(
-                    color = scaleHighlightColor.copy(alpha = 0.7f),
-                    topLeft = Offset(width - 5f, y),
-                    size = Size(5f, rowHeightPx)
+                    color = scaleHighlightColor.copy(alpha = 0.35f),
+                    topLeft = Offset(0f, y),
+                    size = Size(width, rowHeightPx)
                 )
             } else if (isInScale) {
+                // Subtle edge bar for in-scale notes
                 drawRect(
                     color = scaleHighlightColor.copy(alpha = 0.25f),
                     topLeft = Offset(width - 5f, y),
@@ -687,19 +689,32 @@ private fun DrawScope.drawGrid(
     // How many grid steps per beat (e.g. gridResolution=16 in 4/4 -> 4 sub-steps per beat)
     val gridStepsPerBeat = gridResolution / 4
 
-    // Row backgrounds (alternate for black/white keys)
+    // Row backgrounds: sharp/natural alternation normally, two-tone in/out when scale is on
     for (note in 0 until TOTAL_NOTES) {
         val displayNote = TOTAL_NOTES - 1 - note
         val y = note * rowHeightPx
         val octaveIndex = displayNote % 12
-        val isBlack = octaveIndex in BLACK_KEYS
 
-        if (isBlack) {
-            drawRect(
-                color = blackKeyBgColor,
-                topLeft = Offset(0f, y),
-                size = Size(size.width, rowHeightPx)
-            )
+        if (isScaleEnabled) {
+            // Two-tone: in-scale rows stay at base color, out-of-scale rows darken
+            val isInScale = MusicalScaleHelper.isInScale(displayNote, scaleRoot, scaleType)
+            if (!isInScale) {
+                drawRect(
+                    color = Color.Black.copy(alpha = 0.35f),
+                    topLeft = Offset(0f, y),
+                    size = Size(size.width, rowHeightPx)
+                )
+            }
+        } else {
+            // Default: black key rows get a darker background
+            val isBlack = octaveIndex in BLACK_KEYS
+            if (isBlack) {
+                drawRect(
+                    color = blackKeyBgColor,
+                    topLeft = Offset(0f, y),
+                    size = Size(size.width, rowHeightPx)
+                )
+            }
         }
 
         // Row separator -- stronger at C notes (octave boundaries)
@@ -710,30 +725,6 @@ private fun DrawScope.drawGrid(
             end = Offset(size.width, y),
             strokeWidth = if (isC) 1f else 0.5f
         )
-    }
-
-    // Scale row tinting: subtle highlights for in-scale pitches
-    if (isScaleEnabled) {
-        for (note in 0 until TOTAL_NOTES) {
-            val displayNote = TOTAL_NOTES - 1 - note
-            val y = note * rowHeightPx
-            val isRoot = MusicalScaleHelper.isRoot(displayNote, scaleRoot)
-            val isInScale = MusicalScaleHelper.isInScale(displayNote, scaleRoot, scaleType)
-
-            if (isRoot) {
-                drawRect(
-                    color = scaleHighlightColor.copy(alpha = 0.07f),
-                    topLeft = Offset(0f, y),
-                    size = Size(size.width, rowHeightPx)
-                )
-            } else if (isInScale) {
-                drawRect(
-                    color = scaleHighlightColor.copy(alpha = 0.035f),
-                    topLeft = Offset(0f, y),
-                    size = Size(size.width, rowHeightPx)
-                )
-            }
-        }
     }
 
     // Clip region backgrounds and boundary lines
