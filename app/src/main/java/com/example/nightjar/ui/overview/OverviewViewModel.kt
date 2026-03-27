@@ -112,7 +112,7 @@ class OverviewViewModel @Inject constructor(
                 val tracks = studioRepo.ensureProjectInitialized(ideaId)
                 _state.update { it.copy(hasTracks = tracks.isNotEmpty()) }
                 if (tracks.isNotEmpty()) {
-                    loadTracksIntoEngine(tracks)
+                    loadTracksIntoEngine(ideaId)
                     val waveform = extractCompositeWaveform(tracks, ::getAudioFile)
                     _state.update { it.copy(compositeWaveform = waveform) }
                 }
@@ -158,7 +158,7 @@ class OverviewViewModel @Inject constructor(
                 val tracks = studioRepo.ensureProjectInitialized(ideaId)
                 _state.update { it.copy(hasTracks = tracks.isNotEmpty()) }
                 if (tracks.isNotEmpty()) {
-                    loadTracksIntoEngine(tracks)
+                    loadTracksIntoEngine(ideaId)
                     val waveform = extractCompositeWaveform(tracks, ::getAudioFile)
                     _state.update { it.copy(compositeWaveform = waveform) }
                 }
@@ -169,22 +169,21 @@ class OverviewViewModel @Inject constructor(
         }
     }
 
-    private fun loadTracksIntoEngine(
-        tracks: List<com.example.nightjar.data.db.entity.TrackEntity>
-    ) {
+    private suspend fun loadTracksIntoEngine(ideaId: Long) {
         audioEngine.removeAllTracks()
-        for (track in tracks) {
-            if (!track.isAudio || track.audioFileName == null) continue
-            val file = getAudioFile(track.audioFileName)
+        val slots = studioRepo.getActiveAudioSlotsForIdea(ideaId)
+        for ((index, slot) in slots.withIndex()) {
+            val file = getAudioFile(slot.audioFileName)
+            if (!file.exists()) continue
             audioEngine.addTrack(
-                trackId = track.id.toInt(),
+                trackId = index,
                 filePath = file.absolutePath,
-                durationMs = track.durationMs,
-                offsetMs = track.offsetMs,
-                trimStartMs = track.trimStartMs,
-                trimEndMs = track.trimEndMs,
-                volume = track.volume,
-                isMuted = track.isMuted
+                durationMs = slot.durationMs,
+                offsetMs = slot.offsetMs,
+                trimStartMs = slot.trimStartMs,
+                trimEndMs = slot.trimEndMs,
+                volume = slot.volume,
+                isMuted = slot.isMuted
             )
         }
     }

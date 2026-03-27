@@ -30,7 +30,7 @@ data class ClipDragState(
 data class ExpandedClipState(
     val trackId: Long,
     val clipId: Long,
-    val clipType: String  // "drum" or "midi"
+    val clipType: String  // "drum", "midi", or "audio"
 )
 
 /** Transient state while the user is long-press-dragging a MIDI clip to reposition it. */
@@ -78,6 +78,45 @@ data class MidiTrackUiState(
     val selectedClipId: Long? = null
 )
 
+/** Snapshot of a single audio clip for UI rendering. */
+data class AudioClipUiState(
+    val clipId: Long,
+    val trackId: Long,
+    val offsetMs: Long,
+    val displayName: String,
+    val isMuted: Boolean,
+    val activeTake: TakeEntity?,
+    val takeCount: Int,
+    val takes: List<TakeEntity> = emptyList()
+) {
+    /** Effective duration of this clip based on the active take. */
+    val effectiveDurationMs: Long
+        get() {
+            val take = activeTake ?: return 0L
+            return (take.durationMs - take.trimStartMs - take.trimEndMs).coerceAtLeast(200L)
+        }
+}
+
+/** Transient state while the user is long-press-dragging an audio clip. */
+data class AudioClipDragState(
+    val trackId: Long,
+    val clipId: Long,
+    val originalOffsetMs: Long,
+    val previewOffsetMs: Long
+)
+
+/** Transient state while the user is trimming an audio clip edge. */
+data class AudioClipTrimState(
+    val clipId: Long,
+    val trackId: Long,
+    val edge: TrimEdge,
+    val takeId: Long,
+    val originalTrimStartMs: Long,
+    val originalTrimEndMs: Long,
+    val previewTrimStartMs: Long,
+    val previewTrimEndMs: Long
+)
+
 /** UI state for the Studio (multi-track workspace) screen. */
 data class StudioUiState(
     val ideaTitle: String = "",
@@ -106,16 +145,17 @@ data class StudioUiState(
     val latencyDiagnostics: AudioLatencyEstimator.LatencyDiagnostics? = null,
     val manualOffsetMs: Long = 0L,
     val armedTrackId: Long? = null,
-    val trackTakes: Map<Long, List<TakeEntity>> = emptyMap(),
-    val expandedTakeTrackIds: Set<Long> = emptySet(),
+    val audioClips: Map<Long, List<AudioClipUiState>> = emptyMap(),
+    val expandedAudioClipId: Long? = null,
+    val audioClipDragState: AudioClipDragState? = null,
+    val audioClipTrimState: AudioClipTrimState? = null,
     val renamingTrackId: Long? = null,
     val renamingTrackCurrentName: String = "",
     val renamingTakeId: Long? = null,
-    val renamingTakeTrackId: Long? = null,
+    val renamingTakeClipId: Long? = null,
     val renamingTakeCurrentName: String = "",
     val confirmingDeleteTakeId: Long? = null,
-    val confirmingDeleteTakeTrackId: Long? = null,
-    val expandedTakeDrawerIds: Set<Long> = emptySet(),
+    val confirmingDeleteTakeClipId: Long? = null,
     val bpm: Double = 120.0,
     val timeSignatureNumerator: Int = 4,
     val timeSignatureDenominator: Int = 4,
@@ -165,16 +205,17 @@ data class StudioUiState(
                 latencyDiagnostics == other.latencyDiagnostics &&
                 manualOffsetMs == other.manualOffsetMs &&
                 armedTrackId == other.armedTrackId &&
-                trackTakes == other.trackTakes &&
-                expandedTakeTrackIds == other.expandedTakeTrackIds &&
+                audioClips == other.audioClips &&
+                expandedAudioClipId == other.expandedAudioClipId &&
+                audioClipDragState == other.audioClipDragState &&
+                audioClipTrimState == other.audioClipTrimState &&
                 renamingTrackId == other.renamingTrackId &&
                 renamingTrackCurrentName == other.renamingTrackCurrentName &&
                 renamingTakeId == other.renamingTakeId &&
-                renamingTakeTrackId == other.renamingTakeTrackId &&
+                renamingTakeClipId == other.renamingTakeClipId &&
                 renamingTakeCurrentName == other.renamingTakeCurrentName &&
                 confirmingDeleteTakeId == other.confirmingDeleteTakeId &&
-                confirmingDeleteTakeTrackId == other.confirmingDeleteTakeTrackId &&
-                expandedTakeDrawerIds == other.expandedTakeDrawerIds &&
+                confirmingDeleteTakeClipId == other.confirmingDeleteTakeClipId &&
                 bpm == other.bpm &&
                 timeSignatureNumerator == other.timeSignatureNumerator &&
                 timeSignatureDenominator == other.timeSignatureDenominator &&
@@ -221,16 +262,17 @@ data class StudioUiState(
         result = 31 * result + (latencyDiagnostics?.hashCode() ?: 0)
         result = 31 * result + manualOffsetMs.hashCode()
         result = 31 * result + (armedTrackId?.hashCode() ?: 0)
-        result = 31 * result + trackTakes.hashCode()
-        result = 31 * result + expandedTakeTrackIds.hashCode()
+        result = 31 * result + audioClips.hashCode()
+        result = 31 * result + (expandedAudioClipId?.hashCode() ?: 0)
+        result = 31 * result + (audioClipDragState?.hashCode() ?: 0)
+        result = 31 * result + (audioClipTrimState?.hashCode() ?: 0)
         result = 31 * result + (renamingTrackId?.hashCode() ?: 0)
         result = 31 * result + renamingTrackCurrentName.hashCode()
         result = 31 * result + (renamingTakeId?.hashCode() ?: 0)
-        result = 31 * result + (renamingTakeTrackId?.hashCode() ?: 0)
+        result = 31 * result + (renamingTakeClipId?.hashCode() ?: 0)
         result = 31 * result + renamingTakeCurrentName.hashCode()
         result = 31 * result + (confirmingDeleteTakeId?.hashCode() ?: 0)
-        result = 31 * result + (confirmingDeleteTakeTrackId?.hashCode() ?: 0)
-        result = 31 * result + expandedTakeDrawerIds.hashCode()
+        result = 31 * result + (confirmingDeleteTakeClipId?.hashCode() ?: 0)
         result = 31 * result + bpm.hashCode()
         result = 31 * result + timeSignatureNumerator.hashCode()
         result = 31 * result + timeSignatureDenominator.hashCode()
@@ -267,13 +309,13 @@ sealed interface StudioAction {
     data class SeekTo(val positionMs: Long) : StudioAction
     data class SeekFinished(val positionMs: Long) : StudioAction
 
-    // Drag-to-reposition
+    // Drag-to-reposition (kept for non-audio track compatibility)
     data class StartDragTrack(val trackId: Long) : StudioAction
     data class UpdateDragTrack(val previewOffsetMs: Long) : StudioAction
     data class FinishDragTrack(val trackId: Long, val newOffsetMs: Long) : StudioAction
     data object CancelDrag : StudioAction
 
-    // Trim
+    // Trim (kept for non-audio track compatibility)
     data class StartTrim(val trackId: Long, val edge: TrimEdge) : StudioAction
     data class UpdateTrim(val previewTrimStartMs: Long, val previewTrimEndMs: Long) : StudioAction
     data class FinishTrim(
@@ -317,19 +359,24 @@ sealed interface StudioAction {
     data class ConfirmRenameTrack(val trackId: Long, val newName: String) : StudioAction
     data object DismissRenameTrack : StudioAction
 
-    // Takes
-    data class ToggleTakesView(val trackId: Long) : StudioAction
-    data class RenameTake(val takeId: Long, val name: String) : StudioAction
-    data class DeleteTake(val takeId: Long, val trackId: Long) : StudioAction
-    data class SetTakeMuted(val takeId: Long, val trackId: Long, val muted: Boolean) : StudioAction
-    data class DragTake(val takeId: Long, val newOffsetMs: Long) : StudioAction
+    // Audio clip actions
+    data class TapAudioClip(val trackId: Long, val clipId: Long) : StudioAction
+    data class StartDragAudioClip(val trackId: Long, val clipId: Long) : StudioAction
+    data class UpdateDragAudioClip(val previewOffsetMs: Long) : StudioAction
+    data class FinishDragAudioClip(val trackId: Long, val clipId: Long, val newOffsetMs: Long) : StudioAction
+    data object CancelDragAudioClip : StudioAction
+    data class StartTrimAudioClip(val clipId: Long, val trackId: Long, val edge: TrimEdge) : StudioAction
+    data class UpdateTrimAudioClip(val previewTrimStartMs: Long, val previewTrimEndMs: Long) : StudioAction
+    data class FinishTrimAudioClip(val clipId: Long, val trackId: Long, val trimStartMs: Long, val trimEndMs: Long) : StudioAction
+    data object CancelTrimAudioClip : StudioAction
+    data class ActivateTake(val clipId: Long, val takeId: Long, val trackId: Long) : StudioAction
+    data class DeleteAudioClip(val trackId: Long, val clipId: Long) : StudioAction
 
-    // Take drawer / rename / delete
-    data class ToggleTakeDrawer(val takeId: Long) : StudioAction
-    data class RequestRenameTake(val takeId: Long, val trackId: Long, val currentName: String) : StudioAction
+    // Take rename / delete (now clip-scoped)
+    data class RequestRenameTake(val takeId: Long, val clipId: Long, val currentName: String) : StudioAction
     data class ConfirmRenameTake(val takeId: Long, val newName: String) : StudioAction
     data object DismissRenameTake : StudioAction
-    data class RequestDeleteTake(val takeId: Long, val trackId: Long) : StudioAction
+    data class RequestDeleteTake(val takeId: Long, val clipId: Long) : StudioAction
     data object DismissDeleteTake : StudioAction
     data object ExecuteDeleteTake : StudioAction
 

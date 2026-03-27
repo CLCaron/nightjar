@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import com.example.nightjar.data.db.dao.AudioClipDao
 import com.example.nightjar.data.db.dao.DrumPatternDao
 import com.example.nightjar.data.db.dao.IdeaDao
 import com.example.nightjar.data.db.dao.MidiClipDao
@@ -11,6 +12,7 @@ import com.example.nightjar.data.db.dao.MidiNoteDao
 import com.example.nightjar.data.db.dao.TagDao
 import com.example.nightjar.data.db.dao.TakeDao
 import com.example.nightjar.data.db.dao.TrackDao
+import com.example.nightjar.data.db.entity.AudioClipEntity
 import com.example.nightjar.data.db.entity.DrumClipEntity
 import com.example.nightjar.data.db.entity.DrumPatternEntity
 import com.example.nightjar.data.db.entity.DrumStepEntity
@@ -41,16 +43,20 @@ import com.example.nightjar.data.db.entity.TrackEntity
  *             `drum_patterns.trackId` index (allows multiple patterns per track).
  * - **v11** — Added `scaleRoot` and `scaleType` to ideas for project-level
  *             musical scale and key signature.
+ * - **v12** — Added `audio_clips` table for clip-based audio arrangement.
+ *             Restructured `takes` table: `trackId` FK replaced by `clipId` FK
+ *             to `audio_clips`, added `isActive`, removed `offsetMs`/`isMuted`.
+ *             Each existing take becomes its own clip with one active take.
  */
 @Database(
     entities = [
         IdeaEntity::class, TagEntity::class, IdeaTagCrossRef::class,
-        TrackEntity::class, TakeEntity::class,
+        TrackEntity::class, AudioClipEntity::class, TakeEntity::class,
         DrumPatternEntity::class, DrumStepEntity::class,
         DrumClipEntity::class,
         MidiClipEntity::class, MidiNoteEntity::class
     ],
-    version = 11,
+    version = 12,
     exportSchema = false
 )
 abstract class NightjarDatabase : RoomDatabase() {
@@ -59,6 +65,7 @@ abstract class NightjarDatabase : RoomDatabase() {
     abstract fun tagDao(): TagDao
     abstract fun trackDao(): TrackDao
     abstract fun takeDao(): TakeDao
+    abstract fun audioClipDao(): AudioClipDao
     abstract fun drumPatternDao(): DrumPatternDao
     abstract fun midiClipDao(): MidiClipDao
     abstract fun midiNoteDao(): MidiNoteDao
@@ -422,6 +429,117 @@ abstract class NightjarDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v11 -> v12: Audio clips -- restructure takes into clip-based arrangement.
+         *
+         * - New table: `audio_clips` for timeline clip placements of audio
+         * - `takes` table: replace `trackId` FK with `clipId` FK to `audio_clips`,
+         *   add `isActive`, remove `offsetMs` and `isMuted`
+         *
+         * Migration strategy: each existing take becomes its own clip with one
+         * active take, preserving all positions and audio behavior identically.
+         * Tracks with no takes but with `audioFileName` get a clip + take from
+         * the track's audio.
+         */
+        private val MIGRATION_11_12 = object : androidx.room.migration.Migration(11, 12) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                // 1. Create audio_clips table
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS audio_clips (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        trackId INTEGER NOT NULL,
+                        offsetMs INTEGER NOT NULL DEFAULT 0,
+                        displayName TEXT NOT NULL DEFAULT '',
+                        sortIndex INTEGER NOT NULL DEFAULT 0,
+                        isMuted INTEGER NOT NULL DEFAULT 0,
+                        createdAtEpochMs INTEGER NOT NULL,
+                        FOREIGN KEY(trackId) REFERENCES tracks(id) ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_audio_clips_trackId ON audio_clips(trackId)"
+                )
+
+                // 2. For each existing take on an audio track: create a clip
+                //    with offsetMs = take.offsetMs, isMuted = take.isMuted
+                db.execSQL("""
+                    INSERT INTO audio_clips (trackId, offsetMs, displayName, sortIndex, isMuted, createdAtEpochMs)
+                    SELECT t.trackId, t.offsetMs,
+                           'Clip ' || (t.sortIndex + 1),
+                           t.sortIndex,
+                           t.isMuted,
+                           t.createdAtEpochMs
+                    FROM takes t
+                    INNER JOIN tracks tr ON tr.id = t.trackId
+                    WHERE tr.trackType = 'audio'
+                """.trimIndent())
+
+                // 3. For audio tracks with NO takes but with audioFileName:
+                //    create a clip at the track's offsetMs
+                db.execSQL("""
+                    INSERT INTO audio_clips (trackId, offsetMs, displayName, sortIndex, isMuted, createdAtEpochMs)
+                    SELECT tr.id, tr.offsetMs, 'Clip 1', 0, 0, tr.createdAtEpochMs
+                    FROM tracks tr
+                    WHERE tr.trackType = 'audio'
+                      AND tr.audioFileName IS NOT NULL
+                      AND tr.audioFileName != ''
+                      AND tr.id NOT IN (SELECT DISTINCT trackId FROM takes)
+                """.trimIndent())
+
+                // 4. Create takes_new table with new schema
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS takes_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        clipId INTEGER NOT NULL,
+                        audioFileName TEXT NOT NULL,
+                        displayName TEXT NOT NULL,
+                        sortIndex INTEGER NOT NULL,
+                        durationMs INTEGER NOT NULL,
+                        trimStartMs INTEGER NOT NULL DEFAULT 0,
+                        trimEndMs INTEGER NOT NULL DEFAULT 0,
+                        isActive INTEGER NOT NULL DEFAULT 1,
+                        volume REAL NOT NULL DEFAULT 1.0,
+                        createdAtEpochMs INTEGER NOT NULL,
+                        FOREIGN KEY(clipId) REFERENCES audio_clips(id) ON DELETE CASCADE
+                    )
+                """.trimIndent())
+
+                // 5. Migrate existing takes into takes_new by joining to their
+                //    corresponding clip via trackId + sortIndex match
+                db.execSQL("""
+                    INSERT INTO takes_new (id, clipId, audioFileName, displayName, sortIndex,
+                        durationMs, trimStartMs, trimEndMs, isActive, volume, createdAtEpochMs)
+                    SELECT t.id, ac.id, t.audioFileName, t.displayName, 0,
+                        t.durationMs, t.trimStartMs, t.trimEndMs, 1, t.volume, t.createdAtEpochMs
+                    FROM takes t
+                    INNER JOIN tracks tr ON tr.id = t.trackId
+                    INNER JOIN audio_clips ac ON ac.trackId = t.trackId AND ac.sortIndex = t.sortIndex
+                    WHERE tr.trackType = 'audio'
+                """.trimIndent())
+
+                // 6. Create takes for tracks that had no takes (from step 3)
+                //    using track.audioFileName
+                db.execSQL("""
+                    INSERT INTO takes_new (clipId, audioFileName, displayName, sortIndex,
+                        durationMs, trimStartMs, trimEndMs, isActive, volume, createdAtEpochMs)
+                    SELECT ac.id, tr.audioFileName, 'Take 1', 0,
+                        tr.durationMs, tr.trimStartMs, tr.trimEndMs, 1, tr.volume, tr.createdAtEpochMs
+                    FROM audio_clips ac
+                    INNER JOIN tracks tr ON tr.id = ac.trackId
+                    WHERE ac.id NOT IN (SELECT DISTINCT clipId FROM takes_new)
+                      AND tr.audioFileName IS NOT NULL
+                      AND tr.audioFileName != ''
+                """.trimIndent())
+
+                // 7. Drop old takes, rename takes_new
+                db.execSQL("DROP TABLE takes")
+                db.execSQL("ALTER TABLE takes_new RENAME TO takes")
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_takes_clipId ON takes(clipId)"
+                )
+            }
+        }
+
         fun getInstance(context: Context): NightjarDatabase {
             return INSTANCE ?: synchronized(this) {
                 val db = Room.databaseBuilder(
@@ -432,7 +550,7 @@ abstract class NightjarDatabase : RoomDatabase() {
                     MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4,
                     MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
                     MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10,
-                    MIGRATION_10_11
+                    MIGRATION_10_11, MIGRATION_11_12
                 ).build()
                 INSTANCE = db
                 db

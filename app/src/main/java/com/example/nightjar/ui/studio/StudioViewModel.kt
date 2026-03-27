@@ -9,8 +9,9 @@ import com.example.nightjar.audio.MusicalTimeConverter
 import com.example.nightjar.audio.OboeAudioEngine
 import com.example.nightjar.audio.SoundFontManager
 import com.example.nightjar.audio.WavSplitter
-import com.example.nightjar.data.db.entity.TakeEntity
+import com.example.nightjar.data.db.entity.AudioClipEntity
 import com.example.nightjar.data.db.entity.MidiNoteEntity
+import com.example.nightjar.data.db.entity.TakeEntity
 import com.example.nightjar.data.repository.DrumRepository
 import com.example.nightjar.data.repository.MidiRepository
 import com.example.nightjar.data.repository.StudioRepository
@@ -302,29 +303,25 @@ class StudioViewModel @Inject constructor(
                 _state.update { it.copy(renamingTrackId = null, renamingTrackCurrentName = "") }
             }
 
-            // Takes
-            is StudioAction.ToggleTakesView -> toggleTakesView(action.trackId)
-            is StudioAction.RenameTake -> renameTake(action.takeId, action.name)
-            is StudioAction.DeleteTake -> deleteTake(action.takeId, action.trackId)
-            is StudioAction.SetTakeMuted -> setTakeMuted(action.takeId, action.trackId, action.muted)
-            is StudioAction.DragTake -> dragTake(action.takeId, action.newOffsetMs)
+            // Audio clip actions
+            is StudioAction.TapAudioClip -> tapAudioClip(action.trackId, action.clipId)
+            is StudioAction.StartDragAudioClip -> startDragAudioClip(action.trackId, action.clipId)
+            is StudioAction.UpdateDragAudioClip -> updateDragAudioClip(action.previewOffsetMs)
+            is StudioAction.FinishDragAudioClip -> finishDragAudioClip(action.trackId, action.clipId, action.newOffsetMs)
+            StudioAction.CancelDragAudioClip -> cancelDragAudioClip()
+            is StudioAction.StartTrimAudioClip -> startTrimAudioClip(action.clipId, action.trackId, action.edge)
+            is StudioAction.UpdateTrimAudioClip -> updateTrimAudioClip(action.previewTrimStartMs, action.previewTrimEndMs)
+            is StudioAction.FinishTrimAudioClip -> finishTrimAudioClip(action.clipId, action.trackId, action.trimStartMs, action.trimEndMs)
+            StudioAction.CancelTrimAudioClip -> cancelTrimAudioClip()
+            is StudioAction.ActivateTake -> activateTake(action.clipId, action.takeId, action.trackId)
+            is StudioAction.DeleteAudioClip -> deleteAudioClip(action.trackId, action.clipId)
 
-            // Take drawer / rename / delete
-            is StudioAction.ToggleTakeDrawer -> {
-                _state.update {
-                    val newSet = if (action.takeId in it.expandedTakeDrawerIds) {
-                        it.expandedTakeDrawerIds - action.takeId
-                    } else {
-                        it.expandedTakeDrawerIds + action.takeId
-                    }
-                    it.copy(expandedTakeDrawerIds = newSet)
-                }
-            }
+            // Take rename / delete (clip-scoped)
             is StudioAction.RequestRenameTake -> {
                 _state.update {
                     it.copy(
                         renamingTakeId = action.takeId,
-                        renamingTakeTrackId = action.trackId,
+                        renamingTakeClipId = action.clipId,
                         renamingTakeCurrentName = action.currentName
                     )
                 }
@@ -334,7 +331,7 @@ class StudioViewModel @Inject constructor(
                 _state.update {
                     it.copy(
                         renamingTakeId = null,
-                        renamingTakeTrackId = null,
+                        renamingTakeClipId = null,
                         renamingTakeCurrentName = ""
                     )
                 }
@@ -343,13 +340,13 @@ class StudioViewModel @Inject constructor(
                 _state.update {
                     it.copy(
                         confirmingDeleteTakeId = action.takeId,
-                        confirmingDeleteTakeTrackId = action.trackId
+                        confirmingDeleteTakeClipId = action.clipId
                     )
                 }
             }
             StudioAction.DismissDeleteTake -> {
                 _state.update {
-                    it.copy(confirmingDeleteTakeId = null, confirmingDeleteTakeTrackId = null)
+                    it.copy(confirmingDeleteTakeId = null, confirmingDeleteTakeClipId = null)
                 }
             }
             StudioAction.ExecuteDeleteTake -> executeDeleteTake()
@@ -462,13 +459,8 @@ class StudioViewModel @Inject constructor(
                 audioEngine.setBpm(idea.bpm)
                 audioEngine.setMetronomeBeatsPerBar(idea.timeSignatureNumerator)
 
-                // Load takes for all audio tracks so the engine can load them correctly
-                val audioTrackIds = tracks.filter { it.isAudio }.map { it.id }
-                if (audioTrackIds.isNotEmpty()) {
-                    val allTakes = studioRepo.getTakesForTracks(audioTrackIds)
-                    val grouped = allTakes.groupBy { it.trackId }
-                    _state.update { it.copy(trackTakes = grouped) }
-                }
+                // Load audio clips for all audio tracks
+                loadAudioClips(tracks)
 
                 loadTracksIntoEngine(tracks)
 
@@ -497,55 +489,35 @@ class StudioViewModel @Inject constructor(
         }
     }
 
-    /** Compute the engine track ID for a take within a track. */
-    private fun engineIdForTake(trackId: Long, takeSortIndex: Int): Int =
-        (trackId * 1000 + takeSortIndex).toInt()
-
     /**
-     * Load tracks into the native engine. If a track has takes in [trackTakes],
-     * load each unmuted take as a separate engine track. Otherwise load the
-     * track's own audio directly (backwards compatible).
+     * Load tracks into the native engine using clip-based audio arrangement.
+     * For each audio track, loads the active take from each unmuted clip.
+     * The engine sees flat track slots (one per clip) -- no C++ changes needed.
      */
     private fun loadTracksIntoEngine(
         tracks: List<com.example.nightjar.data.db.entity.TrackEntity>
     ) {
         audioEngine.removeAllTracks()
-        val takesMap = _state.value.trackTakes
+        val clipsMap = _state.value.audioClips
 
         for (track in tracks) {
-            // Drum tracks are handled by the synth engine, not the WAV mixer
+            // Drum and MIDI tracks are handled by the synth engine
             if (!track.isAudio) continue
 
-            val takes = takesMap[track.id]
-            if (takes != null && takes.isNotEmpty()) {
-                // Load each unmuted take as a separate engine track
-                for (take in takes) {
-                    val effectivelyMuted = take.isMuted || track.isMuted
-                    val file = getAudioFile(take.audioFileName)
-                    val engineId = engineIdForTake(track.id, take.sortIndex)
-                    audioEngine.addTrack(
-                        trackId = engineId,
-                        filePath = file.absolutePath,
-                        durationMs = take.durationMs,
-                        offsetMs = take.offsetMs,
-                        trimStartMs = take.trimStartMs,
-                        trimEndMs = take.trimEndMs,
-                        volume = take.volume * track.volume,
-                        isMuted = effectivelyMuted
-                    )
-                }
-            } else if (track.audioFileName != null) {
-                // No takes -- load track audio directly
-                val file = getAudioFile(track.audioFileName)
+            val clips = clipsMap[track.id] ?: continue
+            for (clip in clips) {
+                val activeTake = clip.activeTake ?: continue
+                val effectivelyMuted = track.isMuted || clip.isMuted
+                val file = getAudioFile(activeTake.audioFileName)
                 audioEngine.addTrack(
-                    trackId = track.id.toInt(),
+                    trackId = clip.clipId.toInt(),
                     filePath = file.absolutePath,
-                    durationMs = track.durationMs,
-                    offsetMs = track.offsetMs,
-                    trimStartMs = track.trimStartMs,
-                    trimEndMs = track.trimEndMs,
-                    volume = track.volume,
-                    isMuted = track.isMuted
+                    durationMs = activeTake.durationMs,
+                    offsetMs = clip.offsetMs,
+                    trimStartMs = activeTake.trimStartMs,
+                    trimEndMs = activeTake.trimEndMs,
+                    volume = activeTake.volume * track.volume,
+                    isMuted = effectivelyMuted
                 )
             }
         }
@@ -558,21 +530,11 @@ class StudioViewModel @Inject constructor(
         val track = _state.value.tracks.find { it.id == trackId } ?: return
         if (!track.isAudio) return
 
-        viewModelScope.launch {
-            val currentArmed = _state.value.armedTrackId
-            if (currentArmed == trackId) {
-                // Unarm
-                _state.update { it.copy(armedTrackId = null) }
-            } else {
-                // Arm this track -- lazy promote to ensure it has takes
-                val takes = studioRepo.ensureTrackHasTakes(trackId)
-                _state.update {
-                    it.copy(
-                        armedTrackId = trackId,
-                        trackTakes = it.trackTakes + (trackId to takes)
-                    )
-                }
-            }
+        val currentArmed = _state.value.armedTrackId
+        if (currentArmed == trackId) {
+            _state.update { it.copy(armedTrackId = null) }
+        } else {
+            _state.update { it.copy(armedTrackId = trackId) }
         }
     }
 
@@ -778,8 +740,8 @@ class StudioViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 if (wasFirstTrack) {
-                    // Case 1: Create a new track with the recording
-                    studioRepo.addTrack(
+                    // Case 1: Create a new track with clip + take
+                    studioRepo.addTrackWithClipAndTake(
                         ideaId = ideaId,
                         audioFile = file,
                         durationMs = durationMs,
@@ -787,7 +749,7 @@ class StudioViewModel @Inject constructor(
                         trimStartMs = safeTrimStartMs
                     )
                 } else if (armedId != null && wasLoopRecording && loopResets.isNotEmpty()) {
-                    // Case 3: Loop recording -- split into takes
+                    // Case 3: Loop recording -- split into takes within a clip
                     saveLoopRecordingAsTakes(
                         armedTrackId = armedId,
                         file = file,
@@ -796,15 +758,30 @@ class StudioViewModel @Inject constructor(
                         loopResetTimestampsMs = loopResets
                     )
                 } else if (armedId != null) {
-                    // Case 2: Simple take recording
-                    studioRepo.addTake(
-                        trackId = armedId,
-                        audioFile = file,
-                        durationMs = durationMs,
-                        offsetMs = recordingStartGlobalMs,
-                        trimStartMs = safeTrimStartMs
+                    // Case 2: Simple recording -- find or create clip at playhead
+                    val existingClip = studioRepo.findClipAtPosition(
+                        armedId, recordingStartGlobalMs
                     )
-                    reloadTakesForTrack(armedId)
+                    if (existingClip != null) {
+                        // Record into existing clip as a new take
+                        studioRepo.addTakeToClip(
+                            clipId = existingClip.id,
+                            audioFile = file,
+                            durationMs = durationMs,
+                            trimStartMs = safeTrimStartMs
+                        )
+                    } else {
+                        // Create new clip at playhead + first take
+                        val clipId = studioRepo.addClip(armedId, recordingStartGlobalMs)
+                        studioRepo.addTakeToClip(
+                            clipId = clipId,
+                            audioFile = file,
+                            durationMs = durationMs,
+                            trimStartMs = safeTrimStartMs
+                        )
+                    }
+                    studioRepo.recomputeAudioTrackDuration(armedId)
+                    reloadAudioClips(armedId)
                 }
 
                 reloadAndPrepare()
@@ -817,9 +794,9 @@ class StudioViewModel @Inject constructor(
     }
 
     /**
-     * Split a continuous loop recording into individual takes.
+     * Split a continuous loop recording into individual takes within a clip.
      * The recording file is split at the loop reset timestamps,
-     * creating one take per loop cycle.
+     * creating one take per loop cycle in the same clip.
      */
     private suspend fun saveLoopRecordingAsTakes(
         armedTrackId: Long,
@@ -831,6 +808,10 @@ class StudioViewModel @Inject constructor(
         val st = _state.value
         val loopStartMs = st.loopStartMs ?: recordingStartGlobalMs
         val outputDir = file.parentFile ?: return
+
+        // Find or create clip at playhead
+        val existingClip = studioRepo.findClipAtPosition(armedTrackId, recordingStartGlobalMs)
+        val clipId = existingClip?.id ?: studioRepo.addClip(armedTrackId, recordingStartGlobalMs)
 
         // Split the WAV file at loop reset points
         val splitFiles = withContext(Dispatchers.IO) {
@@ -845,31 +826,22 @@ class StudioViewModel @Inject constructor(
         if (splitFiles.isEmpty()) {
             // Split failed or only one segment -- save as a single take
             Log.w(TAG, "WAV split returned no files, saving as single take")
-            studioRepo.addTake(
-                trackId = armedTrackId,
+            studioRepo.addTakeToClip(
+                clipId = clipId,
                 audioFile = file,
                 durationMs = totalDurationMs,
-                offsetMs = recordingStartGlobalMs,
                 trimStartMs = trimStartMs
             )
         } else {
-            // Save each segment as a separate take
+            // Save each segment as a separate take within the clip
             for ((index, segFile) in splitFiles.withIndex()) {
                 val segDurationMs = getFileDurationMs(segFile)
-                val segOffsetMs = if (index == 0) {
-                    // First segment starts at the original recording position
-                    recordingStartGlobalMs
-                } else {
-                    // Subsequent segments start at loop region start
-                    loopStartMs
-                }
                 val segTrimStart = if (index == 0) trimStartMs else 0L
 
-                studioRepo.addTake(
-                    trackId = armedTrackId,
+                studioRepo.addTakeToClip(
+                    clipId = clipId,
                     audioFile = segFile,
                     durationMs = segDurationMs,
-                    offsetMs = segOffsetMs,
                     trimStartMs = segTrimStart
                 )
             }
@@ -880,7 +852,8 @@ class StudioViewModel @Inject constructor(
             }
         }
 
-        reloadTakesForTrack(armedTrackId)
+        studioRepo.recomputeAudioTrackDuration(armedTrackId)
+        reloadAudioClips(armedTrackId)
     }
 
     /** Get the duration of a WAV file in ms from its header. */
@@ -896,131 +869,271 @@ class StudioViewModel @Inject constructor(
         return if (bytesPerMs > 0) dataSize / bytesPerMs else 0L
     }
 
-    // ── Takes ──────────────────────────────────────────────────────────────
+    // ── Audio Clips ────────────────────────────────────────────────────────
 
-    private fun toggleTakesView(trackId: Long) {
-        viewModelScope.launch {
-            // Ensure takes are loaded
-            if (trackId !in _state.value.trackTakes) {
-                val takes = studioRepo.ensureTrackHasTakes(trackId)
-                _state.update {
-                    it.copy(trackTakes = it.trackTakes + (trackId to takes))
+    /** Load audio clips for all audio tracks and update state. */
+    private suspend fun loadAudioClips(
+        tracks: List<com.example.nightjar.data.db.entity.TrackEntity>
+    ) {
+        val audioTracks = tracks.filter { it.isAudio }
+        if (audioTracks.isEmpty()) {
+            _state.update { it.copy(audioClips = emptyMap()) }
+            return
+        }
+
+        val trackIds = audioTracks.map { it.id }
+        val allClips = studioRepo.getClipsForTracks(trackIds)
+
+        val clipsByTrack = mutableMapOf<Long, List<AudioClipUiState>>()
+        if (allClips.isNotEmpty()) {
+            val clipIds = allClips.map { it.id }
+            val allTakes = studioRepo.getTakesForClips(clipIds)
+            val takesByClip = allTakes.groupBy { it.clipId }
+
+            for ((trackId, clips) in allClips.groupBy { it.trackId }) {
+                clipsByTrack[trackId] = clips.map { clip ->
+                    val takes = takesByClip[clip.id] ?: emptyList()
+                    AudioClipUiState(
+                        clipId = clip.id,
+                        trackId = clip.trackId,
+                        offsetMs = clip.offsetMs,
+                        displayName = clip.displayName,
+                        isMuted = clip.isMuted,
+                        activeTake = takes.find { it.isActive },
+                        takeCount = takes.size,
+                        takes = takes
+                    )
                 }
             }
+        }
 
-            _state.update {
-                val newSet = if (trackId in it.expandedTakeTrackIds) {
-                    it.expandedTakeTrackIds - trackId
-                } else {
-                    it.expandedTakeTrackIds + trackId
-                }
-                it.copy(expandedTakeTrackIds = newSet)
+        // Full replacement -- ensures deleted tracks/clips are cleaned up
+        _state.update { it.copy(audioClips = clipsByTrack) }
+    }
+
+    /** Reload audio clips for a single track. */
+    private suspend fun reloadAudioClips(trackId: Long) {
+        val clips = studioRepo.getClipsForTrack(trackId)
+        val clipIds = clips.map { it.id }
+        val allTakes = if (clipIds.isNotEmpty()) studioRepo.getTakesForClips(clipIds) else emptyList()
+        val takesByClip = allTakes.groupBy { it.clipId }
+
+        val clipStates = clips.map { clip ->
+            val takes = takesByClip[clip.id] ?: emptyList()
+            AudioClipUiState(
+                clipId = clip.id,
+                trackId = clip.trackId,
+                offsetMs = clip.offsetMs,
+                displayName = clip.displayName,
+                isMuted = clip.isMuted,
+                activeTake = takes.find { it.isActive },
+                takeCount = takes.size,
+                takes = takes
+            )
+        }
+
+        _state.update { it.copy(audioClips = it.audioClips + (trackId to clipStates)) }
+    }
+
+    /** Reload audio clips for all currently loaded audio tracks. */
+    private suspend fun reloadAllAudioClips() {
+        val trackIds = _state.value.audioClips.keys.toList()
+        for (trackId in trackIds) {
+            reloadAudioClips(trackId)
+        }
+    }
+
+    private fun tapAudioClip(trackId: Long, clipId: Long) {
+        val current = _state.value.expandedAudioClipId
+        _state.update {
+            it.copy(
+                expandedAudioClipId = if (current == clipId) null else clipId
+            )
+        }
+    }
+
+    private fun startDragAudioClip(trackId: Long, clipId: Long) {
+        val clips = _state.value.audioClips[trackId] ?: return
+        val clip = clips.find { it.clipId == clipId } ?: return
+        _state.update {
+            it.copy(audioClipDragState = AudioClipDragState(trackId, clipId, clip.offsetMs, clip.offsetMs))
+        }
+    }
+
+    private fun updateDragAudioClip(previewOffsetMs: Long) {
+        _state.update { st ->
+            st.audioClipDragState?.let { drag ->
+                val snapped = snapIfEnabled(previewOffsetMs).coerceAtLeast(0L)
+                st.copy(audioClipDragState = drag.copy(previewOffsetMs = snapped))
+            } ?: st
+        }
+    }
+
+    private fun finishDragAudioClip(trackId: Long, clipId: Long, newOffsetMs: Long) {
+        _state.update { it.copy(audioClipDragState = null) }
+        val snapped = snapIfEnabled(newOffsetMs).coerceAtLeast(0L)
+        viewModelScope.launch {
+            try {
+                studioRepo.moveClip(clipId, snapped)
+                studioRepo.recomputeAudioTrackDuration(trackId)
+                reloadAudioClips(trackId)
+                reloadAndPrepare()
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to move clip."))
             }
         }
     }
 
-    private fun renameTake(takeId: Long, name: String) {
+    private fun cancelDragAudioClip() {
+        _state.update { it.copy(audioClipDragState = null) }
+    }
+
+    private fun startTrimAudioClip(clipId: Long, trackId: Long, edge: TrimEdge) {
+        val clips = _state.value.audioClips[trackId] ?: return
+        val clip = clips.find { it.clipId == clipId } ?: return
+        val take = clip.activeTake ?: return
+        _state.update {
+            it.copy(audioClipTrimState = AudioClipTrimState(
+                clipId = clipId,
+                trackId = trackId,
+                edge = edge,
+                takeId = take.id,
+                originalTrimStartMs = take.trimStartMs,
+                originalTrimEndMs = take.trimEndMs,
+                previewTrimStartMs = take.trimStartMs,
+                previewTrimEndMs = take.trimEndMs
+            ))
+        }
+    }
+
+    private fun updateTrimAudioClip(previewTrimStartMs: Long, previewTrimEndMs: Long) {
+        _state.update { st ->
+            val trim = st.audioClipTrimState ?: return@update st
+            val clips = st.audioClips[trim.trackId] ?: return@update st
+            val clip = clips.find { it.clipId == trim.clipId } ?: return@update st
+            val take = clip.activeTake ?: return@update st
+            val maxTrimStart = take.durationMs - previewTrimEndMs - MIN_EFFECTIVE_DURATION_MS
+            val maxTrimEnd = take.durationMs - previewTrimStartMs - MIN_EFFECTIVE_DURATION_MS
+
+            val clampedStart = previewTrimStartMs.coerceIn(0L, maxTrimStart.coerceAtLeast(0L))
+            val clampedEnd = previewTrimEndMs.coerceIn(0L, maxTrimEnd.coerceAtLeast(0L))
+            val snappedStart = snapIfEnabled(clampedStart)
+            val snappedEnd = snapIfEnabled(clampedEnd)
+
+            st.copy(audioClipTrimState = trim.copy(
+                previewTrimStartMs = snappedStart,
+                previewTrimEndMs = snappedEnd
+            ))
+        }
+    }
+
+    private fun finishTrimAudioClip(clipId: Long, trackId: Long, trimStartMs: Long, trimEndMs: Long) {
+        val trim = _state.value.audioClipTrimState ?: return
+        _state.update { it.copy(audioClipTrimState = null) }
+        val snappedStart = snapIfEnabled(trimStartMs)
+        val snappedEnd = snapIfEnabled(trimEndMs)
         viewModelScope.launch {
-            studioRepo.renameTake(takeId, name)
-            reloadAllTakes()
+            try {
+                // Adjust clip offset if left trim changed
+                val clips = _state.value.audioClips[trackId] ?: return@launch
+                val clip = clips.find { it.clipId == clipId } ?: return@launch
+                val take = clip.activeTake ?: return@launch
+
+                if (snappedStart != take.trimStartMs) {
+                    val offsetDelta = snappedStart - take.trimStartMs
+                    val newOffsetMs = (clip.offsetMs + offsetDelta).coerceAtLeast(0L)
+                    studioRepo.moveClip(clipId, newOffsetMs)
+                }
+
+                studioRepo.updateTakeTrim(trim.takeId, snappedStart, snappedEnd)
+                studioRepo.recomputeAudioTrackDuration(trackId)
+                reloadAudioClips(trackId)
+                reloadAndPrepare()
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to trim clip."))
+            }
+        }
+    }
+
+    private fun cancelTrimAudioClip() {
+        _state.update { it.copy(audioClipTrimState = null) }
+    }
+
+    private fun activateTake(clipId: Long, takeId: Long, trackId: Long) {
+        viewModelScope.launch {
+            try {
+                studioRepo.setActiveTake(clipId, takeId)
+                studioRepo.recomputeAudioTrackDuration(trackId)
+                reloadAudioClips(trackId)
+                reloadAndPrepare()
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to activate take."))
+            }
+        }
+    }
+
+    private fun deleteAudioClip(trackId: Long, clipId: Long) {
+        viewModelScope.launch {
+            try {
+                studioRepo.deleteClipAndAudio(clipId)
+                _state.update {
+                    it.copy(
+                        expandedAudioClipId = if (it.expandedAudioClipId == clipId) null else it.expandedAudioClipId
+                    )
+                }
+                studioRepo.recomputeAudioTrackDuration(trackId)
+                reloadAudioClips(trackId)
+                reloadAndPrepare()
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to delete clip."))
+            }
         }
     }
 
     private fun confirmRenameTake(takeId: Long, newName: String) {
         val trimmed = newName.trim()
         if (trimmed.isBlank()) return
+        val clipId = _state.value.renamingTakeClipId
         _state.update {
             it.copy(
                 renamingTakeId = null,
-                renamingTakeTrackId = null,
+                renamingTakeClipId = null,
                 renamingTakeCurrentName = ""
             )
         }
         viewModelScope.launch {
             try {
                 studioRepo.renameTake(takeId, trimmed)
-                reloadAllTakes()
+                reloadAllAudioClips()
             } catch (e: Exception) {
                 _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to rename take."))
             }
         }
     }
 
-    private fun deleteTake(takeId: Long, trackId: Long) {
-        viewModelScope.launch {
-            try {
-                studioRepo.deleteTakeAndAudio(takeId)
-                _state.update {
-                    it.copy(expandedTakeDrawerIds = it.expandedTakeDrawerIds - takeId)
-                }
-                reloadTakesForTrack(trackId)
-                reloadAndPrepare()
-            } catch (e: Exception) {
-                _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to delete take."))
-            }
-        }
-    }
-
     private fun executeDeleteTake() {
         val takeId = _state.value.confirmingDeleteTakeId ?: return
-        val trackId = _state.value.confirmingDeleteTakeTrackId ?: return
+        val clipId = _state.value.confirmingDeleteTakeClipId ?: return
         _state.update {
             it.copy(
                 confirmingDeleteTakeId = null,
-                confirmingDeleteTakeTrackId = null,
-                expandedTakeDrawerIds = it.expandedTakeDrawerIds - takeId
+                confirmingDeleteTakeClipId = null
             )
         }
         viewModelScope.launch {
             try {
+                // Find the track ID for this clip
+                val trackId = _state.value.audioClips.entries
+                    .find { (_, clips) -> clips.any { it.clipId == clipId } }?.key
                 studioRepo.deleteTakeAndAudio(takeId)
-                reloadTakesForTrack(trackId)
-                reloadAndPrepare()
+                if (trackId != null) {
+                    studioRepo.recomputeAudioTrackDuration(trackId)
+                    reloadAudioClips(trackId)
+                    reloadAndPrepare()
+                }
             } catch (e: Exception) {
                 _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to delete take."))
             }
-        }
-    }
-
-    private fun setTakeMuted(takeId: Long, trackId: Long, muted: Boolean) {
-        viewModelScope.launch {
-            try {
-                studioRepo.setTakeMuted(takeId, muted)
-                reloadTakesForTrack(trackId)
-                reloadAndPrepare()
-            } catch (e: Exception) {
-                _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to update take."))
-            }
-        }
-    }
-
-    private fun dragTake(takeId: Long, newOffsetMs: Long) {
-        viewModelScope.launch {
-            try {
-                val snapped = snapIfEnabled(newOffsetMs).coerceAtLeast(0L)
-                studioRepo.moveTake(takeId, snapped)
-                reloadAllTakes()
-                reloadAndPrepare()
-            } catch (e: Exception) {
-                _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to move take."))
-            }
-        }
-    }
-
-    private suspend fun reloadTakesForTrack(trackId: Long) {
-        val takes = studioRepo.getTakesForTrack(trackId)
-        _state.update {
-            it.copy(trackTakes = it.trackTakes + (trackId to takes))
-        }
-    }
-
-    private suspend fun reloadAllTakes() {
-        val trackIds = _state.value.trackTakes.keys.toList()
-        if (trackIds.isEmpty()) return
-        val allTakes = studioRepo.getTakesForTracks(trackIds)
-        val grouped = allTakes.groupBy { it.trackId }
-        _state.update {
-            it.copy(trackTakes = it.trackTakes + grouped)
         }
     }
 
@@ -1079,7 +1192,7 @@ class StudioViewModel @Inject constructor(
         _state.update { it.copy(dragState = null) }
         val snapped = snapIfEnabled(newOffsetMs).coerceAtLeast(0L)
         viewModelScope.launch {
-            studioRepo.moveTrackWithTakes(trackId, snapped)
+            studioRepo.moveTrack(trackId, snapped)
             reloadAndPrepare()
         }
     }
@@ -1182,14 +1295,14 @@ class StudioViewModel @Inject constructor(
             val trackMuted = track.isMuted ||
                 (anySoloed && track.id !in st.soloedTrackIds)
             if (track.isAudio) {
-                val takes = st.trackTakes[track.id]
-                if (takes != null && takes.isNotEmpty()) {
-                    for (take in takes) {
-                        val engineId = engineIdForTake(track.id, take.sortIndex)
-                        audioEngine.setTrackMuted(engineId, trackMuted || take.isMuted)
+                val clips = st.audioClips[track.id]
+                if (clips != null) {
+                    for (clip in clips) {
+                        audioEngine.setTrackMuted(
+                            clip.clipId.toInt(),
+                            trackMuted || clip.isMuted
+                        )
                     }
-                } else {
-                    audioEngine.setTrackMuted(track.id.toInt(), trackMuted)
                 }
             } else if (track.isDrum) {
                 // Re-push pattern with updated mute state
@@ -1212,16 +1325,14 @@ class StudioViewModel @Inject constructor(
             if (pattern != null) {
                 pushDrumClipsToEngine(track.copy(volume = clamped), pattern)
             }
-        } else {
+        } else if (track != null && track.isAudio) {
             // Update native engine immediately for instant feedback
-            val takes = _state.value.trackTakes[trackId]
-            if (takes != null && takes.isNotEmpty()) {
-                for (take in takes) {
-                    val engineId = engineIdForTake(trackId, take.sortIndex)
-                    audioEngine.setTrackVolume(engineId, take.volume * clamped)
+            val clips = _state.value.audioClips[trackId]
+            if (clips != null) {
+                for (clip in clips) {
+                    val activeTake = clip.activeTake ?: continue
+                    audioEngine.setTrackVolume(clip.clipId.toInt(), activeTake.volume * clamped)
                 }
-            } else {
-                audioEngine.setTrackVolume(trackId.toInt(), clamped)
             }
         }
         viewModelScope.launch {
@@ -1244,8 +1355,7 @@ class StudioViewModel @Inject constructor(
                 expandedTrackIds = it.expandedTrackIds - trackId,
                 soloedTrackIds = it.soloedTrackIds - trackId,
                 armedTrackId = if (it.armedTrackId == trackId) null else it.armedTrackId,
-                trackTakes = it.trackTakes - trackId,
-                expandedTakeTrackIds = it.expandedTakeTrackIds - trackId,
+                audioClips = it.audioClips - trackId,
                 drumPatterns = it.drumPatterns - trackId
             )
         }
@@ -2367,6 +2477,7 @@ class StudioViewModel @Inject constructor(
         val ideaId = currentIdeaId ?: return
         val tracks = studioRepo.getTracks(ideaId)
         _state.update { it.copy(tracks = tracks) }
+        loadAudioClips(tracks)
         loadTracksIntoEngine(tracks)
 
         // Clamp loop region if total duration changed

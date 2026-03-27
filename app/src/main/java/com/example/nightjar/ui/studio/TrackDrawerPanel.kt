@@ -67,8 +67,6 @@ fun TrackDrawerPanel(
     track: TrackEntity,
     isSoloed: Boolean,
     isArmed: Boolean,
-    hasTakes: Boolean,
-    takesExpanded: Boolean,
     onAction: (StudioAction) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -137,14 +135,6 @@ fun TrackDrawerPanel(
                             onAction(StudioAction.SetTrackMuted(track.id, !track.isMuted))
                         }
                     )
-                    if (track.isAudio) {
-                        DrawerToggleButton(
-                            label = "T",
-                            isActive = takesExpanded,
-                            ledColor = NjAmber,
-                            onClick = { onAction(StudioAction.ToggleTakesView(track.id)) }
-                        )
-                    }
                 }
 
                 // Row 2: Rename + Delete (text buttons, right-aligned)
@@ -224,14 +214,6 @@ fun TrackDrawerPanel(
                             onAction(StudioAction.SetTrackMuted(track.id, !track.isMuted))
                         }
                     )
-                    if (track.isAudio) {
-                        DrawerToggleButton(
-                            label = "T",
-                            isActive = takesExpanded,
-                            ledColor = NjAmber,
-                            onClick = { onAction(StudioAction.ToggleTakesView(track.id)) }
-                        )
-                    }
                 }
 
                 // Spacer pushes action buttons to the right

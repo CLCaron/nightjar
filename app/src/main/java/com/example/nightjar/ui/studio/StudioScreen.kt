@@ -258,9 +258,10 @@ fun StudioScreen(
                         expandedTrackIds = state.expandedTrackIds,
                         soloedTrackIds = state.soloedTrackIds,
                         armedTrackId = state.armedTrackId,
-                        trackTakes = state.trackTakes,
-                        expandedTakeTrackIds = state.expandedTakeTrackIds,
-                        expandedTakeDrawerIds = state.expandedTakeDrawerIds,
+                        audioClips = state.audioClips,
+                        expandedAudioClipId = state.expandedAudioClipId,
+                        audioClipDragState = state.audioClipDragState,
+                        audioClipTrimState = state.audioClipTrimState,
                         drumPatterns = state.drumPatterns,
                         midiTracks = state.midiTracks,
                         clipDragState = state.clipDragState,
@@ -409,7 +410,8 @@ fun StudioScreen(
 
     // Take delete confirmation dialog
     if (state.confirmingDeleteTakeId != null) {
-        val takeName = state.trackTakes.values.flatten()
+        val takeName = state.audioClips.values.flatten()
+            .flatMap { it.takes }
             .find { it.id == state.confirmingDeleteTakeId }
             ?.displayName ?: "this take"
 

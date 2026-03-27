@@ -32,7 +32,7 @@ A lightweight multi-track workspace. Not a replacement for professional tools, b
 
 - **Auto-create tracks** -- tap Record any time, even with existing tracks. No armed track? Nightjar creates a new one automatically. Arm a track when you want to add takes to a specific layer.
 - **Overdub** -- record new layers while existing tracks play back, with hardware-compensated sync. Live coral waveform grows in real time on the timeline during recording.
-- **Takes** -- arm a track and record multiple takes. Each take is an independent audio clip on the timeline. Tap to mute, long-press for rename/delete. Drag and layer takes freely.
+- **Audio clips and takes** -- audio tracks use a clip-based arrangement system (Track -> Clips -> Takes), matching how MIDI and drum tracks work. Each clip is positioned on the timeline and holds one or more takes. Tap a multi-take clip to expand the take list below it; tap a take to make it active, long-press to rename, or delete. Clips can be long-press dragged, edge-trimmed, and flipped for action buttons (delete). Take count badge shown on clips with multiple takes.
 - **Loop recording** -- with a loop region active, record continuously. On stop, the recording is automatically split into individual takes at each loop boundary -- zero gaps, no manual slicing.
 - **Loop playback** -- tap Loop to auto-create a full-timeline region, adjust with draggable handles on the ruler
 - **Drag to reposition** -- long-press a track and slide it along the timeline
@@ -43,7 +43,7 @@ A lightweight multi-track workspace. Not a replacement for professional tools, b
 - **MIDI instrument tracks** -- compose melodies, basslines, and chord progressions with 128 General MIDI instruments. Full-screen piano roll editor with tap-to-place notes, long-press-to-delete, snap-to-beat, and live playback. Inline MiniPianoRoll in the track drawer for quick edits without leaving Studio (tap a clip on the timeline to edit it in-place). Curated instrument picker with audition preview. Compact note visualization on the Studio timeline. Powered by FluidSynth synthesis via a dedicated C++ MidiSequencer.
 - **Scale and chord mode** -- select from 19 musical scales (Major, Minor, Pentatonic, Blues, Dorian, Phrygian, Lydian, Mixolydian, Locrian, Harmonic Minor, Melodic Minor, Flamenco, Hungarian, Romanian, Persian, Bebop, Whole Tone, Chromatic) with any root note. Piano keys and grid rows highlight in-scale pitches. Toggle chord mode to place full diatonic chords (triads, 7ths, 9ths) with a single tap. Passive chord reference strip shows roman numerals and chord names. Scale and key are project-level settings shared across all tracks.
 - **Clip card-flip actions** -- tap any clip (drum, MIDI, or audio) on the timeline to flip it over with a smooth X-axis rotation, revealing icon-only action buttons (duplicate, edit, delete) on the back face. Scrolling across clips no longer accidentally selects them.
-- **Per-track controls** -- volume knob, arm (R), solo (S), mute (M), takes (T), rename, delete via inline track drawer. Drum tracks get a specialized drawer with pattern editor and bar count controls. MIDI tracks get instrument selection, edit notes, and playback controls. Responsive layout adapts to narrow screens (e.g. Galaxy Fold cover display).
+- **Per-track controls** -- volume knob, arm (R), solo (S), mute (M), rename, delete via inline track drawer. Drum tracks get a specialized drawer with pattern editor and bar count controls. MIDI tracks get instrument selection, edit notes, and playback controls. Responsive layout adapts to narrow screens (e.g. Galaxy Fold cover display).
 - **Hardware-style controls** -- unified NjButton and NjCard components with beveled edges, LED glow, haptic feedback, and three-state mechanical latching feel (deep press, latched, raised). Rotary volume knob with haptic detents. Embossed text on buttons and titles. Consistent across all screens.
 
 ---
@@ -76,7 +76,8 @@ Nightjar is in active development, working toward a v1.0 Play Store release.
 - Live waveform during recording with post-recording preview (Record screen and Studio timeline)
 - Native C++ audio engine (Oboe) — low-latency recording and multi-track playback
 - Multi-track overdub with hardware timestamp latency compensation
-- Per-track takes with arm toggle, loop recording with auto-split into takes
+- Clip-based audio arrangement (Track -> Clips -> Takes) aligned with MIDI and drum track models
+- Per-clip take management with active take switching, take count badges, and clip-scoped expansion
 - Drag-to-reposition, non-destructive trim, per-track volume/mute/solo/delete
 - Loop playback with ruler scrub-to-seek and loop handle adjustment
 - Timeline ruler as primary scrub surface (tap or drag to seek)
@@ -90,7 +91,7 @@ Nightjar is in active development, working toward a v1.0 Play Store release.
 - Measure/beat timeline with time signature support (4/4, 3/4, 6/8, 2/4) and snap-to-grid
 - Project controls bar (BPM, time signature, snap toggle, position readout)
 - Metronome with configurable count-in (1/2/4 bars), tap tempo, volume control. Plays continuously through recording on both Record and Studio screens. Seamless negative-position count-in with zero gap at the recording boundary.
-- Take mini-drawer with rename and delete (long-press take header to open)
+- Clip-based audio preview in Library and Overview (loads active takes from clips instead of stale track audio)
 - Unified hardware-style UI components (NjButton, NjCard, NjRecessedPanel, NjLedDot) across all screens
 - Switchable color themes (Indigo, Warm Plum, Lemon Cake) with distinct accent personalities via Settings screen. Lemon Cake is a light theme with warm pink backgrounds and terracotta/peach accents.
 - Unified color palette with theme-varying accents (LEDs, waveforms, track colors, drum row colors, button tints)

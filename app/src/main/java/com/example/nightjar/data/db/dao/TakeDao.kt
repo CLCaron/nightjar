@@ -6,43 +6,43 @@ import androidx.room.Query
 import com.example.nightjar.data.db.entity.TakeEntity
 import kotlinx.coroutines.flow.Flow
 
-/** Data access object for [TakeEntity] -- per-track take management. */
+/** Data access object for [TakeEntity] -- per-clip take management. */
 @Dao
 interface TakeDao {
 
     @Insert
     suspend fun insertTake(take: TakeEntity): Long
 
-    @Query("SELECT * FROM takes WHERE trackId = :trackId ORDER BY sortIndex ASC")
-    suspend fun getTakesForTrack(trackId: Long): List<TakeEntity>
+    @Query("SELECT * FROM takes WHERE clipId = :clipId ORDER BY sortIndex ASC")
+    suspend fun getTakesForClip(clipId: Long): List<TakeEntity>
 
-    @Query("SELECT * FROM takes WHERE trackId = :trackId ORDER BY sortIndex ASC")
-    fun observeTakesForTrack(trackId: Long): Flow<List<TakeEntity>>
+    @Query("SELECT * FROM takes WHERE clipId = :clipId ORDER BY sortIndex ASC")
+    fun observeTakesForClip(clipId: Long): Flow<List<TakeEntity>>
+
+    @Query("SELECT * FROM takes WHERE clipId IN (:clipIds) ORDER BY clipId, sortIndex ASC")
+    suspend fun getTakesForClips(clipIds: List<Long>): List<TakeEntity>
 
     @Query("SELECT * FROM takes WHERE id = :id")
     suspend fun getTakeById(id: Long): TakeEntity?
 
-    @Query("SELECT COUNT(*) FROM takes WHERE trackId = :trackId")
-    suspend fun getTakeCount(trackId: Long): Int
+    @Query("SELECT COUNT(*) FROM takes WHERE clipId = :clipId")
+    suspend fun getTakeCount(clipId: Long): Int
+
+    @Query("SELECT * FROM takes WHERE clipId = :clipId AND isActive = 1 LIMIT 1")
+    suspend fun getActiveTakeForClip(clipId: Long): TakeEntity?
+
+    @Query("UPDATE takes SET isActive = CASE WHEN id = :takeId THEN 1 ELSE 0 END WHERE clipId = :clipId")
+    suspend fun setActiveTake(clipId: Long, takeId: Long)
 
     @Query("UPDATE takes SET displayName = :name WHERE id = :id")
     suspend fun updateDisplayName(id: Long, name: String)
 
-    @Query("UPDATE takes SET isMuted = :muted WHERE id = :id")
-    suspend fun updateMuted(id: Long, muted: Boolean)
-
     @Query("UPDATE takes SET volume = :volume WHERE id = :id")
     suspend fun updateVolume(id: Long, volume: Float)
 
-    @Query("UPDATE takes SET offsetMs = :offsetMs WHERE id = :id")
-    suspend fun updateOffset(id: Long, offsetMs: Long)
+    @Query("UPDATE takes SET trimStartMs = :trimStartMs, trimEndMs = :trimEndMs WHERE id = :id")
+    suspend fun updateTrim(id: Long, trimStartMs: Long, trimEndMs: Long)
 
     @Query("DELETE FROM takes WHERE id = :id")
     suspend fun deleteTakeById(id: Long)
-
-    @Query("SELECT * FROM takes WHERE trackId IN (:trackIds) ORDER BY trackId, sortIndex ASC")
-    suspend fun getTakesForTracks(trackIds: List<Long>): List<TakeEntity>
-
-    @Query("UPDATE takes SET offsetMs = offsetMs + :deltaMs WHERE trackId = :trackId")
-    suspend fun shiftOffsets(trackId: Long, deltaMs: Long)
 }

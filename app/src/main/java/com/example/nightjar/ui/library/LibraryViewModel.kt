@@ -36,6 +36,7 @@ enum class SortMode {
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
     private val repo: IdeaRepository,
+    private val studioRepo: com.example.nightjar.data.repository.StudioRepository,
     private val audioEngine: OboeAudioEngine
 ) : ViewModel() {
 
@@ -143,27 +144,26 @@ class LibraryViewModel @Inject constructor(
 
         viewModelScope.launch {
             try {
-                val tracks = repo.getAudioTracksForIdea(ideaId)
-                if (tracks.isEmpty()) {
+                val slots = studioRepo.getActiveAudioSlotsForIdea(ideaId)
+                if (slots.isEmpty()) {
                     _state.update { it.copy(previewingIdeaId = null) }
                     return@launch
                 }
 
-                // Load all audio tracks into the native engine
+                // Load active audio clips into the native engine
                 audioEngine.removeAllTracks()
-                for (track in tracks) {
-                    val fileName = track.audioFileName ?: continue
-                    val file = repo.getAudioFile(fileName)
+                for ((index, slot) in slots.withIndex()) {
+                    val file = repo.getAudioFile(slot.audioFileName)
                     if (!file.exists()) continue
                     audioEngine.addTrack(
-                        trackId = track.id.toInt(),
+                        trackId = index,
                         filePath = file.absolutePath,
-                        durationMs = track.durationMs,
-                        offsetMs = track.offsetMs,
-                        trimStartMs = track.trimStartMs,
-                        trimEndMs = track.trimEndMs,
-                        volume = track.volume,
-                        isMuted = track.isMuted
+                        durationMs = slot.durationMs,
+                        offsetMs = slot.offsetMs,
+                        trimStartMs = slot.trimStartMs,
+                        trimEndMs = slot.trimEndMs,
+                        volume = slot.volume,
+                        isMuted = slot.isMuted
                     )
                 }
 
