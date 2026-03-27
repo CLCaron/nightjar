@@ -21,6 +21,7 @@ import com.example.nightjar.ui.studio.PianoRollScreen
 import com.example.nightjar.ui.studio.StudioScreen
 import com.example.nightjar.ui.record.RecordScreen
 import com.example.nightjar.ui.theme.IndigoPalette
+import com.example.nightjar.ui.theme.LemonCakePalette
 import com.example.nightjar.ui.theme.WarmPlumPalette
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -33,15 +34,29 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val initialDark = themePrefs.themeKey != ThemePreferences.LEMON_CAKE
         enableEdgeToEdge(
-            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
-            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+            statusBarStyle = if (initialDark) SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+            else SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = if (initialDark) SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+            else SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
         )
         setContent {
             var themeKey by remember { mutableStateOf(themePrefs.themeKey) }
             val palette = when (themeKey) {
                 ThemePreferences.WARM_PLUM -> WarmPlumPalette
+                ThemePreferences.LEMON_CAKE -> LemonCakePalette
                 else -> IndigoPalette
+            }
+
+            DisposableEffect(palette.isDark) {
+                enableEdgeToEdge(
+                    statusBarStyle = if (palette.isDark) SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                    else SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
+                    navigationBarStyle = if (palette.isDark) SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                    else SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
+                )
+                onDispose {}
             }
 
             com.example.nightjar.ui.theme.NightjarTheme(palette = palette) {

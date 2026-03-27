@@ -1302,10 +1302,10 @@ private fun MetronomePanel(
     val view = LocalView.current
     val shape = RoundedCornerShape(4.dp)
 
-    // Opaque body color -- NjBg base with the RaisedBodyColor tint composited on top.
+    // Opaque body color -- NjSurface base with the RaisedBodyColor tint composited on top.
     // RaisedBodyColor is 12% alpha so buttons/cards are see-through by design,
     // but this panel needs to be solid when it overlaps content.
-    val panelBg = NjPanelInset
+    val panelBg = NjSurface
     val panelTint = RaisedBodyColor
     val panelColor = remember(panelBg, panelTint) {
         lerp(panelBg, Color(panelTint.red, panelTint.green, panelTint.blue), panelTint.alpha)

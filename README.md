@@ -92,7 +92,7 @@ Nightjar is in active development, working toward a v1.0 Play Store release.
 - Metronome with configurable count-in (1/2/4 bars), tap tempo, volume control. Plays continuously through recording on both Record and Studio screens. Seamless negative-position count-in with zero gap at the recording boundary.
 - Take mini-drawer with rename and delete (long-press take header to open)
 - Unified hardware-style UI components (NjButton, NjCard, NjRecessedPanel, NjLedDot) across all screens
-- Switchable color themes (Indigo and Warm Plum) with distinct accent personalities via Settings screen
+- Switchable color themes (Indigo, Warm Plum, Lemon Cake) with distinct accent personalities via Settings screen. Lemon Cake is a light theme with warm pink backgrounds and terracotta/peach accents.
 - Unified color palette with theme-varying accents (LEDs, waveforms, track colors, drum row colors, button tints)
 - Record screen with knurled record button, LCD status readout, transforming waveform panel, embossed text, visual button hierarchy (feature buttons with LED glow, groove-bordered button well, expandable metronome panel), matte grain texture on all interactive surfaces
 - Library with tag filtering, sort options, and audio preview playback

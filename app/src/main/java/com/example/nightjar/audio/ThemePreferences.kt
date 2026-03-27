@@ -26,5 +26,6 @@ class ThemePreferences @Inject constructor(
         private const val KEY_THEME = "selected_theme"
         const val DEFAULT_THEME = "indigo"
         const val WARM_PLUM = "warm_plum"
+        const val LEMON_CAKE = "lemon_cake"
     }
 }

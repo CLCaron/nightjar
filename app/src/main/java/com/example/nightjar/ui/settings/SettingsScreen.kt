@@ -42,6 +42,7 @@ import com.example.nightjar.ui.theme.NjBg
 import com.example.nightjar.ui.theme.NjColors
 import com.example.nightjar.ui.theme.NjMuted
 import com.example.nightjar.ui.theme.IndigoPalette
+import com.example.nightjar.ui.theme.LemonCakePalette
 import com.example.nightjar.ui.theme.WarmPlumPalette
 
 @Composable
@@ -100,6 +101,16 @@ fun SettingsScreen(
                     onClick = {
                         vm.onAction(SettingsAction.SetTheme(ThemePreferences.WARM_PLUM))
                         onThemeChanged(ThemePreferences.WARM_PLUM)
+                    }
+                )
+
+                ThemeOptionCard(
+                    label = "Lemon Cake",
+                    palette = LemonCakePalette,
+                    isSelected = state.themeKey == ThemePreferences.LEMON_CAKE,
+                    onClick = {
+                        vm.onAction(SettingsAction.SetTheme(ThemePreferences.LEMON_CAKE))
+                        onThemeChanged(ThemePreferences.LEMON_CAKE)
                     }
                 )
             }

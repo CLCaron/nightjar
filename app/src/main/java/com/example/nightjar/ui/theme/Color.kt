@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.Color
  * track waveform palettes, and drum instrument row colors.
  */
 data class NjColors(
+    val isDark: Boolean,
     val panelInset: Color,
     val bg: Color,
     val surface: Color,
@@ -43,6 +44,7 @@ data class NjColors(
 )
 
 val IndigoPalette = NjColors(
+    isDark = true,
     panelInset = Color(0xFF0A0810),
     bg = Color(0xFF0F0D18),
     surface = Color(0xFF16131E),
@@ -90,6 +92,7 @@ val IndigoPalette = NjColors(
 )
 
 val WarmPlumPalette = NjColors(
+    isDark = true,
     panelInset = Color(0xFF0E0A0E),
     bg = Color(0xFF140E12),
     surface = Color(0xFF1A1418),
@@ -133,6 +136,54 @@ val WarmPlumPalette = NjColors(
         Color(0xFFB87888),  // Clap   -- dusty rose
         Color(0xFFC07860),  // Snare  -- terracotta
         Color(0xFFC06870),  // Kick   -- brick-rose
+    ),
+)
+
+val LemonCakePalette = NjColors(
+    isDark = false,
+    panelInset = Color(0xFFB09498),
+    bg = Color(0xFFC8A8AC),
+    surface = Color(0xFFBEA0A4),
+    surface2 = Color(0xFFB6989C),
+    lane = Color(0xFFBA9CA0),
+    outline = Color(0xFFAA8C90),
+    onBg = Color(0xFF3A2020),
+    muted = Color(0xFF6E4A50),
+    muted2 = Color(0xFF7A585C),
+    accent = Color(0xFFF0C4A8),
+    amber = Color(0xFFB76C5A),
+    metronomeLed = Color(0xFFB76C5A),
+    raisedBody = Color(0xFF3A2020).copy(alpha = 0.08f),
+    pressedBody = Color(0xFFB09498),
+    deepPress = Color(0xFFA88C90),
+    // Accent personality -- warm lemon cake
+    primary = Color(0xFF8A5860),
+    primary2 = Color(0xFF986870),
+    starlight = Color(0xFFA07878),
+    starfieldTint = Color(0xFFD0A880),
+    recordCoral = Color(0xFFF0C4A8),
+    ledGreen = Color(0xFF5A8A50),
+    ledTeal = Color(0xFF387068),
+    ledYellow = Color(0xFFA86848),
+    trackColors = listOf(
+        Color(0xFFC87850),    // warm terracotta
+        Color(0xFF8868A8),    // soft purple
+        Color(0xFFB85050),    // rose red
+        Color(0xFF4A7A58),    // forest green
+        Color(0xFFBCA048),    // soft gold
+        Color(0xFF507898),    // slate blue
+    ),
+    drumRowColors = listOf(
+        Color(0xFFBCA048),  // Crash  -- soft gold
+        Color(0xFF387068),  // Ride   -- teal
+        Color(0xFFA86848),  // OH     -- warm amber
+        Color(0xFFA86848),  // CH     -- warm amber
+        Color(0xFF4A7A58),  // HiTom  -- forest green
+        Color(0xFF4A7A58),  // MdTom  -- forest green
+        Color(0xFF4A7A58),  // LoTom  -- forest green
+        Color(0xFF8868A8),  // Clap   -- soft purple
+        Color(0xFFC87850),  // Snare  -- terracotta
+        Color(0xFFB85050),  // Kick   -- rose red
     ),
 )
 
