@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.nightjar.audio.AudioLatencyEstimator
 import com.example.nightjar.audio.MetronomePreferences
 import com.example.nightjar.audio.MusicalTimeConverter
+import com.example.nightjar.audio.StudioPreferences
 import com.example.nightjar.audio.OboeAudioEngine
 import com.example.nightjar.audio.SoundFontManager
 import com.example.nightjar.audio.WavSplitter
@@ -66,7 +67,8 @@ class StudioViewModel @Inject constructor(
     private val recordingStorage: RecordingStorage,
     private val latencyEstimator: AudioLatencyEstimator,
     private val soundFontManager: SoundFontManager,
-    private val metronomePrefs: MetronomePreferences
+    private val metronomePrefs: MetronomePreferences,
+    private val studioPrefs: StudioPreferences
 ) : ViewModel() {
 
     private var currentIdeaId: Long? = null
@@ -111,14 +113,17 @@ class StudioViewModel @Inject constructor(
     private var recordingArmedTrackId: Long? = null
     // Whether this is a first-track-creation recording (no armed track)
     private var isFirstTrackRecording: Boolean = false
+    // Auto-punch-out boundary (ms) -- recording stops when playhead reaches this
+    private var autoPunchOutMs: Long? = null
 
     init {
-        // Load persisted metronome settings
+        // Load persisted settings
         _state.update {
             it.copy(
                 isMetronomeEnabled = metronomePrefs.isEnabled,
                 metronomeVolume = metronomePrefs.volume,
-                countInBars = metronomePrefs.countInBars
+                countInBars = metronomePrefs.countInBars,
+                returnToCursor = studioPrefs.returnToCursor
             )
         }
         audioEngine.setMetronomeVolume(metronomePrefs.volume)
@@ -152,6 +157,16 @@ class StudioViewModel @Inject constructor(
                         totalDurationMs = effectiveDuration,
                         lastBeatFrame = beatFrame
                     )
+                }
+
+                // Auto-punch-out: stop recording when playhead reaches boundary
+                val punchOut = autoPunchOutMs
+                if (st.isRecording && punchOut != null &&
+                    audioEngine.positionMs.value >= punchOut
+                ) {
+                    autoPunchOutMs = null
+                    stopRecording()
+                    _effects.emit(StudioEffect.ShowStatus("Punched out"))
                 }
 
                 // Track loop resets during recording for post-split
@@ -197,19 +212,28 @@ class StudioViewModel @Inject constructor(
             StudioAction.MicPermissionGranted -> startRecordingAfterPermission()
             StudioAction.StopOverdubRecording -> stopRecording()
             StudioAction.Play -> {
+                if (!_state.value.isPlaying) {
+                    audioEngine.seekTo(_state.value.cursorPositionMs)
+                }
                 audioEngine.play()
                 syncMetronomeToEngine()
             }
             StudioAction.Pause -> {
                 audioEngine.pause()
                 syncMetronomeToEngine()
+                if (_state.value.returnToCursor) {
+                    audioEngine.seekTo(_state.value.cursorPositionMs)
+                }
             }
             StudioAction.RestartPlayback -> {
                 audioEngine.pause()
-                audioEngine.seekTo(0L)
+                audioEngine.seekTo(_state.value.cursorPositionMs)
             }
             is StudioAction.SeekTo -> audioEngine.seekTo(action.positionMs)
-            is StudioAction.SeekFinished -> audioEngine.seekTo(action.positionMs)
+            is StudioAction.SeekFinished -> {
+                audioEngine.seekTo(action.positionMs)
+                setCursorPosition(action.positionMs)
+            }
 
             // Drag-to-reposition
             is StudioAction.StartDragTrack -> startDragTrack(action.trackId)
@@ -409,6 +433,10 @@ class StudioViewModel @Inject constructor(
             is StudioAction.TapClip -> tapClip(action.trackId, action.clipId, action.clipType)
             StudioAction.DismissClipPanel -> dismissClipPanel()
 
+            // Cursor / Transport
+            is StudioAction.SetCursorPosition -> setCursorPosition(action.positionMs)
+            StudioAction.ToggleReturnToCursor -> toggleReturnToCursor()
+
             // Metronome
             StudioAction.ToggleMetronome -> toggleMetronome()
             is StudioAction.SetMetronomeVolume -> setMetronomeVolume(action.volume)
@@ -602,7 +630,7 @@ class StudioViewModel @Inject constructor(
                 val file = recordingStorage.getAudioFile("nightjar_overdub_$ts.wav")
                 recordingFile = file
 
-                val intendedStartMs = audioEngine.positionMs.value
+                val intendedStartMs = _state.value.cursorPositionMs
 
                 // Phase 1: Start input stream
                 val started = audioEngine.startRecording(file.absolutePath)
@@ -614,7 +642,9 @@ class StudioViewModel @Inject constructor(
                 // Phase 2: Pipeline hot
                 audioEngine.awaitFirstBuffer()
 
-                // Start playback from negative position (count-in) or current position
+                // Seek to cursor position before starting playback for overdub context
+                audioEngine.seekTo(intendedStartMs)
+
                 val hasPlayableTracks = st.tracks.any { !it.isMuted }
                 audioEngine.setRecording(true)
                 audioEngine.play()
@@ -640,6 +670,23 @@ class StudioViewModel @Inject constructor(
                 recordingStartGlobalMs = intendedStartMs
                 recordingTrimStartMs = compensation
                 recordingStartNanos = System.nanoTime()
+
+                // Auto-punch-out: if recording into a gap, stop at the next clip
+                autoPunchOutMs = null
+                if (recordingArmedTrackId != null && !isFirstTrackRecording) {
+                    val existingClip = studioRepo.findClipAtPosition(
+                        recordingArmedTrackId!!, intendedStartMs
+                    )
+                    if (existingClip == null) {
+                        val nextClip = studioRepo.findNextClipAfterPosition(
+                            recordingArmedTrackId!!, intendedStartMs
+                        )
+                        if (nextClip != null) {
+                            autoPunchOutMs = nextClip.offsetMs
+                            Log.d(TAG, "Auto-punch-out set at ${nextClip.offsetMs}ms")
+                        }
+                    }
+                }
 
                 Log.d(TAG, "Recording started: intendedStart=${intendedStartMs}ms, " +
                     "preRoll=${preRollMs}ms, compensation=${compensation}ms, " +
@@ -711,6 +758,7 @@ class StudioViewModel @Inject constructor(
         loopResetTimestampsMs.clear()
         recordingArmedTrackId = null
         isFirstTrackRecording = false
+        autoPunchOutMs = null
 
         _state.update {
             it.copy(
@@ -1151,6 +1199,23 @@ class StudioViewModel @Inject constructor(
                 _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to rename track."))
             }
         }
+    }
+
+    // ── Cursor helpers ─────────────────────────────────────────────────
+
+    private fun setCursorPosition(positionMs: Long) {
+        if (_state.value.isRecording) return // cursor locked during recording
+        val snapped = snapIfEnabled(positionMs.coerceAtLeast(0L))
+        _state.update { it.copy(cursorPositionMs = snapped) }
+        if (!_state.value.isPlaying) {
+            audioEngine.seekTo(snapped)
+        }
+    }
+
+    private fun toggleReturnToCursor() {
+        val newValue = !_state.value.returnToCursor
+        studioPrefs.returnToCursor = newValue
+        _state.update { it.copy(returnToCursor = newValue) }
     }
 
     // ── Snap helper ─────────────────────────────────────────────────────

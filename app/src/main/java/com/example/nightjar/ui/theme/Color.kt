@@ -41,6 +41,7 @@ data class NjColors(
     val ledYellow: Color,
     val trackColors: List<Color>,
     val drumRowColors: List<Color>,
+    val cursorTeal: Color,
 )
 
 val IndigoPalette = NjColors(
@@ -89,6 +90,7 @@ val IndigoPalette = NjColors(
         Color(0xFFC48560),  // Snare  -- coral
         Color(0xFFCB6B6B),  // Kick   -- brick
     ),
+    cursorTeal = Color(0xFF4EC8C0),
 )
 
 val WarmPlumPalette = NjColors(
@@ -137,6 +139,7 @@ val WarmPlumPalette = NjColors(
         Color(0xFFC07860),  // Snare  -- terracotta
         Color(0xFFC06870),  // Kick   -- brick-rose
     ),
+    cursorTeal = Color(0xFF58B8A8),
 )
 
 val LemonCakePalette = NjColors(
@@ -185,6 +188,7 @@ val LemonCakePalette = NjColors(
         Color(0xFFC87850),  // Snare  -- terracotta
         Color(0xFFB85050),  // Kick   -- rose red
     ),
+    cursorTeal = Color(0xFF2A8A80),
 )
 
 val LocalNjColors = staticCompositionLocalOf { IndigoPalette }
@@ -217,6 +221,7 @@ val NjLedTeal: Color @Composable @ReadOnlyComposable get() = LocalNjColors.curre
 val NjLedYellow: Color @Composable @ReadOnlyComposable get() = LocalNjColors.current.ledYellow
 val NjTrackColors: List<Color> @Composable @ReadOnlyComposable get() = LocalNjColors.current.trackColors
 val NjDrumRowColors: List<Color> @Composable @ReadOnlyComposable get() = LocalNjColors.current.drumRowColors
+val NjCursorTeal: Color @Composable @ReadOnlyComposable get() = LocalNjColors.current.cursorTeal
 
 // ── Static tokens -- same in all themes ──────────────────────────────
 val NjError = Color(0xFFD4727A)            // muted rose -- errors, destructive actions

@@ -69,6 +69,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
@@ -86,6 +87,7 @@ import com.example.nightjar.data.db.entity.MidiNoteEntity
 import com.example.nightjar.data.db.entity.TakeEntity
 import com.example.nightjar.data.db.entity.TrackEntity
 import com.example.nightjar.ui.components.NjWaveform
+import com.example.nightjar.ui.theme.NjCursorTeal
 import com.example.nightjar.ui.theme.NjDrumRowColors
 import com.example.nightjar.ui.theme.NjRecordCoral
 import com.example.nightjar.ui.theme.NjError
@@ -122,6 +124,7 @@ private const val FAST_LONG_PRESS_MS = 200L
 fun TimelinePanel(
     tracks: List<TrackEntity>,
     globalPositionMs: Long,
+    cursorPositionMs: Long,
     totalDurationMs: Long,
     msPerDp: Float,
     isPlaying: Boolean,
@@ -159,8 +162,10 @@ fun TimelinePanel(
     modifier: Modifier = Modifier
 ) {
     val scrollState = rememberScrollState()
-    val timelineWidthDp = remember(totalDurationMs, msPerDp) {
-        (totalDurationMs / msPerDp).dp + TIMELINE_END_PADDING_DP
+    val timelineWidthDp = remember(totalDurationMs, cursorPositionMs, msPerDp) {
+        val contentDp = (totalDurationMs / msPerDp).dp
+        val cursorDp = (cursorPositionMs / msPerDp).dp
+        maxOf(contentDp, cursorDp) + 600.dp
     }
     val density = LocalDensity.current
 
@@ -281,6 +286,7 @@ fun TimelinePanel(
                     RulerGestureLayer(
                         loopStartMs = loopStartMs,
                         loopEndMs = loopEndMs,
+                        cursorPositionMs = cursorPositionMs,
                         isRecording = isRecording,
                         msPerDp = msPerDp,
                         totalDurationMs = totalDurationMs,
@@ -291,6 +297,12 @@ fun TimelinePanel(
                     )
 
                     if (!isFollowActive) {
+                        CursorSegment(
+                            cursorPositionMs = cursorPositionMs,
+                            msPerDp = msPerDp,
+                            height = RULER_HEIGHT,
+                            showTriangle = true
+                        )
                         PlayheadSegment(
                             globalPositionMs = globalPositionMs,
                             msPerDp = msPerDp,
@@ -415,6 +427,12 @@ fun TimelinePanel(
                         }
 
                         if (!isFollowActive) {
+                            CursorSegment(
+                                cursorPositionMs = cursorPositionMs,
+                                msPerDp = msPerDp,
+                                height = TRACK_LANE_HEIGHT,
+                                showTriangle = false
+                            )
                             PlayheadSegment(
                                 globalPositionMs = globalPositionMs,
                                 msPerDp = msPerDp,
@@ -1744,6 +1762,56 @@ private fun PlayheadSegment(
 }
 
 /**
+ * Cursor segment — teal dashed vertical line with optional downward-pointing
+ * triangle at the top (ruler row only). The cursor marks where playback
+ * starts and where new recordings land.
+ */
+@Composable
+private fun CursorSegment(
+    cursorPositionMs: Long,
+    msPerDp: Float,
+    height: Dp,
+    showTriangle: Boolean
+) {
+    val offsetDp = (cursorPositionMs / msPerDp).dp
+    val cursorColor = NjCursorTeal
+
+    Canvas(
+        modifier = Modifier
+            .offset(x = offsetDp - 5.dp) // center the 10dp-wide triangle
+            .width(10.dp)
+            .height(height)
+    ) {
+        val centerX = size.width / 2f
+        val dashEffect = PathEffect.dashPathEffect(
+            floatArrayOf(4.dp.toPx(), 3.dp.toPx()), 0f
+        )
+
+        // Dashed vertical line
+        drawLine(
+            color = cursorColor.copy(alpha = 0.5f),
+            start = Offset(centerX, if (showTriangle) 8.dp.toPx() else 0f),
+            end = Offset(centerX, size.height),
+            strokeWidth = 1.5f.dp.toPx(),
+            pathEffect = dashEffect
+        )
+
+        // Downward-pointing triangle at top (ruler only)
+        if (showTriangle) {
+            val triW = 10.dp.toPx()
+            val triH = 8.dp.toPx()
+            val triPath = Path().apply {
+                moveTo(centerX - triW / 2f, 0f)
+                lineTo(centerX + triW / 2f, 0f)
+                lineTo(centerX, triH)
+                close()
+            }
+            drawPath(triPath, cursorColor.copy(alpha = 0.85f))
+        }
+    }
+}
+
+/**
  * Loop region overlay segment — gold fill and boundary lines for a single
  * row's height. Triangle handles only rendered when [showHandles] is true
  * (ruler row only).
@@ -1823,7 +1891,7 @@ private fun LoopOverlaySegment(
 }
 
 /** Drag mode for the ruler gesture layer. */
-private enum class RulerDragMode { SCRUB, ADJUST_LOOP_START, ADJUST_LOOP_END }
+private enum class RulerDragMode { SCRUB, DRAG_CURSOR, ADJUST_LOOP_START, ADJUST_LOOP_END }
 
 /**
  * Ruler-height gesture layer for scrub and loop-handle interactions.
@@ -1836,6 +1904,7 @@ private enum class RulerDragMode { SCRUB, ADJUST_LOOP_START, ADJUST_LOOP_END }
 private fun RulerGestureLayer(
     loopStartMs: Long?,
     loopEndMs: Long?,
+    cursorPositionMs: Long,
     isRecording: Boolean,
     msPerDp: Float,
     totalDurationMs: Long,
@@ -1847,6 +1916,7 @@ private fun RulerGestureLayer(
     val density = LocalDensity.current
     val currentStartMs by rememberUpdatedState(loopStartMs)
     val currentEndMs by rememberUpdatedState(loopEndMs)
+    val currentCursorMs by rememberUpdatedState(cursorPositionMs)
     val currentTotalMs by rememberUpdatedState(totalDurationMs)
     val currentIsRecording by rememberUpdatedState(isRecording)
     val currentOnScrub by rememberUpdatedState(onScrub)
@@ -1859,10 +1929,11 @@ private fun RulerGestureLayer(
             .height(RULER_HEIGHT)
             .pointerInput(msPerDp) {
                 val handleHitZonePx = 32.dp.toPx()
+                val cursorHitZonePx = 16.dp.toPx()
 
                 fun pxToMs(px: Float): Long =
                     ((px / density.density) * msPerDp).toLong()
-                        .coerceIn(0L, currentTotalMs)
+                        .coerceAtLeast(0L)
 
                 fun msToPx(ms: Long): Float =
                     (ms / msPerDp) * density.density
@@ -1883,6 +1954,10 @@ private fun RulerGestureLayer(
                     val nearEnd = hasRegion &&
                             abs(touchX - endPx) <= handleHitZonePx
 
+                    // Check cursor proximity
+                    val cursorPx = msToPx(currentCursorMs)
+                    val nearCursor = abs(touchX - cursorPx) <= cursorHitZonePx
+
                     val dragMode = when {
                         nearStart && nearEnd -> {
                             if (abs(touchX - startPx) <= abs(touchX - endPx))
@@ -1890,46 +1965,75 @@ private fun RulerGestureLayer(
                         }
                         nearStart -> RulerDragMode.ADJUST_LOOP_START
                         nearEnd -> RulerDragMode.ADJUST_LOOP_END
+                        nearCursor -> RulerDragMode.DRAG_CURSOR
                         else -> RulerDragMode.SCRUB
                     }
 
-                    if (dragMode == RulerDragMode.SCRUB) {
-                        // Disable scrub during recording
-                        if (currentIsRecording) return@awaitEachGesture
+                    when (dragMode) {
+                        RulerDragMode.SCRUB -> {
+                            // Disable during recording
+                            if (currentIsRecording) return@awaitEachGesture
 
-                        // Immediate seek on touch down
-                        val tapMs = pxToMs(touchX)
-                        currentOnScrub(tapMs)
+                            // Tap sets cursor; drag = scrub with seek
+                            val tapMs = pxToMs(touchX)
 
-                        var lastScrubMs = tapMs
-                        val slop = awaitHorizontalTouchSlopOrCancellation(down.id) { change, _ ->
-                            change.consume()
-                        }
-                        if (slop != null) {
-                            horizontalDrag(slop.id) { change ->
+                            var dragged = false
+                            var lastMs = tapMs
+                            val slop = awaitHorizontalTouchSlopOrCancellation(down.id) { change, _ ->
                                 change.consume()
-                                val fingerMs = pxToMs(change.position.x)
-                                lastScrubMs = fingerMs
-                                currentOnScrub(fingerMs)
+                            }
+                            if (slop != null) {
+                                dragged = true
+                                currentOnScrub(tapMs)
+                                horizontalDrag(slop.id) { change ->
+                                    change.consume()
+                                    val fingerMs = pxToMs(change.position.x)
+                                    lastMs = fingerMs
+                                    currentOnScrub(fingerMs)
+                                }
+                                currentOnScrubFinished(lastMs)
+                            }
+
+                            if (!dragged) {
+                                // Pure tap -- set cursor position
+                                currentOnAction(StudioAction.SetCursorPosition(tapMs))
                             }
                         }
-                        // Commit seek on release (tap or drag end)
-                        currentOnScrubFinished(lastScrubMs)
-                    } else {
-                        // Loop handle adjustment (same as before)
-                        val slop = awaitHorizontalTouchSlopOrCancellation(down.id) { change, _ ->
-                            change.consume()
-                        }
-                        if (slop != null) {
-                            horizontalDrag(slop.id) { change ->
+
+                        RulerDragMode.DRAG_CURSOR -> {
+                            if (currentIsRecording) return@awaitEachGesture
+
+                            // Drag the cursor triangle
+                            val slop = awaitHorizontalTouchSlopOrCancellation(down.id) { change, _ ->
                                 change.consume()
-                                val fingerMs = pxToMs(change.position.x)
-                                when (dragMode) {
-                                    RulerDragMode.ADJUST_LOOP_START ->
-                                        currentOnAction(StudioAction.UpdateLoopRegionStart(fingerMs))
-                                    RulerDragMode.ADJUST_LOOP_END ->
-                                        currentOnAction(StudioAction.UpdateLoopRegionEnd(fingerMs))
-                                    else -> {}
+                            }
+                            if (slop != null) {
+                                horizontalDrag(slop.id) { change ->
+                                    change.consume()
+                                    val fingerMs = pxToMs(change.position.x)
+                                    currentOnAction(StudioAction.SetCursorPosition(fingerMs))
+                                }
+                            } else {
+                                // Tap on cursor -- no-op (already at cursor position)
+                            }
+                        }
+
+                        RulerDragMode.ADJUST_LOOP_START,
+                        RulerDragMode.ADJUST_LOOP_END -> {
+                            val slop = awaitHorizontalTouchSlopOrCancellation(down.id) { change, _ ->
+                                change.consume()
+                            }
+                            if (slop != null) {
+                                horizontalDrag(slop.id) { change ->
+                                    change.consume()
+                                    val fingerMs = pxToMs(change.position.x)
+                                    when (dragMode) {
+                                        RulerDragMode.ADJUST_LOOP_START ->
+                                            currentOnAction(StudioAction.UpdateLoopRegionStart(fingerMs))
+                                        RulerDragMode.ADJUST_LOOP_END ->
+                                            currentOnAction(StudioAction.UpdateLoopRegionEnd(fingerMs))
+                                        else -> {}
+                                    }
                                 }
                             }
                         }

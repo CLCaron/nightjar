@@ -82,6 +82,8 @@ Nightjar is in active development, working toward a v1.0 Play Store release.
 - Loop playback with ruler scrub-to-seek and loop handle adjustment
 - Timeline ruler as primary scrub surface (tap or drag to seek)
 - Studio transport bar: Restart, Play/Pause, Rec (right cluster) with Loop/Clear rocker pill (left). Sticky pinned overlay when scrolled past.
+- LCD status strip between transport and project controls: contextual state display (Ready/Armed/Recording/Clip selected) with IBM Plex Mono text in NjRecessedPanel, always-visible Disarm button, contextual Delete button
+- Cursor position with return-to-cursor transport: teal dashed cursor line on timeline, play starts from cursor, pause returns to cursor. Auto-punch-out stops recording at next clip boundary.
 - Inline track drawer with hardware-style controls (arm, solo, mute, takes, volume knob, rename, delete)
 - Drum step sequencer with FluidSynth synthesis, pattern editor, clip-based timeline arrangement
 - MIDI instrument tracks with full-screen piano roll editor, 128 GM instruments, and C++ MidiSequencer

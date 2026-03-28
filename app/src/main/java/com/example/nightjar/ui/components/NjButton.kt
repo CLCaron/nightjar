@@ -79,7 +79,7 @@ fun NjButton(
     shape: Shape = RoundedCornerShape(2.dp)
 ) {
     if (ledColor != null) {
-        ToggleModeButton(text, onClick, modifier, icon, isActive, ledColor, activeGlow, ledScale, shape)
+        ToggleModeButton(text, onClick, modifier, icon, isActive, ledColor, activeGlow, ledScale, shape, textColor)
     } else {
         MomentaryModeButton(text, onClick, modifier, icon, isActive, activeAccent, textColor, shape)
     }
@@ -96,7 +96,8 @@ private fun ToggleModeButton(
     ledColor: Color,
     activeGlow: Boolean,
     ledScale: Float,
-    shape: Shape
+    shape: Shape,
+    inactiveTextColor: Color? = null
 ) {
     val toggleState = rememberMechanicalToggleState(isActive)
     val depth by toggleState.depth
@@ -108,7 +109,7 @@ private fun ToggleModeButton(
         else -> lerp(RaisedBodyColor, PressedBodyColor, depth * 2f)
     }
     val visuallyActive = toggleState.isVisuallyActive
-    val fgColor = if (visuallyActive) ledColor else ledColor.copy(alpha = 0.5f)
+    val fgColor = if (visuallyActive) ledColor else (inactiveTextColor ?: ledColor.copy(alpha = 0.5f))
 
     // Haptics -- fire on raw press/release events.
     LaunchedEffect(toggleState.interactionSource) {

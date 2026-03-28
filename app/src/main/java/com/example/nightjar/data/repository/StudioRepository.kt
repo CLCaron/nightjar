@@ -303,6 +303,17 @@ class StudioRepository(
     }
 
     /**
+     * Find the first clip on a track whose offsetMs is strictly after [positionMs].
+     * Returns null if no clip exists after that position.
+     */
+    suspend fun findNextClipAfterPosition(trackId: Long, positionMs: Long): AudioClipEntity? {
+        val clips = audioClipDao.getClipsForTrack(trackId)
+        return clips
+            .filter { it.offsetMs > positionMs }
+            .minByOrNull { it.offsetMs }
+    }
+
+    /**
      * Atomic creation of a new audio track with its first clip and take.
      * Used for first-track recording in Studio.
      */

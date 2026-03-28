@@ -69,6 +69,7 @@ import com.example.nightjar.ui.theme.NjAmber
 import com.example.nightjar.ui.theme.NjBg
 import com.example.nightjar.ui.theme.NjRecordCoral
 import com.example.nightjar.ui.theme.NjLedGreen
+import com.example.nightjar.ui.theme.NjCursorTeal
 import com.example.nightjar.ui.theme.NjOutline
 
 import androidx.compose.material.icons.Icons
@@ -80,6 +81,12 @@ import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.Settings
 import com.example.nightjar.ui.theme.NjMetronomeLed
 import com.example.nightjar.ui.theme.NjMuted
+import com.example.nightjar.ui.theme.NjError
+import com.example.nightjar.ui.theme.IbmPlexMono
+import com.example.nightjar.ui.components.NjRecessedPanel
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.flow.collectLatest
 
 /**
@@ -139,6 +146,7 @@ fun StudioScreen(
             when (effect) {
                 is StudioEffect.NavigateBack -> onBack()
                 is StudioEffect.ShowError -> snackbarHostState.showSnackbar(effect.message)
+                is StudioEffect.ShowStatus -> snackbarHostState.showSnackbar(effect.message)
                 is StudioEffect.RequestMicPermission -> {
                     val hasPermission = ContextCompat.checkSelfPermission(
                         context, Manifest.permission.RECORD_AUDIO
@@ -242,6 +250,7 @@ fun StudioScreen(
                     TimelinePanel(
                         tracks = state.tracks,
                         globalPositionMs = displayPositionMs,
+                        cursorPositionMs = state.cursorPositionMs,
                         totalDurationMs = state.totalDurationMs,
                         msPerDp = state.msPerDp,
                         isPlaying = state.isPlaying,
@@ -372,8 +381,10 @@ fun StudioScreen(
         LatencySetupDialog(
             diagnostics = state.latencyDiagnostics,
             manualOffsetMs = state.manualOffsetMs,
+            returnToCursor = state.returnToCursor,
             onOffsetChange = { vm.onAction(StudioAction.SetManualOffset(it)) },
             onClearOffset = { vm.onAction(StudioAction.ClearManualOffset) },
+            onToggleReturnToCursor = { vm.onAction(StudioAction.ToggleReturnToCursor) },
             onDismiss = { vm.onAction(StudioAction.DismissLatencySetup) }
         )
     }
@@ -534,6 +545,8 @@ private fun TransportAndControls(
             }
         }
 
+        StudioStatusLcd(state = state, onAction = onAction)
+
         // Project controls: time sig, BPM, snap, metronome, position
         if (!state.isLoading && state.errorMessage == null) {
             ProjectControlsBar(
@@ -555,12 +568,152 @@ private fun TransportAndControls(
     }
 }
 
+/**
+ * Contextual LCD status strip between the transport row and project controls.
+ *
+ * Shows the current studio state in an NjRecessedPanel with IBM Plex Mono text
+ * (matching the Record screen's hardware LCD aesthetic). The Disarm button is
+ * always visible (dimmed when inactive) for a consistent hardware panel feel.
+ * A Delete button appears when a clip is selected.
+ *
+ * The LCD panel measures all possible text strings invisibly so its width stays
+ * stable across state changes -- no jittery resizing.
+ */
+@Composable
+private fun StudioStatusLcd(
+    state: StudioUiState,
+    onAction: (StudioAction) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val armedTrackName = state.armedTrackId?.let { id ->
+        state.tracks.find { it.id == id }?.displayName
+    }
+    val recordingTrackName = state.recordingTargetTrackId?.let { id ->
+        state.tracks.find { it.id == id }?.displayName
+    } ?: armedTrackName
+
+    val coralColor = NjRecordCoral
+    val amberColor = NjAmber
+    val mutedColor = NjMuted
+    val errorColor = NjError
+
+    // Determine current LCD text and color by priority
+    val lcdText: String
+    val lcdColor: Color
+    when {
+        state.isRecording -> {
+            lcdText = "REC \u00B7 ${recordingTrackName ?: "Track"}"
+            lcdColor = coralColor.copy(alpha = 0.85f)
+        }
+        state.isCountingIn -> {
+            lcdText = "COUNT IN"
+            lcdColor = coralColor.copy(alpha = 0.7f)
+        }
+        state.armedTrackId != null -> {
+            lcdText = "ARMED \u00B7 ${armedTrackName ?: "Track"}"
+            lcdColor = coralColor.copy(alpha = 0.7f)
+        }
+        state.expandedClipState != null -> {
+            lcdText = "CLIP \u00B7 ${state.expandedClipState.clipType.uppercase()}"
+            lcdColor = amberColor.copy(alpha = 0.7f)
+        }
+        else -> {
+            lcdText = "READY"
+            lcdColor = mutedColor.copy(alpha = 0.4f)
+        }
+    }
+
+    val lcdStyle = TextStyle(
+        fontFamily = IbmPlexMono,
+        fontSize = 12.sp,
+        letterSpacing = 1.2.sp
+    )
+
+    // All possible texts for stable width measurement (longest track name in project)
+    val longestName = state.tracks.maxByOrNull { it.displayName.length }?.displayName ?: "Track"
+    val measuringTexts = remember(longestName) {
+        listOf(
+            "READY",
+            "COUNT IN",
+            "ARMED \u00B7 $longestName",
+            "REC \u00B7 $longestName",
+            "CLIP \u00B7 AUDIO"
+        )
+    }
+
+    // Disarm button state
+    val isArmed = state.armedTrackId != null
+    val disarmEnabled = isArmed && !state.isRecording && !state.isCountingIn
+
+    // Delete button state
+    val showDelete = state.expandedClipState != null
+        && !state.isRecording && !state.isCountingIn
+
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        NjRecessedPanel {
+            Box {
+                // Invisible texts to lock the panel to the widest possible content
+                measuringTexts.forEach { txt ->
+                    Text(
+                        text = txt,
+                        style = lcdStyle,
+                        maxLines = 1,
+                        modifier = Modifier.alpha(0f)
+                    )
+                }
+                // Visible LCD text
+                Text(
+                    text = lcdText,
+                    style = lcdStyle,
+                    color = lcdColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+
+        // Disarm -- always visible; lights up coral when a track is armed
+        NjButton(
+            text = "Disarm",
+            onClick = {
+                if (disarmEnabled) onAction(StudioAction.ToggleArm(state.armedTrackId!!))
+            },
+            isActive = disarmEnabled,
+            ledColor = coralColor,
+            textColor = mutedColor,
+        )
+
+        // Delete -- contextual, only when a clip is selected
+        if (showDelete) {
+            val clip = state.expandedClipState!!
+            NjButton(
+                text = "Delete",
+                onClick = {
+                    when (clip.clipType) {
+                        "audio" -> onAction(StudioAction.DeleteAudioClip(clip.trackId, clip.clipId))
+                        "drum" -> onAction(StudioAction.DeleteClip(clip.trackId, clip.clipId))
+                        "midi" -> onAction(StudioAction.DeleteMidiClip(clip.trackId, clip.clipId))
+                    }
+                    onAction(StudioAction.DismissClipPanel)
+                },
+                textColor = errorColor
+            )
+        }
+    }
+}
+
 @Composable
 private fun LatencySetupDialog(
     diagnostics: AudioLatencyEstimator.LatencyDiagnostics?,
     manualOffsetMs: Long,
+    returnToCursor: Boolean,
     onOffsetChange: (Long) -> Unit,
     onClearOffset: () -> Unit,
+    onToggleReturnToCursor: () -> Unit,
     onDismiss: () -> Unit
 ) {
     AlertDialog(
@@ -611,6 +764,22 @@ private fun LatencySetupDialog(
                         text = "If overdubs sound late, drag left (negative)",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                    )
+
+                    Spacer(Modifier.height(8.dp))
+
+                    // Transport section
+                    Text(
+                        text = "Transport",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
+                    )
+
+                    NjButton(
+                        text = "Return to cursor on stop",
+                        onClick = onToggleReturnToCursor,
+                        isActive = returnToCursor,
+                        ledColor = NjCursorTeal
                     )
                 } else {
                     Text(
@@ -857,6 +1026,7 @@ private fun ProjectControlsBar(
                 onClick = { onAction(StudioAction.ToggleSnap) },
                 isActive = isSnapEnabled,
                 ledColor = NjAmber,
+                textColor = NjMuted,
             )
 
             // Metronome + Gear rocker pill
@@ -927,6 +1097,7 @@ private fun MetronomeButtonPill(
             onClick = { onAction(StudioAction.ToggleMetronome) },
             isActive = isEnabled,
             ledColor = NjMetronomeLed,
+            textColor = NjMuted,
             ledScale = beatScale.value
         )
 

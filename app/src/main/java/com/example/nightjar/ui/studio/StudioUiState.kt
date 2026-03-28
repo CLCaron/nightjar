@@ -172,7 +172,9 @@ data class StudioUiState(
     val countInBars: Int = 0,
     val isCountingIn: Boolean = false,
     val lastBeatFrame: Long = -1L,
-    val isMetronomeSettingsOpen: Boolean = false
+    val isMetronomeSettingsOpen: Boolean = false,
+    val cursorPositionMs: Long = 0L,
+    val returnToCursor: Boolean = true
 ) {
     val hasLoopRegion: Boolean get() = loopStartMs != null && loopEndMs != null
 
@@ -232,7 +234,9 @@ data class StudioUiState(
                 countInBars == other.countInBars &&
                 isCountingIn == other.isCountingIn &&
                 lastBeatFrame == other.lastBeatFrame &&
-                isMetronomeSettingsOpen == other.isMetronomeSettingsOpen
+                isMetronomeSettingsOpen == other.isMetronomeSettingsOpen &&
+                cursorPositionMs == other.cursorPositionMs &&
+                returnToCursor == other.returnToCursor
     }
 
     override fun hashCode(): Int {
@@ -290,6 +294,8 @@ data class StudioUiState(
         result = 31 * result + isCountingIn.hashCode()
         result = 31 * result + lastBeatFrame.hashCode()
         result = 31 * result + isMetronomeSettingsOpen.hashCode()
+        result = 31 * result + cursorPositionMs.hashCode()
+        result = 31 * result + returnToCursor.hashCode()
         return result
     }
 }
@@ -432,6 +438,10 @@ sealed interface StudioAction {
     data class FinishDragMidiClip(val trackId: Long, val clipId: Long, val newOffsetMs: Long) : StudioAction
     data object CancelDragMidiClip : StudioAction
 
+    // Cursor / Transport
+    data class SetCursorPosition(val positionMs: Long) : StudioAction
+    data object ToggleReturnToCursor : StudioAction
+
     // Metronome
     data object ToggleMetronome : StudioAction
     data class SetMetronomeVolume(val volume: Float) : StudioAction
@@ -450,6 +460,7 @@ sealed interface StudioAction {
 sealed interface StudioEffect {
     data object NavigateBack : StudioEffect
     data class ShowError(val message: String) : StudioEffect
+    data class ShowStatus(val message: String) : StudioEffect
     data object RequestMicPermission : StudioEffect
     data class NavigateToPianoRoll(val trackId: Long, val clipId: Long) : StudioEffect
     data class NavigateToDrumEditor(val trackId: Long, val clipId: Long = 0L) : StudioEffect
