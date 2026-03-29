@@ -30,7 +30,6 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.gestures.horizontalDrag
 import androidx.compose.foundation.horizontalScroll
@@ -360,11 +359,6 @@ fun TimelinePanel(
                     Box(
                         Modifier
                             .width(timelineWidthDp)
-                            .pointerInput(Unit) {
-                                detectTapGestures {
-                                    onAction(StudioAction.DismissClipPanel)
-                                }
-                            }
                     ) {
                         // Beat grid lines (behind track content)
                         if (isSnapEnabled) {
@@ -746,8 +740,9 @@ private fun AudioTrackLane(
             val activeTake = clip.activeTake ?: return@forEach
             val isDragging = audioClipDragState?.clipId == clip.clipId
             val isTrimming = audioClipTrimState?.clipId == clip.clipId
-            val isExpanded = expandedClipState?.trackId == track.id &&
+            val isSelected = expandedClipState?.trackId == track.id &&
                 expandedClipState.clipId == clip.clipId
+            val isFlipped = isSelected && (expandedClipState?.isFlipped == true)
 
             val effectiveOffsetMs = if (isDragging) {
                 audioClipDragState!!.previewOffsetMs
@@ -793,6 +788,10 @@ private fun AudioTrackLane(
                     .fillMaxHeight()
                     .clip(RoundedCornerShape(6.dp))
                     .background(NjLane.copy(alpha = bgAlpha))
+                    .then(
+                        if (isSelected) Modifier.border(1.5.dp, NjAmber.copy(alpha = 0.7f), RoundedCornerShape(6.dp))
+                        else Modifier
+                    )
                     .then(
                         if (isDragging) Modifier
                             .graphicsLayer { shadowElevation = 8f }
@@ -907,17 +906,13 @@ private fun AudioTrackLane(
                                         }
                                         dragAccumulatedPx = 0f
                                     } else {
-                                        // Short tap — expand takes if multi-take, or toggle clip panel
+                                        // Short tap — select / flip clip
                                         val upChange = currentEvent.changes.firstOrNull { it.id == down.id }
                                         val dist = upChange?.let {
                                             (it.position - down.position).getDistance()
                                         } ?: 0f
                                         if (dist < viewConfiguration.touchSlop) {
-                                            if (clip.takeCount > 1) {
-                                                onAction(StudioAction.TapAudioClip(track.id, clip.clipId))
-                                            } else {
-                                                onAction(StudioAction.TapClip(track.id, clip.clipId, "audio"))
-                                            }
+                                            onAction(StudioAction.TapClip(track.id, clip.clipId, "audio"))
                                         }
                                     }
                                 }
@@ -939,7 +934,7 @@ private fun AudioTrackLane(
                     1f - effectiveTrimEndMs.toFloat() / activeTake.durationMs else 1f
 
                 FlippableClip(
-                    isFlipped = isExpanded,
+                    isFlipped = isFlipped,
                     modifier = Modifier.matchParentSize(),
                     front = {
                         Box(Modifier.fillMaxSize()) {
@@ -1046,8 +1041,9 @@ private fun MidiTrackLane(
             val isDragging = midiClipDragState != null &&
                 midiClipDragState.clipId == clip.clipId &&
                 midiClipDragState.trackId == track.id
-            val isExpanded = expandedClipState?.trackId == track.id &&
+            val isSelected = expandedClipState?.trackId == track.id &&
                 expandedClipState.clipId == clip.clipId
+            val isFlipped = isSelected && (expandedClipState?.isFlipped == true)
             val displayOffsetMs = if (isDragging) midiClipDragState!!.previewOffsetMs else clip.offsetMs
 
             val clipDurationMs = clip.contentDurationMs.coerceAtLeast(measureMs)
@@ -1063,6 +1059,10 @@ private fun MidiTrackLane(
                     .fillMaxHeight()
                     .clip(RoundedCornerShape(4.dp))
                     .background(trackColor.copy(alpha = bgAlpha))
+                    .then(
+                        if (isSelected) Modifier.border(1.5.dp, NjAmber.copy(alpha = 0.7f), RoundedCornerShape(4.dp))
+                        else Modifier
+                    )
                     .then(
                         if (isDragging) Modifier
                             .graphicsLayer { shadowElevation = 8f }
@@ -1109,7 +1109,7 @@ private fun MidiTrackLane(
                     .padding(vertical = 2.dp)
             ) {
                 FlippableClip(
-                    isFlipped = isExpanded,
+                    isFlipped = isFlipped,
                     modifier = Modifier.matchParentSize(),
                     front = {
                         // Draw mini note bars inside the clip
@@ -1267,8 +1267,9 @@ private fun DrumTrackLane(
 
             val isDragging = clipDragState?.trackId == track.id &&
                     clipDragState.clipId == clip.clipId
-            val isExpanded = expandedClipState?.trackId == track.id &&
+            val isSelected = expandedClipState?.trackId == track.id &&
                     expandedClipState.clipId == clip.clipId
+            val isFlipped = isSelected && (expandedClipState?.isFlipped == true)
             val effectiveOffsetMs = if (isDragging) {
                 clipDragState!!.previewOffsetMs
             } else {
@@ -1285,6 +1286,10 @@ private fun DrumTrackLane(
                     .fillMaxHeight()
                     .clip(RoundedCornerShape(6.dp))
                     .background(NjLane.copy(alpha = if (isDragging) 0.8f else bgAlpha))
+                    .then(
+                        if (isSelected) Modifier.border(1.5.dp, NjAmber.copy(alpha = 0.7f), RoundedCornerShape(6.dp))
+                        else Modifier
+                    )
                     .then(
                         if (isDragging) Modifier
                             .graphicsLayer { shadowElevation = 8f }
@@ -1331,7 +1336,7 @@ private fun DrumTrackLane(
                     .padding(vertical = 4.dp)
             ) {
                 FlippableClip(
-                    isFlipped = isExpanded,
+                    isFlipped = isFlipped,
                     modifier = Modifier.matchParentSize(),
                     front = {
                         // Mini step grid -- per-instrument colored dots

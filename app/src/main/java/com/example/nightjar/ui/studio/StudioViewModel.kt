@@ -268,7 +268,7 @@ class StudioViewModel @Inject constructor(
                     } else {
                         it.expandedTrackIds + action.trackId
                     }
-                    it.copy(expandedTrackIds = newSet)
+                    it.copy(expandedTrackIds = newSet, expandedClipState = null)
                 }
             }
             is StudioAction.SetTrackMuted -> setTrackMuted(action.trackId, action.muted)
@@ -325,7 +325,6 @@ class StudioViewModel @Inject constructor(
             }
 
             // Audio clip actions
-            is StudioAction.TapAudioClip -> tapAudioClip(action.trackId, action.clipId)
             is StudioAction.StartDragAudioClip -> startDragAudioClip(action.trackId, action.clipId)
             is StudioAction.UpdateDragAudioClip -> updateDragAudioClip(action.previewOffsetMs)
             is StudioAction.FinishDragAudioClip -> finishDragAudioClip(action.trackId, action.clipId, action.newOffsetMs)
@@ -988,15 +987,6 @@ class StudioViewModel @Inject constructor(
         }
     }
 
-    private fun tapAudioClip(trackId: Long, clipId: Long) {
-        val current = _state.value.expandedAudioClipId
-        _state.update {
-            it.copy(
-                expandedAudioClipId = if (current == clipId) null else clipId
-            )
-        }
-    }
-
     private fun startDragAudioClip(trackId: Long, clipId: Long) {
         val clips = _state.value.audioClips[trackId] ?: return
         val clip = clips.find { it.clipId == clipId } ?: return
@@ -1122,9 +1112,8 @@ class StudioViewModel @Inject constructor(
             try {
                 studioRepo.deleteClipAndAudio(clipId)
                 _state.update {
-                    it.copy(
-                        expandedAudioClipId = if (it.expandedAudioClipId == clipId) null else it.expandedAudioClipId
-                    )
+                    val clearClip = it.expandedClipState?.clipId == clipId
+                    it.copy(expandedClipState = if (clearClip) null else it.expandedClipState)
                 }
                 studioRepo.recomputeAudioTrackDuration(trackId)
                 reloadAudioClips(trackId)
@@ -1203,7 +1192,7 @@ class StudioViewModel @Inject constructor(
     private fun setCursorPosition(positionMs: Long) {
         if (_state.value.isRecording) return // cursor locked during recording
         val snapped = snapIfEnabled(positionMs.coerceAtLeast(0L))
-        _state.update { it.copy(cursorPositionMs = snapped) }
+        _state.update { it.copy(cursorPositionMs = snapped, expandedClipState = null) }
         if (!_state.value.isPlaying) {
             audioEngine.seekTo(snapped)
         }
@@ -1882,6 +1871,7 @@ class StudioViewModel @Inject constructor(
     // ── Clip creation ────────────────────────────────────────────────────
 
     private fun createDrumClip(trackId: Long, offsetMs: Long) {
+        _state.update { it.copy(expandedClipState = null) }
         viewModelScope.launch {
             try {
                 val snapped = snapIfEnabled(offsetMs).coerceAtLeast(0L)
@@ -1894,6 +1884,7 @@ class StudioViewModel @Inject constructor(
     }
 
     private fun createMidiClip(trackId: Long, offsetMs: Long) {
+        _state.update { it.copy(expandedClipState = null) }
         viewModelScope.launch {
             try {
                 val snapped = snapIfEnabled(offsetMs).coerceAtLeast(0L)
@@ -2462,12 +2453,21 @@ class StudioViewModel @Inject constructor(
 
     private fun tapClip(trackId: Long, clipId: Long, clipType: String) {
         val current = _state.value.expandedClipState
-        // Toggle: tap same clip dismisses, tap different clip opens it
-        if (current != null && current.trackId == trackId && current.clipId == clipId) {
-            _state.update { it.copy(expandedClipState = null) }
-        } else {
-            _state.update {
-                it.copy(expandedClipState = ExpandedClipState(trackId, clipId, clipType))
+
+        when {
+            // Same clip, not flipped -> flip to action buttons
+            current != null && current.trackId == trackId && current.clipId == clipId && !current.isFlipped -> {
+                _state.update { it.copy(expandedClipState = current.copy(isFlipped = true)) }
+            }
+            // Same clip, flipped -> unflip (keep selected)
+            current != null && current.trackId == trackId && current.clipId == clipId && current.isFlipped -> {
+                _state.update { it.copy(expandedClipState = current.copy(isFlipped = false)) }
+            }
+            // No selection or different clip -> select with isFlipped = false
+            else -> {
+                _state.update {
+                    it.copy(expandedClipState = ExpandedClipState(trackId, clipId, clipType, isFlipped = false))
+                }
             }
         }
 

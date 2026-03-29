@@ -30,7 +30,8 @@ data class ClipDragState(
 data class ExpandedClipState(
     val trackId: Long,
     val clipId: Long,
-    val clipType: String  // "drum", "midi", or "audio"
+    val clipType: String,  // "drum", "midi", or "audio"
+    val isFlipped: Boolean = false
 )
 
 /** Transient state while the user is long-press-dragging a MIDI clip to reposition it. */
@@ -146,7 +147,6 @@ data class StudioUiState(
     val manualOffsetMs: Long = 0L,
     val armedTrackId: Long? = null,
     val audioClips: Map<Long, List<AudioClipUiState>> = emptyMap(),
-    val expandedAudioClipId: Long? = null,
     val audioClipDragState: AudioClipDragState? = null,
     val audioClipTrimState: AudioClipTrimState? = null,
     val renamingTrackId: Long? = null,
@@ -178,6 +178,16 @@ data class StudioUiState(
 ) {
     val hasLoopRegion: Boolean get() = loopStartMs != null && loopEndMs != null
 
+    /** Derived: the audio clip ID whose takes panel should be expanded (multi-take clips only). */
+    val expandedAudioClipId: Long?
+        get() {
+            val clip = expandedClipState ?: return null
+            if (clip.clipType != "audio") return null
+            val trackClips = audioClips[clip.trackId] ?: return null
+            val audioClip = trackClips.find { it.clipId == clip.clipId } ?: return null
+            return if (audioClip.takeCount > 1) clip.clipId else null
+        }
+
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is StudioUiState) return false
@@ -208,7 +218,6 @@ data class StudioUiState(
                 manualOffsetMs == other.manualOffsetMs &&
                 armedTrackId == other.armedTrackId &&
                 audioClips == other.audioClips &&
-                expandedAudioClipId == other.expandedAudioClipId &&
                 audioClipDragState == other.audioClipDragState &&
                 audioClipTrimState == other.audioClipTrimState &&
                 renamingTrackId == other.renamingTrackId &&
@@ -267,7 +276,6 @@ data class StudioUiState(
         result = 31 * result + manualOffsetMs.hashCode()
         result = 31 * result + (armedTrackId?.hashCode() ?: 0)
         result = 31 * result + audioClips.hashCode()
-        result = 31 * result + (expandedAudioClipId?.hashCode() ?: 0)
         result = 31 * result + (audioClipDragState?.hashCode() ?: 0)
         result = 31 * result + (audioClipTrimState?.hashCode() ?: 0)
         result = 31 * result + (renamingTrackId?.hashCode() ?: 0)
@@ -365,7 +373,6 @@ sealed interface StudioAction {
     data object DismissRenameTrack : StudioAction
 
     // Audio clip actions
-    data class TapAudioClip(val trackId: Long, val clipId: Long) : StudioAction
     data class StartDragAudioClip(val trackId: Long, val clipId: Long) : StudioAction
     data class UpdateDragAudioClip(val previewOffsetMs: Long) : StudioAction
     data class FinishDragAudioClip(val trackId: Long, val clipId: Long, val newOffsetMs: Long) : StudioAction
