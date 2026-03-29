@@ -131,7 +131,7 @@ data class StudioUiState(
     val liveAmplitudes: FloatArray = FloatArray(0),
     val recordingStartGlobalMs: Long? = null,
     val recordingTargetTrackId: Long? = null,
-    val showAddTrackSheet: Boolean = false,
+    val isAddTrackDrawerOpen: Boolean = false,
     val msPerDp: Float = 10f,
     val dragState: TrackDragState? = null,
     val trimState: TrackTrimState? = null,
@@ -193,7 +193,7 @@ data class StudioUiState(
                 liveAmplitudes.contentEquals(other.liveAmplitudes) &&
                 recordingStartGlobalMs == other.recordingStartGlobalMs &&
                 recordingTargetTrackId == other.recordingTargetTrackId &&
-                showAddTrackSheet == other.showAddTrackSheet &&
+                isAddTrackDrawerOpen == other.isAddTrackDrawerOpen &&
                 msPerDp == other.msPerDp &&
                 dragState == other.dragState &&
                 trimState == other.trimState &&
@@ -252,7 +252,7 @@ data class StudioUiState(
         result = 31 * result + liveAmplitudes.contentHashCode()
         result = 31 * result + (recordingStartGlobalMs?.hashCode() ?: 0)
         result = 31 * result + (recordingTargetTrackId?.hashCode() ?: 0)
-        result = 31 * result + showAddTrackSheet.hashCode()
+        result = 31 * result + isAddTrackDrawerOpen.hashCode()
         result = 31 * result + msPerDp.hashCode()
         result = 31 * result + (dragState?.hashCode() ?: 0)
         result = 31 * result + (trimState?.hashCode() ?: 0)
@@ -304,8 +304,7 @@ data class StudioUiState(
 sealed interface StudioAction {
     data object NavigateBack : StudioAction
     data class Load(val ideaId: Long) : StudioAction
-    data object ShowAddTrackSheet : StudioAction
-    data object DismissAddTrackSheet : StudioAction
+    data object ToggleAddTrackDrawer : StudioAction
     data class SelectNewTrackType(val type: NewTrackType) : StudioAction
     data object MicPermissionGranted : StudioAction
     data object StopOverdubRecording : StudioAction

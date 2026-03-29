@@ -1,13 +1,21 @@
 package com.example.nightjar.ui.studio
 
 import com.example.nightjar.ui.components.NjButton
+import com.example.nightjar.ui.components.PressedBodyColor
+import com.example.nightjar.ui.components.RaisedBodyColor
+import com.example.nightjar.ui.components.collectIsPressedWithMinDuration
+import com.example.nightjar.ui.components.njGrain
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.GridOn
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Piano
 import androidx.compose.material3.Icon
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -31,6 +39,7 @@ import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Box
@@ -63,17 +72,23 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import android.view.HapticFeedbackConstants
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.lerp as lerpColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.ViewConfiguration
 import androidx.compose.ui.text.TextStyle
@@ -96,8 +111,11 @@ import com.example.nightjar.ui.theme.NjAmber
 import com.example.nightjar.ui.theme.NjLane
 import com.example.nightjar.ui.theme.NjSurface2
 import com.example.nightjar.ui.theme.NjMuted
+import com.example.nightjar.ui.theme.NjOutline
 import com.example.nightjar.ui.theme.NjTrackColors
+import androidx.compose.foundation.border
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import java.io.File
@@ -129,6 +147,7 @@ fun TimelinePanel(
     msPerDp: Float,
     isPlaying: Boolean,
     isRecording: Boolean = false,
+    isAddTrackDrawerOpen: Boolean = false,
     liveAmplitudes: FloatArray = FloatArray(0),
     recordingStartGlobalMs: Long? = null,
     recordingTargetTrackId: Long? = null,
@@ -540,6 +559,15 @@ fun TimelinePanel(
                 msPerDp = msPerDp,
                 timelineWidthDp = timelineWidthDp,
                 scrollState = scrollState
+            )
+        }
+
+        // Inline add-track row (hidden during recording)
+        if (!isRecording) {
+            AddTrackRow(
+                isDrawerOpen = isAddTrackDrawerOpen,
+                trackCount = tracks.size,
+                onAction = onAction
             )
         }
     }
@@ -1724,21 +1752,355 @@ private fun TrackHeader(
     }
 }
 
-/** Rounded placeholder box shown when the timeline has no tracks. */
+// ── Add-track row ──────────────────────────────────────────────────────
+
+/**
+ * Inline row at the bottom of the track list.
+ *
+ * Closed state: a full-width `+` button filling the header slot.
+ * Open state: the `+` slides right while Audio / MIDI / Drums buttons
+ * slide in from the left, forming one contiguous beveled strip.
+ * After a track is created the row plays an entrance animation:
+ * icon fades in, then the surface "raises" from pressed to raised.
+ */
 @Composable
-fun TimelinePlaceholder(message: String) {
-    Box(
+private fun AddTrackRow(
+    isDrawerOpen: Boolean,
+    trackCount: Int,
+    onAction: (StudioAction) -> Unit
+) {
+    val density = LocalDensity.current
+
+    // ── Entrance animation after a new track is added ──────────────
+    // Track count changes => a track was just added. Play raise-up anim.
+    val raiseProgress = remember { Animatable(1f) }
+    val iconAlpha = remember { Animatable(1f) }
+    val prevTrackCount = remember { mutableStateOf(trackCount) }
+
+    LaunchedEffect(trackCount) {
+        if (trackCount > prevTrackCount.value) {
+            // New track was added — play entrance animation
+            raiseProgress.snapTo(0f)
+            iconAlpha.snapTo(0f)
+            // Fade in icon
+            launch { iconAlpha.animateTo(1f, tween(180)) }
+            // Slight delay then raise the surface
+            delay(80)
+            raiseProgress.animateTo(1f, tween(250))
+        }
+        prevTrackCount.value = trackCount
+    }
+
+    // ── Slide animation ────────────────────────────────────────────
+    // 0f = closed (+ button at left edge), 1f = open (buttons visible)
+    val slideProgress = remember { Animatable(if (isDrawerOpen) 1f else 0f) }
+
+    LaunchedEffect(isDrawerOpen) {
+        val target = if (isDrawerOpen) 1f else 0f
+        slideProgress.animateTo(
+            target,
+            spring(
+                dampingRatio = 0.85f,
+                stiffness = 120f
+            )
+        )
+    }
+
+    // Compute the pixel width of the sliding content (3 buttons + gap)
+    val typeButtonWidthDp = TRACK_LANE_HEIGHT // Each button is square
+    val typeButtonCount = 3
+    val trayGapDp = 10.dp // space between type buttons and + button
+    val drawerWidthDp = typeButtonWidthDp * typeButtonCount + trayGapDp
+    // Extra width extending off the left screen edge so the tray
+    // feels like a physical rail, not a floating panel
+    val trayOverhangDp = 48.dp
+
+    val drawerWidthPx = with(density) { drawerWidthDp.toPx() }
+    val trayOverhangPx = with(density) { trayOverhangDp.toPx() }
+
+    // The + button stays "pressed in" while the drawer is open
+    val plusIsLatched = slideProgress.value > 0.01f
+
+    // Tray colors (hoisted outside draw scope)
+    val trayBorder = NjOutline
+    val traySurface = NjSurface2
+
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(200.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(NjLane.copy(alpha = 0.55f)),
+            .height(TRACK_LANE_HEIGHT)
+    ) {
+        // Clipped container: the tray slides within this
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .weight(1f)
+                .clipToBounds()
+        ) {
+            // The tray — one physical rail holding all buttons.
+            // The overhang keeps the left edge off-screen even when
+            // fully open, so the tray feels like it extends beyond
+            // the device edge rather than floating.
+            Row(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .offset(
+                        x = with(density) {
+                            ((-drawerWidthPx * (1f - slideProgress.value)) - trayOverhangPx).toDp()
+                        }
+                    )
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(traySurface)
+                    .border(1.dp, trayBorder, RoundedCornerShape(6.dp))
+                    .drawWithContent {
+                        drawContent()
+                        // Subtle bevel: light top-left, dark bottom-right
+                        val sw = 1.dp.toPx()
+                        drawLine(
+                            Color.White.copy(alpha = 0.07f),
+                            Offset(sw, sw / 2), Offset(size.width - sw, sw / 2), sw
+                        )
+                        drawLine(
+                            Color.White.copy(alpha = 0.04f),
+                            Offset(sw / 2, sw), Offset(sw / 2, size.height - sw), sw
+                        )
+                        drawLine(
+                            Color.Black.copy(alpha = 0.25f),
+                            Offset(sw, size.height - sw / 2),
+                            Offset(size.width - sw, size.height - sw / 2), sw
+                        )
+                        drawLine(
+                            Color.Black.copy(alpha = 0.12f),
+                            Offset(size.width - sw / 2, sw),
+                            Offset(size.width - sw / 2, size.height - sw), sw
+                        )
+                    },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Left overhang — always off-screen, makes tray feel infinite
+                Spacer(Modifier.width(trayOverhangDp))
+
+                // Type buttons (revealed as tray slides open)
+                AddTrackTypeButton(
+                    icon = Icons.Filled.Mic,
+                    label = "Audio",
+                    onClick = { onAction(StudioAction.SelectNewTrackType(NewTrackType.AUDIO_RECORDING)) }
+                )
+                AddTrackTypeButton(
+                    icon = Icons.Filled.Piano,
+                    label = "MIDI",
+                    onClick = { onAction(StudioAction.SelectNewTrackType(NewTrackType.MIDI_INSTRUMENT)) }
+                )
+                AddTrackTypeButton(
+                    icon = Icons.Filled.GridOn,
+                    label = "Drums",
+                    onClick = { onAction(StudioAction.SelectNewTrackType(NewTrackType.DRUM_SEQUENCER)) }
+                )
+
+                // Gap between type buttons and + button
+                Spacer(Modifier.width(trayGapDp))
+
+                // The + button (always visible on the tray surface)
+                AddTrackPlusButton(
+                    isLatched = plusIsLatched,
+                    raiseProgress = raiseProgress.value,
+                    iconAlpha = iconAlpha.value,
+                    onClick = { onAction(StudioAction.ToggleAddTrackDrawer) },
+                    modifier = Modifier
+                        .width(HEADER_WIDTH)
+                        .fillMaxHeight()
+                )
+            }
+        }
+    }
+}
+
+/** The `+` button that fills the header slot and toggles the drawer. */
+@Composable
+private fun AddTrackPlusButton(
+    isLatched: Boolean,
+    raiseProgress: Float,
+    iconAlpha: Float,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedWithMinDuration()
+    val view = LocalView.current
+    val shape = RoundedCornerShape(4.dp)
+
+    LaunchedEffect(interactionSource) {
+        interactionSource.interactions.collect { interaction ->
+            when (interaction) {
+                is PressInteraction.Press ->
+                    view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                is PressInteraction.Release ->
+                    view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+            }
+        }
+    }
+
+    val raisedBg = RaisedBodyColor
+    val pressedBg = PressedBodyColor
+    val sunkBg = lerpColor(pressedBg, raisedBg, raiseProgress)
+    val bgColor = when {
+        isPressed -> pressedBg
+        isLatched -> pressedBg
+        else -> sunkBg
+    }
+    val fgColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
+
+    Box(
+        modifier = modifier
+            .clip(shape)
+            .background(bgColor)
+            .njGrain(alpha = 0.04f)
+            .drawWithContent {
+                drawContent()
+                val sw = 1.dp.toPx()
+                val isSunk = isPressed || isLatched || raiseProgress < 1f
+                drawBevelEdges(sw, isSunk, raiseProgress)
+            }
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick
+            ),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = message,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+        Icon(
+            imageVector = Icons.Filled.Add,
+            contentDescription = "Add track",
+            tint = fgColor,
+            modifier = Modifier
+                .size(24.dp)
+                .alpha(iconAlpha)
+        )
+    }
+}
+
+/** Square beveled button with icon + label for the add-track drawer. */
+@Composable
+private fun AddTrackTypeButton(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedWithMinDuration()
+    val view = LocalView.current
+    val shape = RoundedCornerShape(4.dp)
+
+    LaunchedEffect(interactionSource) {
+        interactionSource.interactions.collect { interaction ->
+            when (interaction) {
+                is PressInteraction.Press ->
+                    view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                is PressInteraction.Release ->
+                    view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+            }
+        }
+    }
+
+    val bgColor = if (isPressed) PressedBodyColor else RaisedBodyColor
+    val fgColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
+
+    Box(
+        modifier = Modifier
+            .size(TRACK_LANE_HEIGHT)
+            .clip(shape)
+            .background(bgColor)
+            .njGrain(alpha = 0.04f)
+            .drawWithContent {
+                drawContent()
+                val sw = 1.dp.toPx()
+                drawBevelEdges(sw, isPressed, if (isPressed) 0f else 1f)
+            }
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = fgColor,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = fgColor
+            )
+        }
+    }
+}
+
+/**
+ * Shared bevel-edge drawing for add-track buttons.
+ * [isSunk] = true for pressed/latched state (inner shadow).
+ * [raiseFraction] blends between fully sunk (0) and fully raised (1)
+ * for the entrance animation.
+ */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawBevelEdges(
+    sw: Float,
+    isSunk: Boolean,
+    raiseFraction: Float
+) {
+    if (isSunk) {
+        // Inner shadow: dark top + left
+        drawRect(
+            brush = Brush.verticalGradient(
+                0f to Color.Black.copy(alpha = 0.18f),
+                0.35f to Color.Transparent
+            )
+        )
+        drawLine(
+            Color.Black.copy(alpha = 0.40f),
+            Offset(0f, sw / 2), Offset(size.width, sw / 2), sw * 1.5f
+        )
+        drawLine(
+            Color.Black.copy(alpha = 0.20f),
+            Offset(sw / 2, 0f), Offset(sw / 2, size.height), sw
+        )
+        // Subtle light bottom + right (rim catch)
+        drawLine(
+            Color.White.copy(alpha = 0.06f),
+            Offset(0f, size.height - sw / 2), Offset(size.width, size.height - sw / 2), sw
+        )
+        drawLine(
+            Color.White.copy(alpha = 0.04f),
+            Offset(size.width - sw / 2, 0f), Offset(size.width - sw / 2, size.height), sw
+        )
+    } else {
+        // Raised: light top + left, dark bottom + right
+        // Blend alpha by raiseFraction for entrance animation
+        val topAlpha = 0.09f * raiseFraction
+        val leftAlpha = 0.05f * raiseFraction
+        val bottomAlpha = 0.35f * raiseFraction
+        val rightAlpha = 0.18f * raiseFraction
+        drawLine(
+            Color.White.copy(alpha = topAlpha),
+            Offset(0f, sw / 2), Offset(size.width, sw / 2), sw
+        )
+        drawLine(
+            Color.White.copy(alpha = leftAlpha),
+            Offset(sw / 2, 0f), Offset(sw / 2, size.height), sw
+        )
+        drawLine(
+            Color.Black.copy(alpha = bottomAlpha),
+            Offset(0f, size.height - sw / 2), Offset(size.width, size.height - sw / 2), sw
+        )
+        drawLine(
+            Color.Black.copy(alpha = rightAlpha),
+            Offset(size.width - sw / 2, 0f), Offset(size.width - sw / 2, size.height), sw
         )
     }
 }

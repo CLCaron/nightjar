@@ -191,14 +191,11 @@ class StudioViewModel @Inject constructor(
         when (action) {
             StudioAction.NavigateBack -> navigateBack()
             is StudioAction.Load -> load(action.ideaId)
-            StudioAction.ShowAddTrackSheet -> {
-                _state.update { it.copy(showAddTrackSheet = true) }
-            }
-            StudioAction.DismissAddTrackSheet -> {
-                _state.update { it.copy(showAddTrackSheet = false) }
+            StudioAction.ToggleAddTrackDrawer -> {
+                _state.update { it.copy(isAddTrackDrawerOpen = !it.isAddTrackDrawerOpen) }
             }
             is StudioAction.SelectNewTrackType -> {
-                _state.update { it.copy(showAddTrackSheet = false) }
+                _state.update { it.copy(isAddTrackDrawerOpen = false) }
                 when (action.type) {
                     NewTrackType.AUDIO_RECORDING -> {
                         viewModelScope.launch {

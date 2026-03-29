@@ -27,7 +27,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -183,17 +182,6 @@ fun StudioScreen(
     Scaffold(
         containerColor = NjBg,
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
-        floatingActionButton = {
-            if (!state.isLoading && state.errorMessage == null && !state.isRecording) {
-                FloatingActionButton(
-                    onClick = { vm.onAction(StudioAction.ShowAddTrackSheet) },
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
-                ) {
-                    Text("+", style = MaterialTheme.typography.titleLarge)
-                }
-            }
-        }
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             Column(
@@ -241,58 +229,55 @@ fun StudioScreen(
                     }
                 )
 
-                if (state.tracks.isEmpty() && !state.isRecording) {
-                    TimelinePlaceholder("No tracks yet.")
-                } else {
-                    val displayPositionMs =
-                        if (isScrubbing) scrubMs else state.globalPositionMs
+                val displayPositionMs =
+                    if (isScrubbing) scrubMs else state.globalPositionMs
 
-                    TimelinePanel(
-                        tracks = state.tracks,
-                        globalPositionMs = displayPositionMs,
-                        cursorPositionMs = state.cursorPositionMs,
-                        totalDurationMs = state.totalDurationMs,
-                        msPerDp = state.msPerDp,
-                        isPlaying = state.isPlaying,
-                        isRecording = state.isRecording,
-                        liveAmplitudes = state.liveAmplitudes,
-                        recordingStartGlobalMs = state.recordingStartGlobalMs,
-                        recordingTargetTrackId = state.recordingTargetTrackId,
-                        recordingElapsedMs = state.recordingElapsedMs,
-                        dragState = state.dragState,
-                        trimState = state.trimState,
-                        loopStartMs = state.loopStartMs,
-                        loopEndMs = state.loopEndMs,
-                        isLoopEnabled = state.isLoopEnabled,
-                        expandedTrackIds = state.expandedTrackIds,
-                        soloedTrackIds = state.soloedTrackIds,
-                        armedTrackId = state.armedTrackId,
-                        audioClips = state.audioClips,
-                        expandedAudioClipId = state.expandedAudioClipId,
-                        audioClipDragState = state.audioClipDragState,
-                        audioClipTrimState = state.audioClipTrimState,
-                        drumPatterns = state.drumPatterns,
-                        midiTracks = state.midiTracks,
-                        clipDragState = state.clipDragState,
-                        midiClipDragState = state.midiClipDragState,
-                        expandedClipState = state.expandedClipState,
-                        bpm = state.bpm,
-                        timeSignatureNumerator = state.timeSignatureNumerator,
-                        timeSignatureDenominator = state.timeSignatureDenominator,
-                        isSnapEnabled = state.isSnapEnabled,
-                        gridResolution = state.gridResolution,
-                        getAudioFile = vm::getAudioFile,
-                        onAction = vm::onAction,
-                        onScrub = { newMs ->
-                            isScrubbing = true
-                            scrubMs = newMs
-                        },
-                        onScrubFinished = { finalMs ->
-                            isScrubbing = false
-                            vm.onAction(StudioAction.SeekFinished(finalMs))
-                        }
-                    )
-                }
+                TimelinePanel(
+                    tracks = state.tracks,
+                    globalPositionMs = displayPositionMs,
+                    cursorPositionMs = state.cursorPositionMs,
+                    totalDurationMs = state.totalDurationMs,
+                    msPerDp = state.msPerDp,
+                    isPlaying = state.isPlaying,
+                    isRecording = state.isRecording,
+                    isAddTrackDrawerOpen = state.isAddTrackDrawerOpen,
+                    liveAmplitudes = state.liveAmplitudes,
+                    recordingStartGlobalMs = state.recordingStartGlobalMs,
+                    recordingTargetTrackId = state.recordingTargetTrackId,
+                    recordingElapsedMs = state.recordingElapsedMs,
+                    dragState = state.dragState,
+                    trimState = state.trimState,
+                    loopStartMs = state.loopStartMs,
+                    loopEndMs = state.loopEndMs,
+                    isLoopEnabled = state.isLoopEnabled,
+                    expandedTrackIds = state.expandedTrackIds,
+                    soloedTrackIds = state.soloedTrackIds,
+                    armedTrackId = state.armedTrackId,
+                    audioClips = state.audioClips,
+                    expandedAudioClipId = state.expandedAudioClipId,
+                    audioClipDragState = state.audioClipDragState,
+                    audioClipTrimState = state.audioClipTrimState,
+                    drumPatterns = state.drumPatterns,
+                    midiTracks = state.midiTracks,
+                    clipDragState = state.clipDragState,
+                    midiClipDragState = state.midiClipDragState,
+                    expandedClipState = state.expandedClipState,
+                    bpm = state.bpm,
+                    timeSignatureNumerator = state.timeSignatureNumerator,
+                    timeSignatureDenominator = state.timeSignatureDenominator,
+                    isSnapEnabled = state.isSnapEnabled,
+                    gridResolution = state.gridResolution,
+                    getAudioFile = vm::getAudioFile,
+                    onAction = vm::onAction,
+                    onScrub = { newMs ->
+                        isScrubbing = true
+                        scrubMs = newMs
+                    },
+                    onScrubFinished = { finalMs ->
+                        isScrubbing = false
+                        vm.onAction(StudioAction.SeekFinished(finalMs))
+                    }
+                )
 
                 Spacer(Modifier.height(80.dp))
             }
@@ -331,13 +316,6 @@ fun StudioScreen(
                 }
             }
         }
-    }
-
-    if (state.showAddTrackSheet) {
-        AddTrackBottomSheet(
-            onSelect = { type -> vm.onAction(StudioAction.SelectNewTrackType(type)) },
-            onDismiss = { vm.onAction(StudioAction.DismissAddTrackSheet) }
-        )
     }
 
     if (state.showInstrumentPickerForTrackId != null) {
