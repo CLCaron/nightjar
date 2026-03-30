@@ -35,6 +35,7 @@ fun NjTopBar(
     title: String,
     onBack: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    showDivider: Boolean = true,
     trailing: @Composable (() -> Unit)? = null
 ) {
     val starlight = NjStarlight
@@ -69,28 +70,30 @@ fun NjTopBar(
             }
         }
 
-        // Gradient fade divider
-        Spacer(Modifier.height(10.dp))
-        Canvas(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(1.dp)
-        ) {
-            drawLine(
-                brush = Brush.horizontalGradient(
-                    colors = listOf(
-                        Color.Transparent,
-                        starlight.copy(alpha = 0.12f),
-                        starlight.copy(alpha = 0.12f),
-                        Color.Transparent
+        if (showDivider) {
+            // Gradient fade divider
+            Spacer(Modifier.height(10.dp))
+            Canvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+            ) {
+                drawLine(
+                    brush = Brush.horizontalGradient(
+                        colors = listOf(
+                            Color.Transparent,
+                            starlight.copy(alpha = 0.12f),
+                            starlight.copy(alpha = 0.12f),
+                            Color.Transparent
+                        ),
+                        startX = 0f,
+                        endX = size.width
                     ),
-                    startX = 0f,
-                    endX = size.width
-                ),
-                start = Offset(0f, 0f),
-                end = Offset(size.width, 0f),
-                strokeWidth = size.height
-            )
+                    start = Offset(0f, 0f),
+                    end = Offset(size.width, 0f),
+                    strokeWidth = size.height
+                )
+            }
         }
     }
 }

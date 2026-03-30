@@ -172,7 +172,7 @@ data class StudioUiState(
     val countInBars: Int = 0,
     val isCountingIn: Boolean = false,
     val lastBeatFrame: Long = -1L,
-    val isMetronomeSettingsOpen: Boolean = false,
+    val isControlsDrawerOpen: Boolean = false,
     val cursorPositionMs: Long = 0L,
     val returnToCursor: Boolean = true
 ) {
@@ -243,7 +243,7 @@ data class StudioUiState(
                 countInBars == other.countInBars &&
                 isCountingIn == other.isCountingIn &&
                 lastBeatFrame == other.lastBeatFrame &&
-                isMetronomeSettingsOpen == other.isMetronomeSettingsOpen &&
+                isControlsDrawerOpen == other.isControlsDrawerOpen &&
                 cursorPositionMs == other.cursorPositionMs &&
                 returnToCursor == other.returnToCursor
     }
@@ -301,7 +301,7 @@ data class StudioUiState(
         result = 31 * result + countInBars.hashCode()
         result = 31 * result + isCountingIn.hashCode()
         result = 31 * result + lastBeatFrame.hashCode()
-        result = 31 * result + isMetronomeSettingsOpen.hashCode()
+        result = 31 * result + isControlsDrawerOpen.hashCode()
         result = 31 * result + cursorPositionMs.hashCode()
         result = 31 * result + returnToCursor.hashCode()
         return result
@@ -452,7 +452,7 @@ sealed interface StudioAction {
     data object ToggleMetronome : StudioAction
     data class SetMetronomeVolume(val volume: Float) : StudioAction
     data class SetCountInBars(val bars: Int) : StudioAction
-    data object ToggleMetronomeSettings : StudioAction
+    data object ToggleControlsDrawer : StudioAction
 
     // Inline MiniPianoRoll
     data class SelectMidiClip(val trackId: Long, val clipId: Long) : StudioAction

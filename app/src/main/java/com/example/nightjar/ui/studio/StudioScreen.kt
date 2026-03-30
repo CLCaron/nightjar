@@ -1,7 +1,6 @@
 package com.example.nightjar.ui.studio
 
 import com.example.nightjar.audio.AudioLatencyEstimator
-import com.example.nightjar.audio.MusicalTimeConverter
 import com.example.nightjar.ui.components.NjButton
 import android.Manifest
 import android.content.pm.PackageManager
@@ -75,8 +74,9 @@ import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.SkipPrevious
 import com.example.nightjar.ui.components.NjIcons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Repeat
-import androidx.compose.material.icons.filled.Settings
 import com.example.nightjar.ui.theme.NjMetronomeLed
 import com.example.nightjar.ui.theme.NjMuted
 import com.example.nightjar.ui.theme.NjError
@@ -194,6 +194,7 @@ fun StudioScreen(
                 NjTopBar(
                     title = state.ideaTitle.ifBlank { "Studio" },
                     onBack = { vm.onAction(StudioAction.NavigateBack) },
+                    showDivider = false,
                     trailing = {
                         NjButton(
                             text = "Setup",
@@ -202,6 +203,8 @@ fun StudioScreen(
                         )
                     }
                 )
+
+                HardwareGroove(fraction = 0.92f)
 
                 state.errorMessage?.let { msg ->
                     Text(msg, color = MaterialTheme.colorScheme.error)
@@ -291,23 +294,6 @@ fun StudioScreen(
                         .padding(top = 8.dp, bottom = 4.dp)
                 ) {
                     TransportAndControls(state = state, onAction = vm::onAction)
-                    Spacer(Modifier.height(4.dp))
-                    val dividerColor = NjOutline
-                    Canvas(Modifier.fillMaxWidth().height(1.dp)) {
-                        drawLine(
-                            brush = Brush.horizontalGradient(
-                                listOf(
-                                    Color.Transparent,
-                                    dividerColor.copy(alpha = 0.5f),
-                                    dividerColor.copy(alpha = 0.5f),
-                                    Color.Transparent
-                                )
-                            ),
-                            start = Offset(0f, 0f),
-                            end = Offset(size.width, 0f),
-                            strokeWidth = size.height
-                        )
-                    }
                 }
             }
         }
@@ -423,121 +409,442 @@ private fun TransportAndControls(
     onAction: (StudioAction) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        val hasTracksAndNotRecording = state.tracks.isNotEmpty() && !state.isRecording
+
+        // --- Responsive transport: wide inlines LCD, narrow uses two rows ---
+        androidx.compose.foundation.layout.BoxWithConstraints(
+            modifier = Modifier.fillMaxWidth()
         ) {
-            val hasTracksAndNotRecording = state.tracks.isNotEmpty() && !state.isRecording
+            val isWide = maxWidth >= 520.dp
 
-            // Loop + Clear rocker pill (left) -- always visible, dimmed when disabled
-            Row(
-                modifier = Modifier
-                    .height(IntrinsicSize.Min)
-                    .alpha(if (hasTracksAndNotRecording) 1f else 0.35f),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                NjButton(
-                    text = "Loop",
-                    icon = Icons.Filled.Repeat,
-                    onClick = { if (hasTracksAndNotRecording) onAction(StudioAction.ToggleLoop) },
-                    isActive = state.isLoopEnabled,
-                    ledColor = NjAmber,
-                )
-
-                Box(
-                    Modifier
-                        .width(1.dp)
-                        .fillMaxHeight()
-                        .background(NjOutline)
-                )
-
-                NjButton(
-                    text = "Clear",
-                    icon = Icons.Filled.Close,
-                    onClick = {
-                        if (hasTracksAndNotRecording && state.hasLoopRegion) {
-                            onAction(StudioAction.ClearLoopRegion)
-                        }
-                    },
-                    isActive = !state.hasLoopRegion,
-                    ledColor = NjMuted2,
-                    activeGlow = false,
-                )
-            }
-
-            Spacer(Modifier.weight(1f))
-
-            // Transport cluster (right): Restart, Play, Rec
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Restart -- always visible, dimmed when no tracks or recording
-                NjButton(
-                    text = "Restart",
-                    icon = Icons.Filled.SkipPrevious,
-                    onClick = { if (hasTracksAndNotRecording) onAction(StudioAction.RestartPlayback) },
-                    modifier = Modifier.alpha(if (hasTracksAndNotRecording) 1f else 0.35f),
-                    textColor = NjLedGreen.copy(alpha = 0.5f),
-                )
-
-                // Play / Pause -- always visible, dimmed when no tracks or recording
-                NjButton(
-                    text = "Play",
-                    icon = NjIcons.PlayPause,
-                    onClick = {
-                        if (hasTracksAndNotRecording) {
-                            if (state.isPlaying) {
-                                onAction(StudioAction.Pause)
-                            } else {
-                                onAction(StudioAction.Play)
-                            }
-                        }
-                    },
-                    isActive = state.isPlaying,
-                    ledColor = NjLedGreen,
-                    modifier = Modifier.alpha(if (hasTracksAndNotRecording) 1f else 0.35f),
-                )
-
-                // Record button -- coral LED
-                NjButton(
-                    text = "Rec",
-                    icon = Icons.Filled.FiberManualRecord,
-                    onClick = {
-                        if (state.isRecording) {
-                            onAction(StudioAction.StopRecording)
-                        } else {
-                            onAction(StudioAction.StartRecording)
-                        }
-                    },
-                    isActive = state.isRecording,
-                    ledColor = NjRecordCoral,
-                )
+            if (isWide) {
+                // Wide layout: [Loop|Clear]  [LCD .. Disarm (Delete)]  [Restart Play Rec]
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    LoopClearPill(hasTracksAndNotRecording, state, onAction)
+                    // Center: LCD + Disarm + Delete fill available space
+                    StudioStatusLcd(
+                        state = state,
+                        onAction = onAction,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TransportCluster(hasTracksAndNotRecording, state, onAction)
+                }
+            } else {
+                // Narrow layout: transport row, then LCD row beneath
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        LoopClearPill(hasTracksAndNotRecording, state, onAction)
+                        Spacer(Modifier.weight(1f))
+                        TransportCluster(hasTracksAndNotRecording, state, onAction)
+                    }
+                    StudioStatusLcd(state = state, onAction = onAction)
+                }
             }
         }
 
-        StudioStatusLcd(state = state, onAction = onAction)
+        // --- Drawer toggle grip (always visible) ---
+        DrawerToggleGrip(
+            isOpen = state.isControlsDrawerOpen,
+            onClick = { onAction(StudioAction.ToggleControlsDrawer) }
+        )
 
-        // Project controls: time sig, BPM, snap, metronome, position
-        if (!state.isLoading && state.errorMessage == null) {
-            ProjectControlsBar(
-                bpm = state.bpm,
-                timeSignatureNumerator = state.timeSignatureNumerator,
-                timeSignatureDenominator = state.timeSignatureDenominator,
-                isSnapEnabled = state.isSnapEnabled,
-                gridResolution = state.gridResolution,
-                globalPositionMs = state.globalPositionMs,
-                isMetronomeEnabled = state.isMetronomeEnabled,
-                isMetronomeSettingsOpen = state.isMetronomeSettingsOpen,
-                metronomeVolume = state.metronomeVolume,
-                countInBars = state.countInBars,
-                lastBeatFrame = state.lastBeatFrame,
-                isPlaying = state.isPlaying,
-                onAction = onAction
+        // --- Controls drawer ---
+        androidx.compose.animation.AnimatedVisibility(
+            visible = state.isControlsDrawerOpen,
+            enter = androidx.compose.animation.expandVertically(
+                animationSpec = androidx.compose.animation.core.spring(
+                    dampingRatio = 0.75f,
+                    stiffness = androidx.compose.animation.core.Spring.StiffnessMedium
+                ),
+                expandFrom = Alignment.Top
+            ) + androidx.compose.animation.fadeIn(
+                animationSpec = androidx.compose.animation.core.tween(200, delayMillis = 80)
+            ),
+            exit = androidx.compose.animation.fadeOut(
+                animationSpec = androidx.compose.animation.core.tween(150)
+            ) + androidx.compose.animation.shrinkVertically(
+                animationSpec = androidx.compose.animation.core.spring(
+                    dampingRatio = 0.75f,
+                    stiffness = androidx.compose.animation.core.Spring.StiffnessMedium
+                )
+            )
+        ) {
+            ControlsDrawer(state = state, onAction = onAction)
+        }
+    }
+}
+
+/** Loop + Clear rocker pill (left side of transport). */
+@Composable
+private fun LoopClearPill(
+    hasTracksAndNotRecording: Boolean,
+    state: StudioUiState,
+    onAction: (StudioAction) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .height(IntrinsicSize.Min)
+            .alpha(if (hasTracksAndNotRecording) 1f else 0.35f),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        NjButton(
+            text = "Loop",
+            icon = Icons.Filled.Repeat,
+            onClick = { if (hasTracksAndNotRecording) onAction(StudioAction.ToggleLoop) },
+            isActive = state.isLoopEnabled,
+            ledColor = NjAmber,
+        )
+
+        Box(
+            Modifier
+                .width(1.dp)
+                .fillMaxHeight()
+                .background(NjOutline)
+        )
+
+        NjButton(
+            text = "Clear",
+            icon = Icons.Filled.Close,
+            onClick = {
+                if (hasTracksAndNotRecording && state.hasLoopRegion) {
+                    onAction(StudioAction.ClearLoopRegion)
+                }
+            },
+            isActive = !state.hasLoopRegion,
+            ledColor = NjMuted2,
+            activeGlow = false,
+        )
+    }
+}
+
+/** Transport cluster (right side): Restart, Play, Rec. */
+@Composable
+private fun TransportCluster(
+    hasTracksAndNotRecording: Boolean,
+    state: StudioUiState,
+    onAction: (StudioAction) -> Unit
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        NjButton(
+            text = "Restart",
+            icon = Icons.Filled.SkipPrevious,
+            onClick = { if (hasTracksAndNotRecording) onAction(StudioAction.RestartPlayback) },
+            modifier = Modifier.alpha(if (hasTracksAndNotRecording) 1f else 0.35f),
+            textColor = NjLedGreen.copy(alpha = 0.5f),
+        )
+
+        NjButton(
+            text = "Play",
+            icon = NjIcons.PlayPause,
+            onClick = {
+                if (hasTracksAndNotRecording) {
+                    if (state.isPlaying) {
+                        onAction(StudioAction.Pause)
+                    } else {
+                        onAction(StudioAction.Play)
+                    }
+                }
+            },
+            isActive = state.isPlaying,
+            ledColor = NjLedGreen,
+            modifier = Modifier.alpha(if (hasTracksAndNotRecording) 1f else 0.35f),
+        )
+
+        NjButton(
+            text = "Rec",
+            icon = Icons.Filled.FiberManualRecord,
+            onClick = {
+                if (state.isRecording) {
+                    onAction(StudioAction.StopRecording)
+                } else {
+                    onAction(StudioAction.StartRecording)
+                }
+            },
+            isActive = state.isRecording,
+            ledColor = NjRecordCoral,
+        )
+    }
+}
+
+/**
+ * Routed hardware groove -- two-line channel (dark shadow on top, light catch
+ * on bottom) matching the Record screen's faceplate aesthetic. Horizontal
+ * gradient fades at the edges so it doesn't feel stamped on.
+ *
+ * When used standalone (e.g. below the title bar), wrap in a centered container
+ * and pass a width fraction. When used inside a weighted Row (e.g. flanking a
+ * button), pass `fraction = 1f` and let the modifier control width.
+ *
+ * @param fraction Width fraction of the canvas relative to its container.
+ */
+@Composable
+private fun HardwareGroove(
+    modifier: Modifier = Modifier,
+    fraction: Float = 0.7f
+) {
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxWidth(fraction).height(2.dp)) {
+            val darkBrush = Brush.horizontalGradient(
+                colors = listOf(
+                    Color.Transparent,
+                    Color.Black.copy(alpha = 0.50f),
+                    Color.Black.copy(alpha = 0.50f),
+                    Color.Transparent
+                )
+            )
+            val lightBrush = Brush.horizontalGradient(
+                colors = listOf(
+                    Color.Transparent,
+                    Color.White.copy(alpha = 0.07f),
+                    Color.White.copy(alpha = 0.07f),
+                    Color.Transparent
+                )
+            )
+            drawLine(darkBrush, Offset(0f, 0f), Offset(size.width, 0f), size.height / 2)
+            drawLine(lightBrush, Offset(0f, size.height), Offset(size.width, size.height), size.height / 2)
+        }
+    }
+}
+
+/**
+ * Drawer toggle: a small NjButton with a chevron icon that latches when the
+ * drawer is open, with a hardware groove running beneath it.
+ */
+@Composable
+private fun DrawerToggleGrip(
+    isOpen: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        NjButton(
+            text = "",
+            icon = if (isOpen) Icons.Filled.KeyboardArrowUp
+                   else Icons.Filled.KeyboardArrowDown,
+            onClick = onClick,
+            isActive = isOpen,
+            ledColor = NjAmber,
+            activeGlow = false,
+        )
+
+        Spacer(Modifier.height(6.dp))
+        HardwareGroove(fraction = 0.92f)
+    }
+}
+
+/**
+ * Controls drawer: timing, metronome, and grid controls.
+ *
+ * Wide (landscape): single row -- [4/4] [-BPM+] [Met Vol CI] ... [Snap 1/16]
+ * Narrow: two rows -- timing+grid on row 1, metronome on row 2.
+ * Very narrow (<340dp): three rows -- timing, grid, metronome each on own row.
+ */
+@Composable
+private fun ControlsDrawer(
+    state: StudioUiState,
+    onAction: (StudioAction) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(
+                NjBg.copy(alpha = 0.6f),
+                RoundedCornerShape(6.dp)
+            )
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        androidx.compose.foundation.layout.BoxWithConstraints(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            when {
+                // Wide (landscape): everything on one row
+                maxWidth >= 520.dp -> {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TimingCluster(state, onAction)
+                        MetronomeRow(state = state, onAction = onAction)
+                        Spacer(Modifier.weight(1f))
+                        GridCluster(state, onAction)
+                    }
+                }
+                // Very narrow: split into three rows
+                maxWidth < 340.dp -> {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        TimingCluster(state, onAction)
+                        GridCluster(state, onAction)
+                        MetronomeRow(state = state, onAction = onAction)
+                    }
+                }
+                // Normal portrait: timing+grid row, then metronome row
+                else -> {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            TimingCluster(state, onAction)
+                            Spacer(Modifier.weight(1f))
+                            GridCluster(state, onAction)
+                        }
+                        MetronomeRow(state = state, onAction = onAction)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Time signature button + BPM [-/display/+]. */
+@Composable
+private fun TimingCluster(
+    state: StudioUiState,
+    onAction: (StudioAction) -> Unit
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Time signature -- cycle through presets
+        val currentSig = state.timeSignatureNumerator to state.timeSignatureDenominator
+        NjButton(
+            text = "${state.timeSignatureNumerator}/${state.timeSignatureDenominator}",
+            onClick = {
+                val idx = TIME_SIGNATURE_PRESETS.indexOf(currentSig)
+                val next = TIME_SIGNATURE_PRESETS[(idx + 1) % TIME_SIGNATURE_PRESETS.size]
+                onAction(StudioAction.SetTimeSignature(next.first, next.second))
+            },
+            textColor = NjAmber.copy(alpha = 0.8f)
+        )
+
+        // BPM with +/- buttons
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            NjButton(
+                text = "-",
+                onClick = { onAction(StudioAction.SetBpm(state.bpm - 1.0)) },
+                textColor = NjAmber.copy(alpha = 0.7f)
+            )
+            Text(
+                text = "${state.bpm.toInt()} BPM",
+                style = MaterialTheme.typography.labelMedium,
+                color = NjAmber.copy(alpha = 0.8f),
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
+            NjButton(
+                text = "+",
+                onClick = { onAction(StudioAction.SetBpm(state.bpm + 1.0)) },
+                textColor = NjAmber.copy(alpha = 0.7f)
             )
         }
+    }
+}
+
+/** Snap toggle + Grid Resolution cycle button. */
+@Composable
+private fun GridCluster(
+    state: StudioUiState,
+    onAction: (StudioAction) -> Unit
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        NjButton(
+            text = "Snap",
+            onClick = { onAction(StudioAction.ToggleSnap) },
+            isActive = state.isSnapEnabled,
+            ledColor = NjAmber,
+            textColor = NjMuted,
+        )
+
+        // Grid resolution -- cycle through presets
+        NjButton(
+            text = "1/${state.gridResolution}",
+            onClick = {
+                val idx = GRID_RESOLUTION_PRESETS.indexOf(state.gridResolution)
+                val next = GRID_RESOLUTION_PRESETS[(idx + 1) % GRID_RESOLUTION_PRESETS.size]
+                onAction(StudioAction.SetGridResolution(next))
+            },
+            textColor = NjAmber.copy(alpha = 0.8f)
+        )
+    }
+}
+
+/** Metronome toggle + volume knob + count-in cycle button. */
+@Composable
+private fun MetronomeRow(
+    state: StudioUiState,
+    onAction: (StudioAction) -> Unit
+) {
+    // Beat pulse animation: scale up briefly when a new beat is detected
+    val beatScale = remember { androidx.compose.animation.core.Animatable(1f) }
+    LaunchedEffect(state.lastBeatFrame) {
+        if (state.lastBeatFrame >= 0 && state.isMetronomeEnabled && state.isPlaying) {
+            beatScale.snapTo(1.3f)
+            beatScale.animateTo(
+                1f,
+                animationSpec = androidx.compose.animation.core.tween(
+                    durationMillis = 150,
+                    easing = androidx.compose.animation.core.FastOutSlowInEasing
+                )
+            )
+        }
+    }
+
+    val countInOptions = listOf(0, 1, 2, 4)
+
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        NjButton(
+            text = "Met",
+            onClick = { onAction(StudioAction.ToggleMetronome) },
+            isActive = state.isMetronomeEnabled,
+            ledColor = NjMetronomeLed,
+            textColor = NjMuted,
+            ledScale = beatScale.value
+        )
+
+        com.example.nightjar.ui.components.NjKnob(
+            value = state.metronomeVolume,
+            onValueChange = { onAction(StudioAction.SetMetronomeVolume(it)) },
+            knobSize = 36.dp,
+            label = "Vol"
+        )
+
+        NjButton(
+            text = if (state.countInBars == 0) "No CI" else "${state.countInBars} Bar",
+            onClick = {
+                val idx = countInOptions.indexOf(state.countInBars)
+                val next = countInOptions[(idx + 1) % countInOptions.size]
+                onAction(StudioAction.SetCountInBars(next))
+            },
+            textColor = NjMetronomeLed.copy(alpha = 0.8f)
+        )
     }
 }
 
@@ -920,220 +1227,3 @@ private val TIME_SIGNATURE_PRESETS = listOf(
 
 private val GRID_RESOLUTION_PRESETS = listOf(4, 8, 16, 32)
 
-/**
- * Compact project controls bar: time signature, BPM, snap toggle, grid resolution, position readout.
- * Sits between the title and the timeline.
- */
-@Composable
-private fun ProjectControlsBar(
-    bpm: Double,
-    timeSignatureNumerator: Int,
-    timeSignatureDenominator: Int,
-    isSnapEnabled: Boolean,
-    gridResolution: Int,
-    globalPositionMs: Long,
-    isMetronomeEnabled: Boolean,
-    isMetronomeSettingsOpen: Boolean,
-    metronomeVolume: Float,
-    countInBars: Int,
-    lastBeatFrame: Long,
-    isPlaying: Boolean,
-    onAction: (StudioAction) -> Unit
-) {
-    val position = remember(globalPositionMs, bpm, timeSignatureNumerator, timeSignatureDenominator) {
-        MusicalTimeConverter.msToPosition(
-            globalPositionMs, bpm, timeSignatureNumerator, timeSignatureDenominator
-        )
-    }
-
-    Column {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    NjBg.copy(alpha = 0.6f),
-                    RoundedCornerShape(6.dp)
-                )
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Time signature picker -- cycle through presets on tap
-            val currentSig = timeSignatureNumerator to timeSignatureDenominator
-            NjButton(
-                text = "$timeSignatureNumerator/$timeSignatureDenominator",
-                onClick = {
-                    val idx = TIME_SIGNATURE_PRESETS.indexOf(currentSig)
-                    val next = TIME_SIGNATURE_PRESETS[(idx + 1) % TIME_SIGNATURE_PRESETS.size]
-                    onAction(StudioAction.SetTimeSignature(next.first, next.second))
-                },
-                textColor = NjAmber.copy(alpha = 0.8f)
-            )
-
-            // BPM with +/- buttons
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                NjButton(
-                    text = "-",
-                    onClick = { onAction(StudioAction.SetBpm(bpm - 1.0)) },
-                    textColor = NjAmber.copy(alpha = 0.7f)
-                )
-                Text(
-                    text = "${bpm.toInt()} BPM",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = NjAmber.copy(alpha = 0.8f),
-                    modifier = Modifier.padding(horizontal = 4.dp)
-                )
-                NjButton(
-                    text = "+",
-                    onClick = { onAction(StudioAction.SetBpm(bpm + 1.0)) },
-                    textColor = NjAmber.copy(alpha = 0.7f)
-                )
-            }
-
-            // Snap toggle
-            NjButton(
-                text = "Snap",
-                onClick = { onAction(StudioAction.ToggleSnap) },
-                isActive = isSnapEnabled,
-                ledColor = NjAmber,
-                textColor = NjMuted,
-            )
-
-            // Metronome + Gear rocker pill
-            MetronomeButtonPill(
-                isEnabled = isMetronomeEnabled,
-                isSettingsOpen = isMetronomeSettingsOpen,
-                lastBeatFrame = lastBeatFrame,
-                isPlaying = isPlaying,
-                onAction = onAction
-            )
-
-            // Push position to the right
-            Spacer(Modifier.weight(1f))
-
-            // Position readout
-            Text(
-                text = position.format(),
-                style = MaterialTheme.typography.labelMedium,
-                color = NjMuted.copy(alpha = 0.7f)
-            )
-        }
-
-        // Metronome settings drawer
-        androidx.compose.animation.AnimatedVisibility(
-            visible = isMetronomeSettingsOpen,
-            enter = androidx.compose.animation.expandVertically(),
-            exit = androidx.compose.animation.shrinkVertically()
-        ) {
-            MetronomeSettingsDrawer(
-                volume = metronomeVolume,
-                countInBars = countInBars,
-                onAction = onAction
-            )
-        }
-    }
-}
-
-/** Metronome + Gear rocker pill pair (matches Loop/Clear pattern). */
-@Composable
-private fun MetronomeButtonPill(
-    isEnabled: Boolean,
-    isSettingsOpen: Boolean,
-    lastBeatFrame: Long,
-    isPlaying: Boolean,
-    onAction: (StudioAction) -> Unit
-) {
-    // Beat pulse animation: scale up briefly when a new beat is detected
-    val beatScale = remember { androidx.compose.animation.core.Animatable(1f) }
-    LaunchedEffect(lastBeatFrame) {
-        if (lastBeatFrame >= 0 && isEnabled && isPlaying) {
-            beatScale.snapTo(1.3f)
-            beatScale.animateTo(
-                1f,
-                animationSpec = androidx.compose.animation.core.tween(
-                    durationMillis = 150,
-                    easing = androidx.compose.animation.core.FastOutSlowInEasing
-                )
-            )
-        }
-    }
-
-    Row(
-        modifier = Modifier.height(IntrinsicSize.Min),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        NjButton(
-            text = "Met",
-            onClick = { onAction(StudioAction.ToggleMetronome) },
-            isActive = isEnabled,
-            ledColor = NjMetronomeLed,
-            textColor = NjMuted,
-            ledScale = beatScale.value
-        )
-
-        Box(
-            Modifier
-                .width(1.dp)
-                .fillMaxHeight()
-                .background(NjOutline)
-        )
-
-        NjButton(
-            text = "Cfg",
-            icon = Icons.Filled.Settings,
-            onClick = { onAction(StudioAction.ToggleMetronomeSettings) },
-            isActive = isSettingsOpen,
-            ledColor = NjMuted2,
-            activeGlow = false
-        )
-    }
-}
-
-/** Compact settings drawer for metronome: volume knob + count-in selector. */
-@Composable
-private fun MetronomeSettingsDrawer(
-    volume: Float,
-    countInBars: Int,
-    onAction: (StudioAction) -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(
-                NjBg.copy(alpha = 0.8f),
-                RoundedCornerShape(bottomStart = 6.dp, bottomEnd = 6.dp)
-            )
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // Volume knob
-        com.example.nightjar.ui.components.NjKnob(
-            value = volume,
-            onValueChange = { onAction(StudioAction.SetMetronomeVolume(it)) },
-            knobSize = 36.dp,
-            label = "Vol"
-        )
-
-        // Count-in selector: cycle through 0/1/2/4
-        val countInOptions = listOf(0, 1, 2, 4)
-        NjButton(
-            text = if (countInBars == 0) "No CI" else "${countInBars} Bar",
-            onClick = {
-                val idx = countInOptions.indexOf(countInBars)
-                val next = countInOptions[(idx + 1) % countInOptions.size]
-                onAction(StudioAction.SetCountInBars(next))
-            },
-            textColor = NjMetronomeLed.copy(alpha = 0.8f)
-        )
-
-        Text(
-            text = "Count-In",
-            style = MaterialTheme.typography.labelSmall,
-            color = NjMuted
-        )
-    }
-}

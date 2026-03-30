@@ -437,8 +437,8 @@ class StudioViewModel @Inject constructor(
             StudioAction.ToggleMetronome -> toggleMetronome()
             is StudioAction.SetMetronomeVolume -> setMetronomeVolume(action.volume)
             is StudioAction.SetCountInBars -> setCountInBars(action.bars)
-            StudioAction.ToggleMetronomeSettings -> {
-                _state.update { it.copy(isMetronomeSettingsOpen = !it.isMetronomeSettingsOpen) }
+            StudioAction.ToggleControlsDrawer -> {
+                _state.update { it.copy(isControlsDrawerOpen = !it.isControlsDrawerOpen) }
             }
 
             // Inline MiniPianoRoll

@@ -45,6 +45,7 @@ A lightweight multi-track workspace. Not a replacement for professional tools, b
 - **Clip selection and actions** -- tap any clip (drum, MIDI, or audio) on the timeline to select it (amber border). Tap again to flip it over with a smooth X-axis rotation, revealing icon-only action buttons (duplicate, edit, delete) on the back face. Tap a third time to unflip. Tapping the ruler, a track header, or a different clip deselects. Selecting an audio clip with multiple takes expands the take list below. Selecting a drum or MIDI clip updates the drawer's pattern editor or inline piano roll.
 - **Per-track controls** -- volume knob, arm (R), solo (S), mute (M), rename, delete via inline track drawer. Drum tracks get a specialized drawer with pattern editor and bar count controls. MIDI tracks get instrument selection, edit notes, and playback controls. Responsive layout adapts to narrow screens (e.g. Galaxy Fold cover display).
 - **Inline add-track row** -- the last row in the timeline is a `+` button on a physical tray. Tap to slide open a drawer with Audio, MIDI, and Drums buttons. The tray extends off the left screen edge like a rail, with beveled edges and a surface background. Smooth spring animation with mechanical feel.
+- **Controls drawer** -- secondary project controls (time signature, BPM, snap, grid resolution, metronome with volume knob and count-in) live behind a toggle drawer below the transport. Chevron button latches open with an amber LED. Responsive layout: landscape merges all controls into a single row; portrait uses two rows; very narrow screens stack three. Hardware grooves frame the transport section.
 - **Hardware-style controls** -- unified NjButton and NjCard components with beveled edges, LED glow, haptic feedback, and three-state mechanical latching feel (deep press, latched, raised). Rotary volume knob with haptic detents. Embossed text on buttons and titles. Consistent across all screens.
 
 ---
@@ -82,8 +83,9 @@ Nightjar is in active development, working toward a v1.0 Play Store release.
 - Drag-to-reposition, non-destructive trim, per-track volume/mute/solo/delete
 - Loop playback with ruler scrub-to-seek and loop handle adjustment
 - Timeline ruler as primary scrub surface (tap or drag to seek)
-- Studio transport bar: Restart, Play/Pause, Rec (right cluster) with Loop/Clear rocker pill (left). Sticky pinned overlay when scrolled past.
-- LCD status strip between transport and project controls: contextual state display (Ready/Armed/Recording/Clip selected) with IBM Plex Mono text in NjRecessedPanel, always-visible Disarm button, contextual Delete button
+- Studio transport bar: Restart, Play/Pause, Rec (right cluster) with Loop/Clear rocker pill (left). Responsive layout inlines LCD in landscape. Sticky pinned overlay when scrolled past.
+- LCD status strip: contextual state display (Ready/Armed/Recording/Clip selected) with IBM Plex Mono text in NjRecessedPanel, always-visible Disarm button, contextual Delete button
+- Controls drawer with toggle button, spring animation, and responsive breakpoints for portrait/landscape/narrow layouts
 - Cursor position with return-to-cursor transport: teal dashed cursor line on timeline, play starts from cursor, pause returns to cursor. Auto-punch-out stops recording at next clip boundary.
 - Inline track drawer with hardware-style controls (arm, solo, mute, takes, volume knob, rename, delete)
 - Drum step sequencer with FluidSynth synthesis, pattern editor, clip-based timeline arrangement
@@ -92,7 +94,7 @@ Nightjar is in active development, working toward a v1.0 Play Store release.
 - Piano roll undo/redo, multi-select, group drag/resize (select notes and move or resize them all at once), double-tap-to-delete
 - Sample-accurate MIDI and drum timing via sub-buffer scheduling (events fire at exact sample positions within render chunks)
 - Measure/beat timeline with time signature support (4/4, 3/4, 6/8, 2/4) and snap-to-grid
-- Project controls bar (BPM, time signature, snap toggle, position readout)
+- Controls drawer: BPM, time signature, snap, grid resolution, metronome with volume and count-in
 - Metronome with configurable count-in (1/2/4 bars), tap tempo, volume control. Plays continuously through recording on both Record and Studio screens. Seamless negative-position count-in with zero gap at the recording boundary.
 - Clip-based audio preview in Library and Overview (loads active takes from clips instead of stale track audio)
 - Unified hardware-style UI components (NjButton, NjCard, NjRecessedPanel, NjLedDot) across all screens
