@@ -32,6 +32,8 @@ CLAUDE.md
 .claude/
 
 # Project docs (local only)
-TASKS.md
-CLEANUP_TODO.md
+docs/TASKS.md
+docs/CLEANUP_TODO.md
 CODEBASE_OVERVIEW.md
+/docs/
+/specs/

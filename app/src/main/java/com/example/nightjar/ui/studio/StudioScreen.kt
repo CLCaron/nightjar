@@ -27,7 +27,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -75,9 +74,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.SkipPrevious
 import com.example.nightjar.ui.components.NjIcons
-import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.Repeat
-import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.Settings
 import com.example.nightjar.ui.theme.NjMetronomeLed
 import com.example.nightjar.ui.theme.NjMuted
 import com.example.nightjar.ui.theme.NjError
@@ -196,15 +195,11 @@ fun StudioScreen(
                     title = state.ideaTitle.ifBlank { "Studio" },
                     onBack = { vm.onAction(StudioAction.NavigateBack) },
                     trailing = {
-                        IconButton(
-                            onClick = { vm.onAction(StudioAction.ShowLatencySetup) }
-                        ) {
-                            Text(
-                                "Setup",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
-                            )
-                        }
+                        NjButton(
+                            text = "Setup",
+                            onClick = { vm.onAction(StudioAction.ShowLatencySetup) },
+                            textColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+                        )
                     }
                 )
 
@@ -445,7 +440,7 @@ private fun TransportAndControls(
             ) {
                 NjButton(
                     text = "Loop",
-                    icon = Icons.Outlined.Repeat,
+                    icon = Icons.Filled.Repeat,
                     onClick = { if (hasTracksAndNotRecording) onAction(StudioAction.ToggleLoop) },
                     isActive = state.isLoopEnabled,
                     ledColor = NjAmber,
@@ -460,7 +455,7 @@ private fun TransportAndControls(
 
                 NjButton(
                     text = "Clear",
-                    icon = Icons.Outlined.Close,
+                    icon = Icons.Filled.Close,
                     onClick = {
                         if (hasTracksAndNotRecording && state.hasLoopRegion) {
                             onAction(StudioAction.ClearLoopRegion)
@@ -1088,7 +1083,7 @@ private fun MetronomeButtonPill(
 
         NjButton(
             text = "Cfg",
-            icon = Icons.Outlined.Settings,
+            icon = Icons.Filled.Settings,
             onClick = { onAction(StudioAction.ToggleMetronomeSettings) },
             isActive = isSettingsOpen,
             ledColor = NjMuted2,

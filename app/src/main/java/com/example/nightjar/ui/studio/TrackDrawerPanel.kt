@@ -4,7 +4,7 @@ import com.example.nightjar.ui.components.NjButton
 import android.view.HapticFeedbackConstants
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.PressInteraction
@@ -145,7 +145,7 @@ fun TrackDrawerPanel(
                 ) {
                     NjButton(
                         text = "Rename",
-                        icon = Icons.Filled.Edit,
+                        icon = Icons.AutoMirrored.Filled.Label,
                         onClick = {
                             onAction(
                                 StudioAction.RequestRenameTrack(
@@ -154,7 +154,7 @@ fun TrackDrawerPanel(
                                 )
                             )
                         },
-                        textColor = NjMuted2.copy(alpha = 0.7f)
+                        textColor = NjMuted2.copy(alpha = 0.85f)
                     )
                     Spacer(Modifier.width(8.dp))
                     NjButton(
@@ -226,7 +226,7 @@ fun TrackDrawerPanel(
                 ) {
                     NjButton(
                         text = "Rename",
-                        icon = Icons.Filled.Edit,
+                        icon = Icons.AutoMirrored.Filled.Label,
                         onClick = {
                             onAction(
                                 StudioAction.RequestRenameTrack(
@@ -235,7 +235,7 @@ fun TrackDrawerPanel(
                                 )
                             )
                         },
-                        textColor = NjMuted2.copy(alpha = 0.7f)
+                        textColor = NjMuted2.copy(alpha = 0.85f)
                     )
                     NjButton(
                         text = "Delete",

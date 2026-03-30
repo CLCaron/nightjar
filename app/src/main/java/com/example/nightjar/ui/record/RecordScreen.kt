@@ -55,6 +55,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -475,7 +476,8 @@ private fun PortraitRecordLayout(
                 text = "",
                 icon = Icons.Filled.Settings,
                 onClick = onSettings,
-                textColor = NjMuted
+                textColor = NjMuted,
+                modifier = Modifier.heightIn(min = 40.dp)
             )
         }
     }
@@ -528,13 +530,14 @@ private fun LandscapeRecordLayout(
                     volume = metronomeState.metronomeVolume,
                     countInBars = metronomeState.countInBars,
                     onAction = onAction,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.widthIn(max = 260.dp)
                 )
                 NjButton(
                     text = "",
                     icon = Icons.Filled.Settings,
                     onClick = onSettings,
-                    textColor = NjMuted
+                    textColor = NjMuted,
+                    modifier = Modifier.heightIn(min = 40.dp)
                 )
             }
         }
