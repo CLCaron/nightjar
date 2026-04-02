@@ -174,7 +174,9 @@ data class StudioUiState(
     val lastBeatFrame: Long = -1L,
     val isControlsDrawerOpen: Boolean = false,
     val cursorPositionMs: Long = 0L,
-    val returnToCursor: Boolean = true
+    val returnToCursor: Boolean = true,
+    val collapsedHeaderTrackIds: Set<Long> = emptySet(),
+    val headersCollapsedMode: Boolean = false
 ) {
     val hasLoopRegion: Boolean get() = loopStartMs != null && loopEndMs != null
 
@@ -245,7 +247,9 @@ data class StudioUiState(
                 lastBeatFrame == other.lastBeatFrame &&
                 isControlsDrawerOpen == other.isControlsDrawerOpen &&
                 cursorPositionMs == other.cursorPositionMs &&
-                returnToCursor == other.returnToCursor
+                returnToCursor == other.returnToCursor &&
+                collapsedHeaderTrackIds == other.collapsedHeaderTrackIds &&
+                headersCollapsedMode == other.headersCollapsedMode
     }
 
     override fun hashCode(): Int {
@@ -304,6 +308,8 @@ data class StudioUiState(
         result = 31 * result + isControlsDrawerOpen.hashCode()
         result = 31 * result + cursorPositionMs.hashCode()
         result = 31 * result + returnToCursor.hashCode()
+        result = 31 * result + collapsedHeaderTrackIds.hashCode()
+        result = 31 * result + headersCollapsedMode.hashCode()
         return result
     }
 }
@@ -453,6 +459,10 @@ sealed interface StudioAction {
     data class SetMetronomeVolume(val volume: Float) : StudioAction
     data class SetCountInBars(val bars: Int) : StudioAction
     data object ToggleControlsDrawer : StudioAction
+
+    // Track header collapse
+    data class ToggleTrackHeaderCollapse(val trackId: Long) : StudioAction
+    data object ToggleAllTrackHeaders : StudioAction
 
     // Inline MiniPianoRoll
     data class SelectMidiClip(val trackId: Long, val clipId: Long) : StudioAction

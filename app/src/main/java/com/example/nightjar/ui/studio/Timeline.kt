@@ -17,6 +17,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -52,6 +53,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.ui.layout.layout
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -85,6 +87,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -122,6 +125,7 @@ import kotlin.math.abs
 
 // ── Layout constants ────────────────────────────────────────────────────
 private val HEADER_WIDTH = 100.dp
+private val COLOR_TAB_WIDTH = 10.dp
 private val TRACK_LANE_HEIGHT = 56.dp
 private val RULER_HEIGHT = 28.dp
 private val TIMELINE_END_PADDING_DP = 120.dp
@@ -157,6 +161,8 @@ fun TimelinePanel(
     loopEndMs: Long?,
     isLoopEnabled: Boolean,
     expandedTrackIds: Set<Long>,
+    collapsedHeaderTrackIds: Set<Long> = emptySet(),
+    headersCollapsedMode: Boolean = false,
     soloedTrackIds: Set<Long>,
     armedTrackId: Long?,
     audioClips: Map<Long, List<AudioClipUiState>>,
@@ -256,6 +262,15 @@ fun TimelinePanel(
         )
     )
 
+    // Shared animated column width: all tracks + ruler use this for alignment.
+    // In collapsed mode the column stays narrow even when individual headers
+    // are pulled out (those render as overlays on their row).
+    val columnWidth by animateDpAsState(
+        targetValue = if (headersCollapsedMode) COLOR_TAB_WIDTH else HEADER_WIDTH,
+        animationSpec = spring(dampingRatio = 0.65f, stiffness = 200f),
+        label = "columnWidth"
+    )
+
     Box(modifier = modifier.fillMaxWidth()) {
     Column(
         modifier = Modifier
@@ -271,7 +286,11 @@ fun TimelinePanel(
     ) {
         // ── Ruler row ──────────────────────────────────────────────
         Row(Modifier.fillMaxWidth()) {
-            Spacer(Modifier.width(HEADER_WIDTH))
+            MasterCollapseHandle(
+                columnWidth = columnWidth,
+                anyCollapsed = headersCollapsedMode,
+                onToggle = { onAction(StudioAction.ToggleAllTrackHeaders) }
+            )
 
             Box(
                 modifier = Modifier
@@ -289,7 +308,6 @@ fun TimelinePanel(
                         gridResolution = gridResolution
                     )
 
-                    // Loop overlay + gesture layer in the ruler
                     if (loopStartMs != null && loopEndMs != null) {
                         LoopOverlaySegment(
                             loopStartMs = loopStartMs,
@@ -340,14 +358,21 @@ fun TimelinePanel(
             val isArmed = track.id == armedTrackId
             val clips = audioClips[track.id] ?: emptyList()
 
-            // Track row: header + scrollable lane
+            // Track row: header + scrollable lane.
+            // Box wrapper clips overlay headers that extend left when retracted.
+            Box(Modifier.fillMaxWidth().clipToBounds()) {
             Row(Modifier.fillMaxWidth()) {
                 TrackHeader(
                     track = track,
                     height = TRACK_LANE_HEIGHT,
+                    headerWidth = columnWidth,
                     isExpanded = track.id in expandedTrackIds,
+                    isCollapsed = track.id in collapsedHeaderTrackIds,
+                    headersCollapsedMode = headersCollapsedMode,
                     isSoloed = isSoloed,
                     isArmed = isArmed,
+                    trackColor = trackColor,
+                    trackIndex = index,
                     onAction = onAction
                 )
 
@@ -356,11 +381,7 @@ fun TimelinePanel(
                         .weight(1f)
                         .horizontalScroll(scrollState)
                 ) {
-                    Box(
-                        Modifier
-                            .width(timelineWidthDp)
-                    ) {
-                        // Beat grid lines (behind track content)
+                    Box(Modifier.width(timelineWidthDp)) {
                         if (isSnapEnabled) {
                             BeatGridOverlay(
                                 totalDurationMs = totalDurationMs,
@@ -455,6 +476,7 @@ fun TimelinePanel(
                     }
                 }
             }
+            } // close clipToBounds Box
 
             // Drawer slot
             AnimatedVisibility(
@@ -570,7 +592,7 @@ fun TimelinePanel(
         // screen position so it never jitters. Content scrolls underneath.
         if (isFollowActive) {
             val lineXPx = with(density) {
-                HEADER_WIDTH.toPx() + scrollState.viewportSize / 4f
+                columnWidth.toPx() + scrollState.viewportSize / 4f
             }
             val lineColor = NjAmber
             Canvas(modifier = Modifier.matchParentSize()) {
@@ -1677,46 +1699,230 @@ private fun computeClipTrimValues(
 }
 
 /**
- * Fixed-width header showing a track's display name, duration, and status.
- * Tap to toggle the inline drawer. Shows visual indicators for expanded,
- * soloed, and muted states.
+ * Fixed-width header in the track row.
+ *
+ * **Normal mode** ([headersCollapsedMode] = false): header fills [headerWidth],
+ * content slides left/right within the column. Color tab stays fixed.
+ *
+ * **Collapsed mode** ([headersCollapsedMode] = true): the entire header
+ * (tab + content + background) is one physical unit that slides together.
+ * When retracted, only the color tab peeks out from the left edge. When
+ * pulled out, the full header overlays the track lane via [zIndex].
+ * The parent Row wrapper must have [clipToBounds] so the retracted portion
+ * (extending to negative x) is hidden.
  */
 @Composable
 private fun TrackHeader(
     track: TrackEntity,
     height: Dp,
+    headerWidth: Dp,
     isExpanded: Boolean,
+    isCollapsed: Boolean,
+    headersCollapsedMode: Boolean,
     isSoloed: Boolean,
     isArmed: Boolean = false,
+    trackColor: Color,
+    trackIndex: Int = 0,
     onAction: (StudioAction) -> Unit
 ) {
-    val borderColor = when {
-        isArmed -> NjRecordCoral.copy(alpha = 0.6f)
-        isExpanded -> NjAmber.copy(alpha = 0.5f)
-        else -> NjAmber.copy(alpha = 0f)
+    val density = LocalDensity.current
+    val view = LocalView.current
+
+    val tabColor = if (isArmed) {
+        NjRecordCoral.copy(alpha = 0.8f)
+    } else {
+        trackColor.copy(alpha = 0.7f)
     }
 
-    Column(
-        modifier = Modifier
-            .width(HEADER_WIDTH)
-            .height(height)
-            .drawBehind {
-                // Left border: coral when armed, gold when expanded
-                if (isArmed || isExpanded) {
-                    drawLine(
-                        color = borderColor,
-                        start = Offset(0f, 0f),
-                        end = Offset(0f, size.height),
-                        strokeWidth = 2.dp.toPx()
+    if (headersCollapsedMode) {
+        // ── Collapsed mode: background + content slide from behind the tab ──
+        // The tab stays fixed at [0, 10dp] as the handle. The background
+        // surface + text slide right to reveal (or left to retract).
+        // This produces a "pull-out drawer" feel where tab and content look
+        // like one connected piece.
+        val contentWidthPx = with(density) { (HEADER_WIDTH - COLOR_TAB_WIDTH).toPx() }
+
+        val slideOffset = remember { Animatable(if (isCollapsed) -contentWidthPx else 0f) }
+
+        LaunchedEffect(isCollapsed) {
+            delay(trackIndex * 30L)
+            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+            slideOffset.animateTo(
+                targetValue = if (isCollapsed) -contentWidthPx else 0f,
+                animationSpec = spring(dampingRatio = 0.65f, stiffness = 200f)
+            )
+        }
+
+        Box(
+            modifier = Modifier
+                .width(headerWidth)          // narrow layout slot in the Row
+                .height(height)
+                .zIndex(1f)                  // always on top so collapse animation stays visible
+        ) {
+            // Background + content panel: slides to reveal from behind the tab.
+            // Measured at HEADER_WIDTH (100dp) via custom layout to avoid the
+            // auto-centering that requiredWidth applies when exceeding parent
+            // constraints. Placed at (0,0) so the panel extends rightward.
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .layout { measurable, constraints ->
+                        val widthPx = HEADER_WIDTH.roundToPx()
+                        val placeable = measurable.measure(
+                            constraints.copy(minWidth = widthPx, maxWidth = widthPx)
+                        )
+                        layout(placeable.width, placeable.height) {
+                            placeable.place(0, 0)
+                        }
+                    }
+                    .graphicsLayer { translationX = slideOffset.value }
+                    .background(NjSurface2, RoundedCornerShape(topEnd = 4.dp, bottomEnd = 4.dp))
+                    .drawBehind {
+                        // Right-edge shadow for depth
+                        drawLine(
+                            color = Color.Black.copy(alpha = 0.35f),
+                            start = Offset(size.width, 0f),
+                            end = Offset(size.width, size.height),
+                            strokeWidth = 2.dp.toPx()
+                        )
+                    }
+            ) {
+                TrackHeaderContent(
+                    track = track,
+                    isSoloed = isSoloed,
+                    isArmed = isArmed,
+                    modifier = Modifier
+                        .padding(start = COLOR_TAB_WIDTH)
+                        .fillMaxSize()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = LocalIndication.current,
+                            onClick = { onAction(StudioAction.OpenTrackSettings(track.id)) }
+                        )
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+            }
+
+            // Color tab: fixed at [0, 10dp], always visible as the handle
+            Box(
+                modifier = Modifier
+                    .width(COLOR_TAB_WIDTH)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(topEnd = 2.dp, bottomEnd = 2.dp))
+                    .background(tabColor)
+                    .drawBehind {
+                        val bevelX = size.width - 1.dp.toPx()
+                        drawLine(
+                            color = Color.White.copy(alpha = 0.15f),
+                            start = Offset(bevelX, 0f),
+                            end = Offset(bevelX, size.height * 0.5f),
+                            strokeWidth = 1.dp.toPx()
+                        )
+                        drawLine(
+                            color = Color.Black.copy(alpha = 0.2f),
+                            start = Offset(bevelX, size.height * 0.5f),
+                            end = Offset(bevelX, size.height),
+                            strokeWidth = 1.dp.toPx()
+                        )
+                    }
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = { onAction(StudioAction.ToggleTrackHeaderCollapse(track.id)) }
+                    )
+            )
+        }
+    } else {
+        // ── Normal mode: content slides within column, tab stays fixed ──
+        val contentWidthPx = with(density) { (HEADER_WIDTH - COLOR_TAB_WIDTH).toPx() }
+        val slideOffset = remember { Animatable(if (isCollapsed) -contentWidthPx else 0f) }
+
+        LaunchedEffect(isCollapsed) {
+            delay(trackIndex * 30L)
+            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+            slideOffset.animateTo(
+                targetValue = if (isCollapsed) -contentWidthPx else 0f,
+                animationSpec = spring(dampingRatio = 0.65f, stiffness = 200f)
+            )
+        }
+
+        Box(
+            modifier = Modifier
+                .width(headerWidth)
+                .height(height)
+                .clipToBounds()
+        ) {
+            // Header content — slides left when collapsed
+            Box(
+                modifier = Modifier
+                    .padding(start = COLOR_TAB_WIDTH)
+                    .fillMaxHeight()
+                    .width(HEADER_WIDTH - COLOR_TAB_WIDTH)
+                    .clipToBounds()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .graphicsLayer { translationX = slideOffset.value }
+                        .width(HEADER_WIDTH - COLOR_TAB_WIDTH)
+                        .fillMaxHeight()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = LocalIndication.current,
+                            onClick = { onAction(StudioAction.OpenTrackSettings(track.id)) }
+                        )
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    TrackHeaderContent(
+                        track = track,
+                        isSoloed = isSoloed,
+                        isArmed = isArmed
                     )
                 }
             }
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = LocalIndication.current,
-                onClick = { onAction(StudioAction.OpenTrackSettings(track.id)) }
+
+            // Color tab — fixed at left edge, acts as collapse toggle
+            Box(
+                modifier = Modifier
+                    .width(COLOR_TAB_WIDTH)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(topEnd = 2.dp, bottomEnd = 2.dp))
+                    .background(tabColor)
+                    .drawBehind {
+                        val bevelX = size.width - 1.dp.toPx()
+                        drawLine(
+                            color = Color.White.copy(alpha = 0.15f),
+                            start = Offset(bevelX, 0f),
+                            end = Offset(bevelX, size.height * 0.5f),
+                            strokeWidth = 1.dp.toPx()
+                        )
+                        drawLine(
+                            color = Color.Black.copy(alpha = 0.2f),
+                            start = Offset(bevelX, size.height * 0.5f),
+                            end = Offset(bevelX, size.height),
+                            strokeWidth = 1.dp.toPx()
+                        )
+                    }
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = { onAction(StudioAction.ToggleTrackHeaderCollapse(track.id)) }
+                    )
             )
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+        }
+    }
+}
+
+/** Shared header text content: track name, duration, status flags. */
+@Composable
+private fun TrackHeaderContent(
+    track: TrackEntity,
+    isSoloed: Boolean,
+    isArmed: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier,
         verticalArrangement = Arrangement.Center
     ) {
         Text(
@@ -1738,7 +1944,6 @@ private fun TrackHeader(
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
         )
-        // Status indicators
         val statusParts = mutableListOf<String>()
         if (isArmed) statusParts.add("Armed")
         if (isSoloed) statusParts.add("Solo")
@@ -1753,6 +1958,93 @@ private fun TrackHeader(
                     else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
                 }
             )
+        }
+    }
+}
+
+/**
+ * Master collapse/expand handle in the ruler row's left column.
+ * Double-chevron icon pointing left (collapse) or right (expand).
+ */
+/**
+ * Master collapse/expand handle in the ruler row. Uses the shared [columnWidth]
+ * for layout. Visually shows full chevrons only when all headers are expanded;
+ * otherwise shows a small tucked chevron at the left edge.
+ */
+@Composable
+private fun MasterCollapseHandle(
+    columnWidth: Dp,
+    anyCollapsed: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedWithMinDuration()
+    val iconAlpha = if (isPressed) 0.8f else 0.5f
+
+    Box(
+        modifier = modifier
+            .width(columnWidth)
+            .height(RULER_HEIGHT)
+            .clipToBounds()
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onToggle
+            ),
+        contentAlignment = if (anyCollapsed) Alignment.CenterStart else Alignment.Center
+    ) {
+        val gripColor = NjOutline.copy(alpha = 0.3f)
+        val chevronColor = NjMuted2.copy(alpha = iconAlpha)
+
+        if (!anyCollapsed) {
+            // All headers expanded — full chevron with grips (collapse all)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Canvas(Modifier.size(6.dp, 14.dp)) {
+                    val lineWidth = 1.dp.toPx()
+                    drawLine(gripColor, Offset(0f, 0f), Offset(0f, size.height), lineWidth)
+                    drawLine(gripColor, Offset(3.dp.toPx(), 0f), Offset(3.dp.toPx(), size.height), lineWidth)
+                }
+
+                Spacer(Modifier.width(3.dp))
+
+                // Left-pointing double chevron (collapse)
+                Canvas(Modifier.size(14.dp)) {
+                    val strokeW = 1.5.dp.toPx()
+                    val midY = size.height / 2f
+                    val arrowH = size.height * 0.35f
+                    val x1 = size.width * 0.85f
+                    val x1Tip = size.width * 0.55f
+                    val x2 = size.width * 0.55f
+                    val x2Tip = size.width * 0.25f
+                    drawLine(chevronColor, Offset(x1, midY - arrowH), Offset(x1Tip, midY), strokeW)
+                    drawLine(chevronColor, Offset(x1, midY + arrowH), Offset(x1Tip, midY), strokeW)
+                    drawLine(chevronColor, Offset(x2, midY - arrowH), Offset(x2Tip, midY), strokeW)
+                    drawLine(chevronColor, Offset(x2, midY + arrowH), Offset(x2Tip, midY), strokeW)
+                }
+
+                Spacer(Modifier.width(3.dp))
+
+                Canvas(Modifier.size(6.dp, 14.dp)) {
+                    val lineWidth = 1.dp.toPx()
+                    drawLine(gripColor, Offset(0f, 0f), Offset(0f, size.height), lineWidth)
+                    drawLine(gripColor, Offset(3.dp.toPx(), 0f), Offset(3.dp.toPx(), size.height), lineWidth)
+                }
+            }
+        } else {
+            // Some headers collapsed — tucked right-pointing chevron (expand)
+            Canvas(Modifier.padding(start = 1.dp).size(8.dp)) {
+                val strokeW = 1.dp.toPx()
+                val midY = size.height / 2f
+                val arrowH = size.height * 0.35f
+                val xStart = size.width * 0.1f
+                val xTip = size.width * 0.9f
+                drawLine(chevronColor, Offset(xStart, midY - arrowH), Offset(xTip, midY), strokeW)
+                drawLine(chevronColor, Offset(xStart, midY + arrowH), Offset(xTip, midY), strokeW)
+            }
         }
     }
 }

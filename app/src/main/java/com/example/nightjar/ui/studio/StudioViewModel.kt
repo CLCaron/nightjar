@@ -441,6 +441,43 @@ class StudioViewModel @Inject constructor(
                 _state.update { it.copy(isControlsDrawerOpen = !it.isControlsDrawerOpen) }
             }
 
+            // Track header collapse
+            is StudioAction.ToggleTrackHeaderCollapse -> {
+                _state.update { s ->
+                    if (action.trackId in s.collapsedHeaderTrackIds) {
+                        // Expand this header
+                        s.copy(collapsedHeaderTrackIds = s.collapsedHeaderTrackIds - action.trackId)
+                    } else {
+                        // Collapse this header — also close drawer and deselect clip if on this track
+                        s.copy(
+                            collapsedHeaderTrackIds = s.collapsedHeaderTrackIds + action.trackId,
+                            expandedTrackIds = s.expandedTrackIds - action.trackId,
+                            expandedClipState = if (s.expandedClipState?.trackId == action.trackId) null else s.expandedClipState
+                        )
+                    }
+                }
+            }
+            StudioAction.ToggleAllTrackHeaders -> {
+                _state.update { s ->
+                    val allTrackIds = s.tracks.map { it.id }.toSet()
+                    if (!s.headersCollapsedMode) {
+                        // Enter collapsed mode: collapse all headers
+                        s.copy(
+                            headersCollapsedMode = true,
+                            collapsedHeaderTrackIds = allTrackIds,
+                            expandedTrackIds = emptySet(),
+                            expandedClipState = null
+                        )
+                    } else {
+                        // Exit collapsed mode: expand all headers
+                        s.copy(
+                            headersCollapsedMode = false,
+                            collapsedHeaderTrackIds = emptySet()
+                        )
+                    }
+                }
+            }
+
             // Inline MiniPianoRoll
             is StudioAction.SelectMidiClip -> selectMidiClip(action.trackId, action.clipId)
             is StudioAction.InlinePlaceNote -> inlinePlaceNote(action.trackId, action.clipId, action.pitch, action.startMs, action.durationMs)

@@ -249,6 +249,8 @@ fun StudioScreen(
                     loopEndMs = state.loopEndMs,
                     isLoopEnabled = state.isLoopEnabled,
                     expandedTrackIds = state.expandedTrackIds,
+                    collapsedHeaderTrackIds = state.collapsedHeaderTrackIds,
+                    headersCollapsedMode = state.headersCollapsedMode,
                     soloedTrackIds = state.soloedTrackIds,
                     armedTrackId = state.armedTrackId,
                     audioClips = state.audioClips,
