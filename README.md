@@ -92,7 +92,7 @@ Nightjar is in active development, working toward a v1.0 Play Store release.
 - Drum step sequencer with FluidSynth synthesis, pattern editor, clip-based timeline arrangement
 - MIDI instrument tracks with full-screen piano roll editor, 128 GM instruments, and C++ MidiSequencer
 - Scale and chord mode in piano roll: 19 scales, chord insertion (triad/7th/9th), diatonic chord reference strip
-- Piano roll undo/redo, multi-select, group drag/resize (select notes and move or resize them all at once), double-tap-to-delete
+- Piano roll undo/redo, multi-select, group drag/resize (select notes and move or resize them all at once), double-tap-to-delete, pinch-to-zoom (independent horizontal/vertical axes with focal-point tracking)
 - Sample-accurate MIDI and drum timing via sub-buffer scheduling (events fire at exact sample positions within render chunks)
 - Measure/beat timeline with time signature support (4/4, 3/4, 6/8, 2/4) and snap-to-grid
 - Controls drawer: BPM, time signature, snap, grid resolution, metronome with volume and count-in

@@ -2,7 +2,9 @@ package com.example.nightjar.ui.studio
 
 import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
@@ -36,8 +38,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
@@ -46,7 +50,9 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerId
+import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -80,6 +86,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.ui.Alignment
 import com.example.nightjar.audio.MusicalScaleHelper
 import kotlin.math.abs
+import kotlinx.coroutines.launch
 
 /** Height of each semitone row in dp. */
 private const val ROW_HEIGHT_DP = 20f
@@ -91,6 +98,14 @@ private const val PX_PER_MS = 0.2f
 private const val TOTAL_NOTES = 128
 /** Default starting octave scroll position (middle C area). */
 private const val DEFAULT_SCROLL_NOTE = 48
+
+/** Zoom limits for pinch-to-zoom. */
+private const val MIN_H_ZOOM = 0.25f
+private const val MAX_H_ZOOM = 8.0f
+private const val MIN_V_ZOOM = 0.5f
+private const val MAX_V_ZOOM = 3.0f
+/** Maximum canvas pixel width to prevent GPU texture overflow. */
+private const val MAX_CANVAS_PX = 32768f
 
 /** Touch zone width for detecting resize drag on a note's right edge. */
 private val EDGE_TOUCH_ZONE = 16.dp
@@ -122,9 +137,15 @@ fun PianoRollScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val density = LocalDensity.current
+    val coroutineScope = rememberCoroutineScope()
 
-    val rowHeightPx = with(density) { ROW_HEIGHT_DP.dp.toPx() }
-    val totalGridHeight = (TOTAL_NOTES * ROW_HEIGHT_DP).dp
+    // Zoom state (view-layer only, not in ViewModel)
+    var horizontalZoom by remember { mutableFloatStateOf(1f) }
+    var verticalZoom by remember { mutableFloatStateOf(1f) }
+    var isPinching by remember { mutableStateOf(false) }
+
+    val rowHeightPx = with(density) { (ROW_HEIGHT_DP * verticalZoom).dp.toPx() }
+    val totalGridHeight = (TOTAL_NOTES * ROW_HEIGHT_DP * verticalZoom).dp
 
     // Compute grid width from content (BPM-aware)
     val measureMs = MusicalTimeConverter.msPerMeasure(
@@ -136,10 +157,18 @@ fun PianoRollScreen(
     val maxClipEndMs = state.clips.maxOfOrNull { it.endMs } ?: 0L
     val contentMs = maxOf(maxNoteEndMs + paddingMs, maxClipEndMs + paddingMs,
         state.totalDurationMs + paddingMs, minContentMs)
-    val gridWidthDp = (contentMs * PX_PER_MS).dp
+
+    // Dynamically clamp horizontal zoom so canvas width stays under MAX_CANVAS_PX
+    val baseWidthPx = contentMs * PX_PER_MS * density.density
+    val effectiveMaxHZoom = if (baseWidthPx > 0f) {
+        (MAX_CANVAS_PX / baseWidthPx).coerceIn(MIN_H_ZOOM, MAX_H_ZOOM)
+    } else MAX_H_ZOOM
+    horizontalZoom = horizontalZoom.coerceAtMost(effectiveMaxHZoom)
+
+    val gridWidthDp = (contentMs * PX_PER_MS * horizontalZoom).dp
 
     val verticalScrollState = rememberScrollState(
-        (DEFAULT_SCROLL_NOTE * ROW_HEIGHT_DP * density.density).toInt()
+        (DEFAULT_SCROLL_NOTE * ROW_HEIGHT_DP * verticalZoom * density.density).toInt()
     )
     val horizontalScrollState = rememberScrollState()
     val textMeasurer = rememberTextMeasurer()
@@ -227,11 +256,23 @@ fun PianoRollScreen(
                     textColor = if (state.selectedNoteIds.isNotEmpty()) NjError else NjMuted2.copy(alpha = 0.3f)
                 )
                 Spacer(Modifier.width(8.dp))
-                NjButton(
-                    text = "1/${state.gridResolution}",
-                    onClick = { viewModel.onAction(PianoRollAction.CycleGridResolution) },
-                    textColor = NjAmber.copy(alpha = 0.8f)
-                )
+                @OptIn(ExperimentalFoundationApi::class)
+                Box(
+                    modifier = Modifier.combinedClickable(
+                        onClick = { viewModel.onAction(PianoRollAction.CycleGridResolution) },
+                        onLongClick = {
+                            horizontalZoom = 1f
+                            verticalZoom = 1f
+                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                        }
+                    )
+                ) {
+                    NjButton(
+                        text = "1/${state.gridResolution}",
+                        onClick = { viewModel.onAction(PianoRollAction.CycleGridResolution) },
+                        textColor = NjAmber.copy(alpha = 0.8f)
+                    )
+                }
                 Spacer(Modifier.width(4.dp))
                 NjButton(
                     text = "Snap",
@@ -300,6 +341,35 @@ fun PianoRollScreen(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight()
+                        .pointerInput(effectiveMaxHZoom) {
+                            detectPinchZoom(
+                                canStart = { dragState == null },
+                                onPinchStart = { isPinching = true },
+                                onPinchZoom = { scaleX, scaleY, centroidX, centroidY ->
+                                    val oldHZoom = horizontalZoom
+                                    val oldVZoom = verticalZoom
+                                    val newHZoom = (oldHZoom * scaleX).coerceIn(MIN_H_ZOOM, effectiveMaxHZoom)
+                                    val newVZoom = (oldVZoom * scaleY).coerceIn(MIN_V_ZOOM, MAX_V_ZOOM)
+
+                                    // Focal-point scroll: keep the content under the pinch center stable
+                                    val newHScroll = ((centroidX + horizontalScrollState.value) * (newHZoom / oldHZoom) - centroidX)
+                                        .toInt().coerceAtLeast(0)
+                                    val newVScroll = ((centroidY + verticalScrollState.value) * (newVZoom / oldVZoom) - centroidY)
+                                        .toInt().coerceAtLeast(0)
+
+                                    horizontalZoom = newHZoom
+                                    verticalZoom = newVZoom
+
+                                    coroutineScope.launch {
+                                        horizontalScrollState.scrollTo(newHScroll)
+                                    }
+                                    coroutineScope.launch {
+                                        verticalScrollState.scrollTo(newVScroll)
+                                    }
+                                },
+                                onPinchEnd = { isPinching = false }
+                            )
+                        }
                         .verticalScroll(verticalScrollState)
                         .horizontalScroll(horizontalScrollState)
                 ) {
@@ -310,12 +380,14 @@ fun PianoRollScreen(
                             .background(panelInset)
                             .pointerInput(
                                 state.notes, state.isSnapEnabled, state.bpm,
-                                state.selectedNoteIds
+                                state.selectedNoteIds, horizontalZoom, verticalZoom,
+                                isPinching
                             ) {
-                                val pxPerMs = PX_PER_MS * density.density
+                                val pxPerMs = PX_PER_MS * horizontalZoom * density.density
                                 val edgeZonePx = EDGE_TOUCH_ZONE.toPx()
 
                                 awaitEachGesture {
+                                    if (isPinching) return@awaitEachGesture
                                     val down = awaitFirstDown(requireUnconsumed = false)
                                     // DON'T consume down -- lets scroll handle swipes
 
@@ -471,7 +543,7 @@ fun PianoRollScreen(
                     ) {
                         drawGrid(
                             rowHeightPx = rowHeightPx,
-                            pxPerMs = PX_PER_MS * density.density,
+                            pxPerMs = PX_PER_MS * horizontalZoom * density.density,
                             notes = state.notes,
                             clips = state.clips,
                             highlightClipId = state.highlightClipId,
@@ -685,18 +757,20 @@ private fun DrawScope.drawPianoKeys(
             strokeWidth = if (isC) 1f else 0.5f
         )
 
-        // Note label for every key
-        val noteName = NOTE_NAMES[octaveIndex]
-        val label = if (octaveIndex == 0) "C${displayNote / 12 - 1}" else noteName
-        val labelColor = if (octaveIndex == 0) onBgColor else muted2Color.copy(alpha = 0.6f)
-        val result = textMeasurer.measure(
-            text = label,
-            style = TextStyle(color = labelColor, fontSize = 10.sp)
-        )
-        drawText(
-            textLayoutResult = result,
-            topLeft = Offset(4f, y + (rowHeightPx - result.size.height) / 2f)
-        )
+        // Note label for every key (skip when rows are too small to read)
+        if (rowHeightPx >= 12f) {
+            val noteName = NOTE_NAMES[octaveIndex]
+            val label = if (octaveIndex == 0) "C${displayNote / 12 - 1}" else noteName
+            val labelColor = if (octaveIndex == 0) onBgColor else muted2Color.copy(alpha = 0.6f)
+            val result = textMeasurer.measure(
+                text = label,
+                style = TextStyle(color = labelColor, fontSize = 10.sp)
+            )
+            drawText(
+                textLayoutResult = result,
+                topLeft = Offset(4f, y + (rowHeightPx - result.size.height) / 2f)
+            )
+        }
     }
 }
 
@@ -1154,5 +1228,86 @@ private suspend fun AwaitPointerEventScope.handleMoveDrag(
         onCommit(dragNoteIds, snappedDeltaMs, pitchDelta)
     } else {
         onCancel()
+    }
+}
+
+/**
+ * Detect pinch-to-zoom gestures using [PointerEventPass.Initial] so events are
+ * intercepted before scroll modifiers. Single-finger events pass through unconsumed
+ * so normal scroll/tap/drag work normally. When 2+ pointers are detected, computes
+ * per-axis scale factors from finger span changes and reports the centroid.
+ */
+private suspend fun PointerInputScope.detectPinchZoom(
+    canStart: () -> Boolean,
+    onPinchStart: () -> Unit,
+    onPinchZoom: (scaleX: Float, scaleY: Float, centroidX: Float, centroidY: Float) -> Unit,
+    onPinchEnd: () -> Unit
+) {
+    awaitEachGesture {
+        // Wait for first finger
+        val firstDown = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+        // Don't consume -- let scroll handle it if no second finger arrives
+
+        var prevSpanX = 0f
+        var prevSpanY = 0f
+        var pinching = false
+
+        while (true) {
+            val event = awaitPointerEvent(pass = PointerEventPass.Initial)
+            val pressed = event.changes.filter { it.pressed }
+            if (pressed.isEmpty()) {
+                if (pinching) onPinchEnd()
+                break
+            }
+
+            if (pressed.size >= 2) {
+                if (!pinching) {
+                    if (!canStart()) {
+                        // Don't start pinch during an active note drag
+                        continue
+                    }
+                    pinching = true
+                    onPinchStart()
+                    // Initialize spans from current finger positions
+                    val xs = pressed.map { it.position.x }
+                    val ys = pressed.map { it.position.y }
+                    prevSpanX = (xs.max() - xs.min()).coerceAtLeast(1f)
+                    prevSpanY = (ys.max() - ys.min()).coerceAtLeast(1f)
+                    // Consume all changes to prevent scroll from seeing them
+                    event.changes.forEach { it.consume() }
+                    continue
+                }
+
+                // Compute current spans
+                val xs = pressed.map { it.position.x }
+                val ys = pressed.map { it.position.y }
+                val spanX = (xs.max() - xs.min()).coerceAtLeast(1f)
+                val spanY = (ys.max() - ys.min()).coerceAtLeast(1f)
+
+                val scaleX = spanX / prevSpanX
+                val scaleY = spanY / prevSpanY
+
+                // Centroid (average of all finger positions)
+                val centroidX = xs.average().toFloat()
+                val centroidY = ys.average().toFloat()
+
+                // Jitter filter: only report changes > 0.5%
+                if (abs(scaleX - 1f) > 0.005f || abs(scaleY - 1f) > 0.005f) {
+                    onPinchZoom(scaleX, scaleY, centroidX, centroidY)
+                    prevSpanX = spanX
+                    prevSpanY = spanY
+                }
+
+                // Consume all changes to prevent scroll
+                event.changes.forEach { it.consume() }
+            } else if (pinching) {
+                // Went from 2 fingers back to 1 -- end pinch
+                onPinchEnd()
+                // Consume the remaining finger to prevent scroll jump
+                event.changes.forEach { it.consume() }
+                break
+            }
+            // Single finger, not pinching -- don't consume, let scroll handle it
+        }
     }
 }
