@@ -130,7 +130,7 @@ private val TRACK_LANE_HEIGHT = 56.dp
 private val RULER_HEIGHT = 28.dp
 private val TIMELINE_END_PADDING_DP = 120.dp
 private const val MIN_EFFECTIVE_DURATION_MS = 200L
-private val TRIM_HANDLE_WIDTH = 12.dp
+private val TRIM_HANDLE_WIDTH = 10.dp
 private val TRIM_TOUCH_ZONE = 36.dp
 private val TAKE_ROW_HEIGHT = 48.dp
 private const val FAST_LONG_PRESS_MS = 200L
@@ -1641,16 +1641,46 @@ private fun BeatGridOverlay(
     }
 }
 
-/** Visual trim-handle indicator on the left or right edge of a track. */
+/** Knurled-grip trim handle — horizontal grooves matching the hardware aesthetic. */
 @Composable
 private fun TrimHandle(modifier: Modifier = Modifier) {
+    val bg = NjMuted2.copy(alpha = 0.78f)
     Box(
         modifier = modifier
             .width(TRIM_HANDLE_WIDTH)
             .fillMaxHeight()
-            .padding(vertical = 8.dp)
+            .padding(vertical = 5.dp)
             .clip(RoundedCornerShape(4.dp))
-            .background(NjMuted.copy(alpha = 0.45f))
+            .background(bg)
+            .drawWithContent {
+                drawContent()
+                // Knurled grooves: stacked horizontal ridges, same two-tone
+                // channel pattern used by HardwareGroove elsewhere in the app.
+                val grooveCount = 5
+                val grooveSpacing = 3.dp.toPx()
+                val totalHeight = (grooveCount - 1) * grooveSpacing
+                val startY = (size.height - totalHeight) / 2
+                val sw = 0.5.dp.toPx()
+                val inset = 2.5.dp.toPx()
+
+                for (i in 0 until grooveCount) {
+                    val y = startY + i * grooveSpacing
+                    // Dark shadow (top of groove)
+                    drawLine(
+                        Color.Black.copy(alpha = 0.50f),
+                        Offset(inset, y),
+                        Offset(size.width - inset, y),
+                        sw
+                    )
+                    // Light catch (bottom of groove)
+                    drawLine(
+                        Color.White.copy(alpha = 0.12f),
+                        Offset(inset, y + sw),
+                        Offset(size.width - inset, y + sw),
+                        sw
+                    )
+                }
+            }
     )
 }
 
