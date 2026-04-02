@@ -1234,8 +1234,17 @@ private suspend fun AwaitPointerEventScope.handleMoveDrag(
 /**
  * Detect pinch-to-zoom gestures using [PointerEventPass.Initial] so events are
  * intercepted before scroll modifiers. Single-finger events pass through unconsumed
- * so normal scroll/tap/drag work normally. When 2+ pointers are detected, computes
- * per-axis scale factors from finger span changes and reports the centroid.
+ * so normal scroll/tap/drag work normally.
+ *
+ * Tracks two specific pointer IDs for reliable direction detection:
+ * - **Crossing prevention:** Records the signed finger difference at pinch start.
+ *   If the sign flips (fingers crossed), zoom freezes on that axis. On uncross,
+ *   the baseline resets to prevent a jump.
+ * - **Proportional damping:** Each axis's zoom influence is scaled by how far apart
+ *   the fingers are on that axis at pinch start (soft threshold ~48dp). Small initial
+ *   spans contribute almost nothing, preventing cross-axis contamination.
+ * - **Drain on end:** When the pinch ends (2->1 finger), all remaining pointer events
+ *   are consumed until all fingers lift, preventing accidental note placement.
  */
 private suspend fun PointerInputScope.detectPinchZoom(
     canStart: () -> Boolean,
@@ -1243,14 +1252,24 @@ private suspend fun PointerInputScope.detectPinchZoom(
     onPinchZoom: (scaleX: Float, scaleY: Float, centroidX: Float, centroidY: Float) -> Unit,
     onPinchEnd: () -> Unit
 ) {
-    awaitEachGesture {
-        // Wait for first finger
-        val firstDown = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-        // Don't consume -- let scroll handle it if no second finger arrives
+    val softThresholdPx = 48.dp.toPx()
 
+    awaitEachGesture {
+        // Wait for first finger -- don't consume so scroll works if no second finger arrives
+        awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+
+        // Tracked pointer IDs for consistent direction detection
+        var firstPointerId: PointerId? = null
+        var secondPointerId: PointerId? = null
+        var initialSignX = 0f      // sign of (first.x - second.x) at pinch start
+        var initialSignY = 0f
+        var initialSpanX = 0f      // absolute span at pinch start (for damping weight)
+        var initialSpanY = 0f
         var prevSpanX = 0f
         var prevSpanY = 0f
         var pinching = false
+        var wasCrossedX = false
+        var wasCrossedY = false
 
         while (true) {
             val event = awaitPointerEvent(pass = PointerEventPass.Initial)
@@ -1263,48 +1282,95 @@ private suspend fun PointerInputScope.detectPinchZoom(
             if (pressed.size >= 2) {
                 if (!pinching) {
                     if (!canStart()) {
-                        // Don't start pinch during an active note drag
+                        // Don't start pinch during an active note drag -- let events pass through
                         continue
                     }
                     pinching = true
                     onPinchStart()
-                    // Initialize spans from current finger positions
-                    val xs = pressed.map { it.position.x }
-                    val ys = pressed.map { it.position.y }
-                    prevSpanX = (xs.max() - xs.min()).coerceAtLeast(1f)
-                    prevSpanY = (ys.max() - ys.min()).coerceAtLeast(1f)
-                    // Consume all changes to prevent scroll from seeing them
+
+                    // Lock the two pointer IDs we'll track for the rest of this gesture
+                    firstPointerId = pressed[0].id
+                    secondPointerId = pressed[1].id
+                    val p1 = pressed[0].position
+                    val p2 = pressed[1].position
+                    val dx = p1.x - p2.x
+                    val dy = p1.y - p2.y
+                    initialSignX = if (dx >= 0f) 1f else -1f
+                    initialSignY = if (dy >= 0f) 1f else -1f
+                    initialSpanX = abs(dx).coerceAtLeast(1f)
+                    initialSpanY = abs(dy).coerceAtLeast(1f)
+                    prevSpanX = initialSpanX
+                    prevSpanY = initialSpanY
+
                     event.changes.forEach { it.consume() }
                     continue
                 }
 
-                // Compute current spans
-                val xs = pressed.map { it.position.x }
-                val ys = pressed.map { it.position.y }
-                val spanX = (xs.max() - xs.min()).coerceAtLeast(1f)
-                val spanY = (ys.max() - ys.min()).coerceAtLeast(1f)
+                // Find our tracked pointers (ignore any additional fingers)
+                val p1 = pressed.find { it.id == firstPointerId }
+                val p2 = pressed.find { it.id == secondPointerId }
+                if (p1 == null || p2 == null) {
+                    // One of our tracked pointers was lost -- end pinch and drain
+                    onPinchEnd()
+                    event.changes.forEach { it.consume() }
+                    while (true) {
+                        val drain = awaitPointerEvent(pass = PointerEventPass.Initial)
+                        drain.changes.forEach { it.consume() }
+                        if (drain.changes.none { it.pressed }) break
+                    }
+                    break
+                }
 
-                val scaleX = spanX / prevSpanX
-                val scaleY = spanY / prevSpanY
+                val signedX = p1.position.x - p2.position.x
+                val signedY = p1.position.y - p2.position.y
 
-                // Centroid (average of all finger positions)
-                val centroidX = xs.average().toFloat()
-                val centroidY = ys.average().toFloat()
+                // Crossing detection: sign flip means fingers crossed on that axis
+                val crossedX = (signedX * initialSignX) < 0f
+                val crossedY = (signedY * initialSignY) < 0f
+
+                // On uncross transition, reset baseline to prevent accumulated jump
+                if (wasCrossedX && !crossedX) {
+                    prevSpanX = abs(signedX).coerceAtLeast(1f)
+                }
+                if (wasCrossedY && !crossedY) {
+                    prevSpanY = abs(signedY).coerceAtLeast(1f)
+                }
+                wasCrossedX = crossedX
+                wasCrossedY = crossedY
+
+                // When crossed, hold span at previous value so scale = 1.0 (frozen)
+                val spanX = if (crossedX) prevSpanX else abs(signedX).coerceAtLeast(1f)
+                val spanY = if (crossedY) prevSpanY else abs(signedY).coerceAtLeast(1f)
+
+                val rawScaleX = spanX / prevSpanX
+                val rawScaleY = spanY / prevSpanY
+
+                // Proportional damping: small initial spans contribute almost nothing
+                val dampX = (initialSpanX / softThresholdPx).coerceIn(0f, 1f)
+                val dampY = (initialSpanY / softThresholdPx).coerceIn(0f, 1f)
+                val scaleX = 1f + (rawScaleX - 1f) * dampX
+                val scaleY = 1f + (rawScaleY - 1f) * dampY
+
+                val centroidX = (p1.position.x + p2.position.x) / 2f
+                val centroidY = (p1.position.y + p2.position.y) / 2f
 
                 // Jitter filter: only report changes > 0.5%
                 if (abs(scaleX - 1f) > 0.005f || abs(scaleY - 1f) > 0.005f) {
                     onPinchZoom(scaleX, scaleY, centroidX, centroidY)
-                    prevSpanX = spanX
-                    prevSpanY = spanY
+                    if (!crossedX) prevSpanX = spanX
+                    if (!crossedY) prevSpanY = spanY
                 }
 
-                // Consume all changes to prevent scroll
                 event.changes.forEach { it.consume() }
             } else if (pinching) {
-                // Went from 2 fingers back to 1 -- end pinch
+                // Went from 2 fingers to 1 -- end pinch and drain until all fingers lift
                 onPinchEnd()
-                // Consume the remaining finger to prevent scroll jump
                 event.changes.forEach { it.consume() }
+                while (true) {
+                    val drain = awaitPointerEvent(pass = PointerEventPass.Initial)
+                    drain.changes.forEach { it.consume() }
+                    if (drain.changes.none { it.pressed }) break
+                }
                 break
             }
             // Single finger, not pinching -- don't consume, let scroll handle it
