@@ -49,7 +49,9 @@ fun DrumTrackDrawer(
     modifier: Modifier = Modifier,
     beatsPerBar: Int = 4,
     timeSignatureNumerator: Int = 4,
-    timeSignatureDenominator: Int = 4
+    timeSignatureDenominator: Int = 4,
+    globalPositionMs: Long = 0L,
+    isPlaying: Boolean = false
 ) {
     val goldBorderColor = NjAmber.copy(alpha = 0.5f)
 
@@ -113,11 +115,14 @@ fun DrumTrackDrawer(
                     if (pattern != null) {
                         Spacer(Modifier.width(12.dp))
 
-                        // Resolution picker
+                        // Resolution picker (reads from viewResolution)
                         val resPresets = listOf(8, 16, 32)
-                        val currentRes = if (timeSignatureNumerator > 0) {
-                            (pattern.stepsPerBar * timeSignatureDenominator) / timeSignatureNumerator
-                        } else 16
+                        val currentRes = pattern.viewResolution.let { vr ->
+                            if (vr > 0) vr
+                            else if (timeSignatureNumerator > 0) {
+                                (pattern.stepsPerBar * timeSignatureDenominator) / timeSignatureNumerator
+                            } else 16
+                        }
                         val resIndex = resPresets.indexOf(currentRes)
 
                         Row(
@@ -281,11 +286,14 @@ fun DrumTrackDrawer(
 
                     // Resolution + Bar count controls
                     if (pattern != null) {
-                        // Resolution picker
+                        // Resolution picker (reads from viewResolution)
                         val resPresets = listOf(8, 16, 32)
-                        val currentRes = if (timeSignatureNumerator > 0) {
-                            (pattern.stepsPerBar * timeSignatureDenominator) / timeSignatureNumerator
-                        } else 16
+                        val currentRes = pattern.viewResolution.let { vr ->
+                            if (vr > 0) vr
+                            else if (timeSignatureNumerator > 0) {
+                                (pattern.stepsPerBar * timeSignatureDenominator) / timeSignatureNumerator
+                            } else 16
+                        }
                         val resIndex = resPresets.indexOf(currentRes)
 
                         Row(
@@ -417,7 +425,12 @@ fun DrumTrackDrawer(
                     trackId = track.id,
                     pattern = pattern,
                     onAction = onAction,
-                    beatsPerBar = beatsPerBar
+                    beatsPerBar = beatsPerBar,
+                    bpm = bpm,
+                    timeSignatureDenominator = timeSignatureDenominator,
+                    globalPositionMs = globalPositionMs,
+                    isPlaying = isPlaying,
+                    viewResolution = pattern.viewResolution
                 )
             }
         }

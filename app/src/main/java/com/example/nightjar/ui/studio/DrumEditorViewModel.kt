@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.nightjar.audio.MusicalTimeConverter
 import com.example.nightjar.audio.OboeAudioEngine
+import com.example.nightjar.data.db.dao.TrackDao
 import com.example.nightjar.data.db.entity.DrumStepEntity
 import com.example.nightjar.data.repository.DrumRepository
 import com.example.nightjar.data.repository.IdeaRepository
@@ -46,9 +47,12 @@ data class DrumEditorState(
     val bpm: Double = 120.0,
     val timeSignatureNumerator: Int = 4,
     val timeSignatureDenominator: Int = 4,
-    val gridResolution: Int = 16,
     val isSnapEnabled: Boolean = true,
-    val isLoading: Boolean = true
+    val isLoading: Boolean = true,
+    val trackVolume: Float = 1f,
+    val trackMuted: Boolean = false,
+    /** View resolution as note subdivision (e.g. 8, 16, 32). Controls visible columns. */
+    val viewResolution: Int = 16
 )
 
 /** User-initiated actions on the drum editor. */
@@ -71,7 +75,8 @@ class DrumEditorViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val drumRepo: DrumRepository,
     private val ideaRepo: IdeaRepository,
-    private val audioEngine: OboeAudioEngine
+    private val audioEngine: OboeAudioEngine,
+    private val trackDao: TrackDao
 ) : ViewModel() {
 
     private val trackId: Long = savedStateHandle["trackId"] ?: 0L
@@ -102,6 +107,7 @@ class DrumEditorViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val idea = ideaRepo.getIdeaById(ideaId)
+                val track = trackDao.getTrackById(trackId)
 
                 // Load all clips for this drum track
                 val clipEntities = drumRepo.getClipsForTrack(trackId)
@@ -118,6 +124,15 @@ class DrumEditorViewModel @Inject constructor(
                     )
                 }
 
+                // Derive initial view resolution from the highlighted clip
+                val num = idea?.timeSignatureNumerator ?: 4
+                val den = idea?.timeSignatureDenominator ?: 4
+                val highlightClip = editorClips.find { it.clipId == navClipId }
+                    ?: editorClips.firstOrNull()
+                val initialViewRes = if (highlightClip != null && num > 0) {
+                    (highlightClip.stepsPerBar * den) / num
+                } else 16
+
                 _state.update {
                     it.copy(
                         trackId = trackId,
@@ -125,10 +140,12 @@ class DrumEditorViewModel @Inject constructor(
                         clips = editorClips,
                         highlightClipId = navClipId,
                         bpm = idea?.bpm ?: 120.0,
-                        timeSignatureNumerator = idea?.timeSignatureNumerator ?: 4,
-                        timeSignatureDenominator = idea?.timeSignatureDenominator ?: 4,
-                        gridResolution = idea?.gridResolution ?: 16,
-                        isLoading = false
+                        timeSignatureNumerator = num,
+                        timeSignatureDenominator = den,
+                        isLoading = false,
+                        trackVolume = track?.volume ?: 1f,
+                        trackMuted = track?.isMuted ?: false,
+                        viewResolution = initialViewRes
                     )
                 }
 
@@ -198,11 +215,98 @@ class DrumEditorViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Cycle view resolution through [8, 16, 32]. Resolution is a view filter:
+     * lowering only changes stride (no DB mutation). Raising upscales any clips
+     * whose storage resolution is below the new view (lossless integer scaling).
+     */
     private fun cycleGridResolution() {
-        val presets = listOf(4, 8, 16, 32)
-        val current = _state.value.gridResolution
-        val nextIndex = (presets.indexOf(current) + 1) % presets.size
-        _state.update { it.copy(gridResolution = presets[nextIndex]) }
+        val resPresets = listOf(8, 16, 32)
+        val st = _state.value
+
+        val currentRes = st.viewResolution
+        val resIndex = resPresets.indexOf(currentRes)
+        val nextIndex = if (resIndex >= 0) (resIndex + 1) % resPresets.size else 0
+        val newResolution = resPresets[nextIndex]
+
+        val viewStepsPerBar = MusicalTimeConverter.stepsPerBar(
+            newResolution, st.timeSignatureNumerator, st.timeSignatureDenominator
+        )
+
+        viewModelScope.launch {
+            try {
+                // Upscale any clips whose storage resolution is below the new view
+                val updatedClips = st.clips.toMutableList()
+                var needsEnginePush = false
+                for (i in updatedClips.indices) {
+                    val clip = updatedClips[i]
+                    if (clip.stepsPerBar < viewStepsPerBar) {
+                        drumRepo.remapPatternResolution(
+                            clip.patternId, clip.stepsPerBar, viewStepsPerBar, clip.bars
+                        )
+                        updatedClips[i] = clip.copy(stepsPerBar = viewStepsPerBar)
+                        needsEnginePush = true
+                    }
+                }
+                _state.update { state ->
+                    state.copy(
+                        clips = updatedClips,
+                        viewResolution = newResolution
+                    )
+                }
+                if (needsEnginePush) {
+                    pushDrumClipsToEngine()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to cycle resolution", e)
+                _effects.emit(DrumEditorEffect.ShowError(e.message ?: "Failed to change resolution"))
+            }
+        }
+    }
+
+    /** Push per-clip drum pattern data to the C++ step sequencer. */
+    private fun pushDrumClipsToEngine() {
+        val st = _state.value
+        val clips = st.clips
+        if (clips.isEmpty()) return
+
+        val clipStepsPerBar = IntArray(clips.size)
+        val clipBars = IntArray(clips.size)
+        val clipBeatsPerBar = IntArray(clips.size)
+        val clipOffsetsMs = LongArray(clips.size)
+        val clipHitCounts = IntArray(clips.size)
+
+        val allStepIndices = mutableListOf<Int>()
+        val allDrumNotes = mutableListOf<Int>()
+        val allVelocities = mutableListOf<Float>()
+
+        for (i in clips.indices) {
+            val clip = clips[i]
+            clipStepsPerBar[i] = clip.stepsPerBar
+            clipBars[i] = clip.bars
+            clipBeatsPerBar[i] = st.timeSignatureNumerator
+            clipOffsetsMs[i] = clip.offsetMs
+            clipHitCounts[i] = clip.steps.size
+
+            for (step in clip.steps) {
+                allStepIndices.add(step.stepIndex)
+                allDrumNotes.add(step.drumNote)
+                allVelocities.add(step.velocity)
+            }
+        }
+
+        audioEngine.updateDrumPatternClips(
+            volume = st.trackVolume,
+            muted = st.trackMuted,
+            clipStepsPerBar = clipStepsPerBar,
+            clipBars = clipBars,
+            clipBeatsPerBar = clipBeatsPerBar,
+            clipOffsetsMs = clipOffsetsMs,
+            clipHitCounts = clipHitCounts,
+            hitStepIndices = allStepIndices.toIntArray(),
+            hitDrumNotes = allDrumNotes.toIntArray(),
+            hitVelocities = allVelocities.toFloatArray()
+        )
     }
 
     override fun onCleared() {

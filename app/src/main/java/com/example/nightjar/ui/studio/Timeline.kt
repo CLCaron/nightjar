@@ -495,7 +495,9 @@ fun TimelinePanel(
                             onAction = onAction,
                             beatsPerBar = timeSignatureNumerator,
                             timeSignatureNumerator = timeSignatureNumerator,
-                            timeSignatureDenominator = timeSignatureDenominator
+                            timeSignatureDenominator = timeSignatureDenominator,
+                            globalPositionMs = globalPositionMs,
+                            isPlaying = isPlaying
                         )
                     }
                     track.isMidi -> {

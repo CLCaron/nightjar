@@ -29,13 +29,17 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.input.pointer.pointerInput
@@ -100,9 +104,11 @@ fun DrumEditorScreen(
     } ?: 0L
     val contentMs = maxOf(maxClipEndMs + paddingMs, state.totalDurationMs + paddingMs, minContentMs)
 
-    // Compute dp-per-ms so cells are square: step_width_dp = ROW_HEIGHT_DP
-    val maxStepsPerBar = state.clips.maxOfOrNull { it.stepsPerBar } ?: 16
-    val stepMs = measureMs.toDouble() / maxStepsPerBar
+    // Compute dp-per-ms so cells are square at the view resolution
+    val viewStepsPerBar = MusicalTimeConverter.stepsPerBar(
+        state.viewResolution, state.timeSignatureNumerator, state.timeSignatureDenominator
+    )
+    val stepMs = measureMs.toDouble() / viewStepsPerBar
     val pxPerMsDp = if (stepMs > 0) ROW_HEIGHT_DP / stepMs else DEFAULT_PX_PER_MS.toDouble()
     val pxPerMs = (pxPerMsDp * density.density).toFloat()
     val gridWidthDp = (contentMs * pxPerMsDp).toFloat().dp
@@ -120,6 +126,28 @@ fun DrumEditorScreen(
     val surfaceColor = NjSurface
     val surface2Color = NjSurface2
     val laneColor = NjLane
+
+    // Auto-scroll: 60fps follow, pinned ~1/5 from left edge
+    val currentPositionMs = rememberUpdatedState(state.positionMs)
+    val currentIsPlaying = rememberUpdatedState(state.isPlaying)
+    val totalContentWidthPx = with(density) { gridWidthDp.toPx() }
+
+    LaunchedEffect(pxPerMs) {
+        while (true) {
+            delay(16L)
+            if (!currentIsPlaying.value) continue
+            val maxScroll = horizontalScrollState.maxValue
+            if (maxScroll <= 0) continue
+            if (horizontalScrollState.isScrollInProgress) continue
+
+            val playheadPx = currentPositionMs.value * pxPerMs
+            // viewportWidth = totalContent - maxScroll
+            val viewportWidth = (totalContentWidthPx - maxScroll).coerceAtLeast(1f)
+            val scrollTarget = (playheadPx - viewportWidth / 5f).toInt()
+                .coerceIn(0, maxScroll)
+            horizontalScrollState.scrollTo(scrollTarget)
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -147,7 +175,7 @@ fun DrumEditorScreen(
             },
             actions = {
                 NjButton(
-                    text = "1/${state.gridResolution}",
+                    text = "1/${state.viewResolution}",
                     onClick = { viewModel.onAction(DrumEditorAction.CycleGridResolution) },
                     textColor = NjAmber.copy(alpha = 0.8f)
                 )
@@ -241,7 +269,7 @@ fun DrumEditorScreen(
                     modifier = Modifier
                         .width(gridWidthDp)
                         .height(totalGridHeight)
-                        .pointerInput(state.clips, state.bpm, pxPerMs) {
+                        .pointerInput(state.clips, state.bpm, pxPerMs, viewStepsPerBar) {
                             awaitEachGesture {
                                 val down = awaitFirstDown(requireUnconsumed = false)
                                 val up = waitForUpOrCancellation()
@@ -261,10 +289,14 @@ fun DrumEditorScreen(
                                                 state.bpm, state.timeSignatureNumerator,
                                                 state.timeSignatureDenominator
                                             ) * clip.bars
-                                            val stepIndex = if (clipDurationMs > 0) {
-                                                ((localMs.toDouble() / clipDurationMs) * clip.totalSteps)
-                                                    .toInt().coerceIn(0, clip.totalSteps - 1)
+                                            // Map tap to view column, then multiply by stride for real step
+                                            val clipViewSteps = viewStepsPerBar * clip.bars
+                                            val viewCol = if (clipDurationMs > 0) {
+                                                ((localMs.toDouble() / clipDurationMs) * clipViewSteps)
+                                                    .toInt().coerceIn(0, clipViewSteps - 1)
                                             } else 0
+                                            val stride = (clip.stepsPerBar / viewStepsPerBar).coerceAtLeast(1)
+                                            val stepIndex = viewCol * stride
                                             viewModel.onAction(
                                                 DrumEditorAction.ToggleStep(
                                                     clip.clipId, clip.patternId, stepIndex, drumNote
@@ -287,6 +319,7 @@ fun DrumEditorScreen(
                         beatsPerBar = state.timeSignatureNumerator,
                         timeSignatureNumerator = state.timeSignatureNumerator,
                         timeSignatureDenominator = state.timeSignatureDenominator,
+                        viewStepsPerBar = viewStepsPerBar,
                         contentMs = contentMs,
                         positionMs = state.positionMs,
                         isPlaying = state.isPlaying,
@@ -414,6 +447,7 @@ private fun DrawScope.drawDrumGrid(
     beatsPerBar: Int,
     timeSignatureNumerator: Int,
     timeSignatureDenominator: Int,
+    viewStepsPerBar: Int,
     contentMs: Long,
     positionMs: Long,
     isPlaying: Boolean,
@@ -510,65 +544,127 @@ private fun DrawScope.drawDrumGrid(
         // Build active steps set for this clip
         val activeSteps = clip.steps.map { it.stepIndex to it.drumNote }.toSet()
 
+        // Stride-based view: show every Nth step
+        val stride = (clip.stepsPerBar / viewStepsPerBar).coerceAtLeast(1)
+        val viewTotalSteps = viewStepsPerBar * clip.bars
+
+        // Compute per-clip playhead position for glow (in view-column space)
+        val msPerViewStep = if (viewTotalSteps > 0) clipDurationMs / viewTotalSteps else 0.0
+        val localMs = positionMs - clip.offsetMs
+        val playheadInClip = isPlaying && localMs >= 0 && localMs < clipDurationMs.toLong()
+        val currentStepFraction = if (playheadInClip && msPerViewStep > 0.0) {
+            localMs.toDouble() / msPerViewStep
+        } else -1.0
+
         // Draw step cells within the clip (square cells with gaps)
-        val stepsPerBeat = if (beatsPerBar > 0) clip.stepsPerBar / beatsPerBar else 4
-        val stepWidthPx = clipWidthPx / clip.totalSteps.coerceAtLeast(1)
+        val viewStepsPerBeat = if (beatsPerBar > 0) viewStepsPerBar / beatsPerBar else 4
+        val stepWidthPx = clipWidthPx / viewTotalSteps.coerceAtLeast(1)
         val halfGap = cellGapPx / 2f
 
-        for (step in 0 until clip.totalSteps) {
-            val stepInBeat = if (stepsPerBeat > 0) step % stepsPerBeat else step
+        for (displayCol in 0 until viewTotalSteps) {
+            val realStep = displayCol * stride
+            val stepInBeat = if (viewStepsPerBeat > 0) displayCol % viewStepsPerBeat else displayCol
             val isDownbeat = stepInBeat == 0
+
+            // Compute glow intensity for this display column
+            val cellGlow = if (currentStepFraction >= 0.0) {
+                val dist = currentStepFraction - displayCol.toDouble()
+                when {
+                    dist >= 0.0 && dist < 1.0 -> 1f          // Current step: full glow
+                    dist >= 1.0 && dist < 2.5 -> (1f - ((dist - 1.0) / 1.5).toFloat()).coerceAtLeast(0f) // Trail: fade out
+                    else -> 0f
+                }
+            } else 0f
 
             for (rowIndex in 0 until numRows) {
                 val drumNote = GM_DRUM_ROWS[rowIndex].note
-                val isActive = (step to drumNote) in activeSteps
+                val isActive = (realStep to drumNote) in activeSteps
 
-                // Center the square cell within the step column and row
-                val stepX = clipStartPx + step * stepWidthPx
-                val x = stepX + halfGap
-                val y = rowIndex * rowHeightPx + halfGap
+                // Center the square cell within the display column and row
+                val stepX = clipStartPx + displayCol * stepWidthPx
+                val baseX = stepX + halfGap
+                val baseY = rowIndex * rowHeightPx + halfGap
                 val w = cellSizePx
                 val h = cellSizePx
 
+                // Scale punch for active cells under the playhead
+                val scaleFactor = if (isActive && cellGlow > 0f) 1f + cellGlow * 0.12f else 1f
+                val scaledW = w * scaleFactor
+                val scaledH = h * scaleFactor
+                val x = baseX - (scaledW - w) / 2f
+                val y = baseY - (scaledH - h) / 2f
+
                 val fillColor = if (isActive) {
-                    drumRowColors[rowIndex].copy(alpha = 0.85f)
+                    if (cellGlow > 0f) drumRowColors[rowIndex] // Full brightness when firing
+                    else drumRowColors[rowIndex].copy(alpha = 0.85f)
                 } else if (isDownbeat) {
                     downbeatCellColor
                 } else {
                     offbeatCellColor
                 }
-                val cr = CornerRadius(3f, 3f)
-                val bw = 1f
+                val cr = CornerRadius(3.dp.toPx())
+                val bw = 1.dp.toPx()
 
                 // Main fill
-                drawRoundRect(color = fillColor, topLeft = Offset(x, y), size = Size(w, h), cornerRadius = cr)
+                drawRoundRect(color = fillColor, topLeft = Offset(x, y), size = Size(scaledW, scaledH), cornerRadius = cr)
 
                 // Bevel edges
                 if (isActive) {
-                    // Pressed in: dark top/left, light bottom/right
-                    drawLine(Color.Black.copy(alpha = 0.3f), Offset(x + bw, y + bw), Offset(x + w - bw, y + bw), bw)
-                    drawLine(Color.Black.copy(alpha = 0.25f), Offset(x + bw, y + bw), Offset(x + bw, y + h - bw), bw)
-                    drawLine(Color.White.copy(alpha = 0.08f), Offset(x + bw, y + h - bw), Offset(x + w - bw, y + h - bw), bw)
-                    drawLine(Color.White.copy(alpha = 0.06f), Offset(x + w - bw, y + bw), Offset(x + w - bw, y + h - bw), bw)
+                    drawLine(Color.Black.copy(alpha = 0.3f), Offset(x + bw, y + bw), Offset(x + scaledW - bw, y + bw), bw)
+                    drawLine(Color.Black.copy(alpha = 0.25f), Offset(x + bw, y + bw), Offset(x + bw, y + scaledH - bw), bw)
+                    drawLine(Color.White.copy(alpha = 0.08f), Offset(x + bw, y + scaledH - bw), Offset(x + scaledW - bw, y + scaledH - bw), bw)
+                    drawLine(Color.White.copy(alpha = 0.06f), Offset(x + scaledW - bw, y + bw), Offset(x + scaledW - bw, y + scaledH - bw), bw)
                 } else {
-                    // Raised: light top/left, dark bottom/right
-                    drawLine(Color.White.copy(alpha = 0.12f), Offset(x + bw, y + bw), Offset(x + w - bw, y + bw), bw)
-                    drawLine(Color.White.copy(alpha = 0.08f), Offset(x + bw, y + bw), Offset(x + bw, y + h - bw), bw)
-                    drawLine(Color.Black.copy(alpha = 0.25f), Offset(x + bw, y + h - bw), Offset(x + w - bw, y + h - bw), bw)
-                    drawLine(Color.Black.copy(alpha = 0.2f), Offset(x + w - bw, y + bw), Offset(x + w - bw, y + h - bw), bw)
+                    drawLine(Color.White.copy(alpha = 0.12f), Offset(x + bw, y + bw), Offset(x + scaledW - bw, y + bw), bw)
+                    drawLine(Color.White.copy(alpha = 0.08f), Offset(x + bw, y + bw), Offset(x + bw, y + scaledH - bw), bw)
+                    drawLine(Color.Black.copy(alpha = 0.25f), Offset(x + bw, y + scaledH - bw), Offset(x + scaledW - bw, y + scaledH - bw), bw)
+                    drawLine(Color.Black.copy(alpha = 0.2f), Offset(x + scaledW - bw, y + bw), Offset(x + scaledW - bw, y + scaledH - bw), bw)
+                }
+
+                // Glow overlay
+                if (cellGlow > 0f) {
+                    val cx = x + scaledW / 2f
+                    val cy = y + scaledH / 2f
+                    if (isActive) {
+                        // Amber radial bloom
+                        drawCircle(
+                            brush = Brush.radialGradient(
+                                colors = listOf(
+                                    amberColor.copy(alpha = cellGlow * 0.7f),
+                                    Color.Transparent
+                                ),
+                                center = Offset(cx, cy),
+                                radius = scaledW * 1.0f
+                            ),
+                            radius = scaledW * 1.0f,
+                            center = Offset(cx, cy)
+                        )
+                        // White hot-spot center flash
+                        drawCircle(
+                            brush = Brush.radialGradient(
+                                colors = listOf(
+                                    Color.White.copy(alpha = cellGlow * 0.35f),
+                                    Color.Transparent
+                                ),
+                                center = Offset(cx, cy),
+                                radius = scaledW * 0.4f
+                            ),
+                            radius = scaledW * 0.4f,
+                            center = Offset(cx, cy)
+                        )
+                    } else {
+                        // Subtle amber wash on inactive cells
+                        drawRoundRect(
+                            color = amberColor.copy(alpha = cellGlow * 0.18f),
+                            topLeft = Offset(x, y),
+                            size = Size(scaledW, scaledH),
+                            cornerRadius = cr
+                        )
+                    }
                 }
             }
         }
     }
 
-    // Playhead
-    if (isPlaying || positionMs > 0) {
-        val playheadX = positionMs * pxPerMs
-        drawLine(
-            color = amberColor,
-            start = Offset(playheadX, 0f),
-            end = Offset(playheadX, totalHeight),
-            strokeWidth = 2f
-        )
-    }
+    // Playhead removed -- sweep glow on cells is the only playback indicator
 }

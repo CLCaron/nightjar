@@ -1633,7 +1633,16 @@ class StudioViewModel @Inject constructor(
                 }
             }
 
-            val drumState = DrumPatternUiState(clips = clipUiStates)
+            // Derive initial view resolution from the first clip's stepsPerBar
+            val currentState = _state.value
+            val firstClip = clipUiStates.firstOrNull()
+            val initialViewRes = if (firstClip != null && currentState.timeSignatureNumerator > 0) {
+                (firstClip.stepsPerBar * currentState.timeSignatureDenominator) / currentState.timeSignatureNumerator
+            } else 16
+            val drumState = DrumPatternUiState(
+                clips = clipUiStates,
+                viewResolution = initialViewRes
+            )
             patterns[track.id] = drumState
             pushDrumClipsToEngine(track, drumState)
             // Observe the first clip's pattern for step changes
@@ -1856,36 +1865,47 @@ class StudioViewModel @Inject constructor(
         }
     }
 
-    /** Change the resolution (note subdivision) for the selected clip's pattern. */
+    /**
+     * Change the view resolution for a drum track. Resolution is a view filter:
+     * the DB stores the highest-ever resolution. Lowering resolution just changes
+     * which columns are visible (stride increases). Raising resolution upscales
+     * any clips whose stepsPerBar is too small (lossless integer scaling).
+     */
     private fun setPatternResolution(trackId: Long, resolution: Int) {
         val st = _state.value
         val drumState = st.drumPatterns[trackId] ?: return
-        val selectedClip = drumState.selectedClip ?: return
-        val oldStepsPerBar = selectedClip.stepsPerBar
-        val newStepsPerBar = MusicalTimeConverter.stepsPerBar(
+        val viewStepsPerBar = MusicalTimeConverter.stepsPerBar(
             resolution, st.timeSignatureNumerator, st.timeSignatureDenominator
         )
-        if (newStepsPerBar == oldStepsPerBar) return
 
         viewModelScope.launch {
             try {
-                drumRepo.remapPatternResolution(
-                    selectedClip.patternId, oldStepsPerBar, newStepsPerBar, selectedClip.bars
-                )
-                // Update UI state
+                // Upscale any clips whose storage resolution is below the new view
                 val updatedClips = drumState.clips.toMutableList()
-                val idx = drumState.selectedClipIndex
-                if (idx in updatedClips.indices) {
-                    updatedClips[idx] = updatedClips[idx].copy(stepsPerBar = newStepsPerBar)
+                var needsEnginePush = false
+                for (i in updatedClips.indices) {
+                    val clip = updatedClips[i]
+                    if (clip.stepsPerBar < viewStepsPerBar) {
+                        drumRepo.remapPatternResolution(
+                            clip.patternId, clip.stepsPerBar, viewStepsPerBar, clip.bars
+                        )
+                        updatedClips[i] = clip.copy(stepsPerBar = viewStepsPerBar)
+                        needsEnginePush = true
+                    }
                 }
+                // Update view resolution (always, even if no upscale)
                 _state.update {
                     it.copy(
-                        drumPatterns = it.drumPatterns + (trackId to drumState.copy(clips = updatedClips))
+                        drumPatterns = it.drumPatterns + (trackId to drumState.copy(
+                            clips = updatedClips,
+                            viewResolution = resolution
+                        ))
                     )
                 }
-                // Re-push to engine
-                val track = _state.value.tracks.find { it.id == trackId } ?: return@launch
-                pushDrumClipsToEngine(track, _state.value.drumPatterns[trackId]!!)
+                if (needsEnginePush) {
+                    val track = _state.value.tracks.find { it.id == trackId } ?: return@launch
+                    pushDrumClipsToEngine(track, _state.value.drumPatterns[trackId]!!)
+                }
             } catch (e: Exception) {
                 _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to change resolution."))
             }

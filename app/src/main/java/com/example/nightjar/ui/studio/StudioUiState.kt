@@ -45,7 +45,9 @@ data class MidiClipDragState(
 /** Snapshot of a drum pattern for UI rendering, keyed by track ID. Per-clip data model. */
 data class DrumPatternUiState(
     val clips: List<DrumClipUiState> = emptyList(),
-    val selectedClipIndex: Int = 0
+    val selectedClipIndex: Int = 0,
+    /** View resolution as note subdivision (e.g. 8, 16, 32). 0 = derive from stepsPerBar. */
+    val viewResolution: Int = 0
 ) {
     /** The currently selected clip (for editing). */
     val selectedClip: DrumClipUiState?
