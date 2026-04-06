@@ -51,7 +51,8 @@ fun DrumTrackDrawer(
     timeSignatureNumerator: Int = 4,
     timeSignatureDenominator: Int = 4,
     globalPositionMs: Long = 0L,
-    isPlaying: Boolean = false
+    isPlaying: Boolean = false,
+    isAnimating: Boolean = false
 ) {
     val goldBorderColor = NjAmber.copy(alpha = 0.5f)
 
@@ -430,7 +431,8 @@ fun DrumTrackDrawer(
                     timeSignatureDenominator = timeSignatureDenominator,
                     globalPositionMs = globalPositionMs,
                     isPlaying = isPlaying,
-                    viewResolution = pattern.viewResolution
+                    viewResolution = pattern.viewResolution,
+                    isAnimating = isAnimating
                 )
             }
         }

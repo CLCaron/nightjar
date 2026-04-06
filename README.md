@@ -82,6 +82,7 @@ Nightjar is in active development, working toward a v1.0 Play Store release.
 - Clip-based audio arrangement (Track -> Clips -> Takes) aligned with MIDI and drum track models
 - Per-clip take management with active take switching, take count badges, and clip-scoped expansion
 - Drag-to-reposition, non-destructive trim, per-track volume/mute/solo/delete
+- Playhead auto-follow with fixed overlay line scoped to ruler and track lanes (does not bleed through drawers or other UI). Opening drawers or interacting with non-timeline controls preserves follow state.
 - Loop playback with ruler scrub-to-seek and loop handle adjustment
 - Timeline ruler as primary scrub surface (tap or drag to seek)
 - Studio transport bar: Restart, Play/Pause, Rec (right cluster) with Loop/Clear rocker pill (left). Responsive layout inlines LCD in landscape. Sticky pinned overlay when scrolled past.

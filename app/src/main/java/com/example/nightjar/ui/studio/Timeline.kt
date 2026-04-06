@@ -271,80 +271,101 @@ fun TimelinePanel(
         label = "columnWidth"
     )
 
+    // Pre-compute the fixed playhead X position for follow-mode overlays.
+    // Each ruler/track row draws its own overlay so the line doesn't bleed
+    // through drawers or other non-timeline content.
+    val followLineColor = NjAmber
+    val followLineXPx = if (isFollowActive) {
+        with(density) { columnWidth.toPx() + scrollState.viewportSize / 4f }
+    } else 0f
+
+    // Disengage follow only when the user touches scrollable timeline content
+    // (ruler or track lanes), not headers, drawers, or other controls.
+    val disengageFollowModifier = Modifier.pointerInput(Unit) {
+        awaitEachGesture {
+            awaitFirstDown(requireUnconsumed = false)
+            isFollowEligible = false
+            isFollowActive = false
+        }
+    }
+
     Box(modifier = modifier.fillMaxWidth()) {
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .pointerInput(Unit) {
-                // Disengage follow on any user touch in the timeline area
-                awaitEachGesture {
-                    awaitFirstDown(requireUnconsumed = false)
-                    isFollowEligible = false
-                    isFollowActive = false
-                }
-            }
+        modifier = Modifier.fillMaxWidth()
     ) {
         // ── Ruler row ──────────────────────────────────────────────
-        Row(Modifier.fillMaxWidth()) {
-            MasterCollapseHandle(
-                columnWidth = columnWidth,
-                anyCollapsed = headersCollapsedMode,
-                onToggle = { onAction(StudioAction.ToggleAllTrackHeaders) }
-            )
+        Box(Modifier.fillMaxWidth()) {
+            Row(Modifier.fillMaxWidth()) {
+                MasterCollapseHandle(
+                    columnWidth = columnWidth,
+                    anyCollapsed = headersCollapsedMode,
+                    onToggle = { onAction(StudioAction.ToggleAllTrackHeaders) }
+                )
 
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .horizontalScroll(scrollState)
-            ) {
-                Box(Modifier.width(timelineWidthDp)) {
-                    TimeRuler(
-                        totalDurationMs = totalDurationMs,
-                        msPerDp = msPerDp,
-                        timelineWidth = timelineWidthDp,
-                        bpm = bpm,
-                        timeSignatureNumerator = timeSignatureNumerator,
-                        timeSignatureDenominator = timeSignatureDenominator,
-                        gridResolution = gridResolution
-                    )
+                Box(
+                    modifier = disengageFollowModifier
+                        .weight(1f)
+                        .horizontalScroll(scrollState)
+                ) {
+                    Box(Modifier.width(timelineWidthDp)) {
+                        TimeRuler(
+                            totalDurationMs = totalDurationMs,
+                            msPerDp = msPerDp,
+                            timelineWidth = timelineWidthDp,
+                            bpm = bpm,
+                            timeSignatureNumerator = timeSignatureNumerator,
+                            timeSignatureDenominator = timeSignatureDenominator,
+                            gridResolution = gridResolution
+                        )
 
-                    if (loopStartMs != null && loopEndMs != null) {
-                        LoopOverlaySegment(
+                        if (loopStartMs != null && loopEndMs != null) {
+                            LoopOverlaySegment(
+                                loopStartMs = loopStartMs,
+                                loopEndMs = loopEndMs,
+                                isLoopEnabled = isLoopEnabled,
+                                msPerDp = msPerDp,
+                                height = RULER_HEIGHT,
+                                showHandles = true
+                            )
+                        }
+
+                        RulerGestureLayer(
                             loopStartMs = loopStartMs,
                             loopEndMs = loopEndMs,
-                            isLoopEnabled = isLoopEnabled,
-                            msPerDp = msPerDp,
-                            height = RULER_HEIGHT,
-                            showHandles = true
-                        )
-                    }
-
-                    RulerGestureLayer(
-                        loopStartMs = loopStartMs,
-                        loopEndMs = loopEndMs,
-                        cursorPositionMs = cursorPositionMs,
-                        isRecording = isRecording,
-                        msPerDp = msPerDp,
-                        totalDurationMs = totalDurationMs,
-                        timelineWidth = timelineWidthDp,
-                        onScrub = onScrub,
-                        onScrubFinished = onScrubFinished,
-                        onAction = onAction
-                    )
-
-                    if (!isFollowActive) {
-                        CursorSegment(
                             cursorPositionMs = cursorPositionMs,
+                            isRecording = isRecording,
                             msPerDp = msPerDp,
-                            height = RULER_HEIGHT,
-                            showTriangle = true
+                            totalDurationMs = totalDurationMs,
+                            timelineWidth = timelineWidthDp,
+                            onScrub = onScrub,
+                            onScrubFinished = onScrubFinished,
+                            onAction = onAction
                         )
-                        PlayheadSegment(
-                            globalPositionMs = globalPositionMs,
-                            msPerDp = msPerDp,
-                            height = RULER_HEIGHT
-                        )
+
+                        if (!isFollowActive) {
+                            CursorSegment(
+                                cursorPositionMs = cursorPositionMs,
+                                msPerDp = msPerDp,
+                                height = RULER_HEIGHT,
+                                showTriangle = true
+                            )
+                            PlayheadSegment(
+                                globalPositionMs = globalPositionMs,
+                                msPerDp = msPerDp,
+                                height = RULER_HEIGHT
+                            )
+                        }
                     }
+                }
+            }
+            if (isFollowActive) {
+                Canvas(modifier = Modifier.matchParentSize()) {
+                    drawLine(
+                        color = followLineColor,
+                        start = Offset(followLineXPx, 0f),
+                        end = Offset(followLineXPx, size.height),
+                        strokeWidth = 2.dp.toPx()
+                    )
                 }
             }
         }
@@ -377,7 +398,7 @@ fun TimelinePanel(
                 )
 
                 Box(
-                    modifier = Modifier
+                    modifier = disengageFollowModifier
                         .weight(1f)
                         .horizontalScroll(scrollState)
                 ) {
@@ -476,6 +497,16 @@ fun TimelinePanel(
                     }
                 }
             }
+            if (isFollowActive) {
+                Canvas(modifier = Modifier.matchParentSize()) {
+                    drawLine(
+                        color = followLineColor,
+                        start = Offset(followLineXPx, 0f),
+                        end = Offset(followLineXPx, size.height),
+                        strokeWidth = 2.dp.toPx()
+                    )
+                }
+            }
             } // close clipToBounds Box
 
             // Drawer slot
@@ -484,6 +515,7 @@ fun TimelinePanel(
                 enter = drawerEnter,
                 exit = drawerExit
             ) {
+                val isDrawerAnimating = transition.isRunning
                 when {
                     track.isDrum -> {
                         val drumPattern = drumPatterns[track.id]
@@ -497,7 +529,8 @@ fun TimelinePanel(
                             timeSignatureNumerator = timeSignatureNumerator,
                             timeSignatureDenominator = timeSignatureDenominator,
                             globalPositionMs = globalPositionMs,
-                            isPlaying = isPlaying
+                            isPlaying = isPlaying,
+                            isAnimating = isDrawerAnimating
                         )
                     }
                     track.isMidi -> {
@@ -590,22 +623,6 @@ fun TimelinePanel(
         }
     }
 
-        // Fixed playhead overlay during follow mode — drawn at a constant
-        // screen position so it never jitters. Content scrolls underneath.
-        if (isFollowActive) {
-            val lineXPx = with(density) {
-                columnWidth.toPx() + scrollState.viewportSize / 4f
-            }
-            val lineColor = NjAmber
-            Canvas(modifier = Modifier.matchParentSize()) {
-                drawLine(
-                    color = lineColor,
-                    start = Offset(lineXPx, 0f),
-                    end = Offset(lineXPx, size.height),
-                    strokeWidth = 2.dp.toPx()
-                )
-            }
-        }
     }
 }
 

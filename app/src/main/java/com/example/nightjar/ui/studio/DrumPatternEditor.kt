@@ -84,7 +84,8 @@ fun DrumPatternEditor(
     timeSignatureDenominator: Int = 4,
     globalPositionMs: Long = 0L,
     isPlaying: Boolean = false,
-    viewResolution: Int = 0
+    viewResolution: Int = 0,
+    isAnimating: Boolean = false
 ) {
     // Compute stride: viewResolution controls visible columns, storage may be finer
     val viewStepsPerBar = if (viewResolution > 0 && timeSignatureDenominator > 0 && beatsPerBar > 0) {
@@ -133,7 +134,8 @@ fun DrumPatternEditor(
     val glowMap = remember { mutableStateMapOf<Int, Animatable<Float, AnimationVector1D>>() }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(currentPlayheadStep) {
+    LaunchedEffect(currentPlayheadStep, isAnimating) {
+        if (isAnimating) return@LaunchedEffect
         if (currentPlayheadStep != null) {
             val anim = glowMap.getOrPut(currentPlayheadStep) { Animatable(0f) }
             anim.snapTo(1f)
@@ -161,7 +163,8 @@ fun DrumPatternEditor(
     val currentGlobalMs = rememberUpdatedState(globalPositionMs)
     val currentIsPlaying = rememberUpdatedState(isPlaying)
 
-    LaunchedEffect(pattern.selectedClip?.clipId, stepsPerBeat, msPerBar, pattern.bars, viewStepsPerBar) {
+    LaunchedEffect(pattern.selectedClip?.clipId, stepsPerBeat, msPerBar, pattern.bars, viewStepsPerBar, isAnimating) {
+        if (isAnimating) return@LaunchedEffect
         if (stepsPerBeat <= 0 || msPerBar <= 0.0) return@LaunchedEffect
 
         val cellSizePx = with(density) { CELL_SIZE.toPx() }
@@ -348,18 +351,22 @@ fun DrumPatternEditor(
                                                     drawLine(Color.Black.copy(alpha = 0.2f), Offset(size.width - bw, bw), Offset(size.width - bw, size.height - bw), bw)
                                                 }
                                             }
-                                            .clickable(
-                                                interactionSource = remember { MutableInteractionSource() },
-                                                indication = null
-                                            ) {
-                                                onAction(
-                                                    StudioAction.ToggleDrumStep(
-                                                        trackId = trackId,
-                                                        stepIndex = realStep,
-                                                        drumNote = drumRow.note
-                                                    )
-                                                )
-                                            }
+                                            .then(
+                                                if (!isAnimating) {
+                                                    Modifier.clickable(
+                                                        interactionSource = remember { MutableInteractionSource() },
+                                                        indication = null
+                                                    ) {
+                                                        onAction(
+                                                            StudioAction.ToggleDrumStep(
+                                                                trackId = trackId,
+                                                                stepIndex = realStep,
+                                                                drumNote = drumRow.note
+                                                            )
+                                                        )
+                                                    }
+                                                } else Modifier
+                                            )
                                     )
                                 }
                             }
