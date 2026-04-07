@@ -85,7 +85,7 @@ Nightjar is in active development, working toward a v1.0 Play Store release.
 - Playhead auto-follow with fixed overlay line scoped to ruler and track lanes (does not bleed through drawers or other UI). Opening drawers or interacting with non-timeline controls preserves follow state.
 - Loop playback with ruler scrub-to-seek and loop handle adjustment
 - Timeline ruler as primary scrub surface (tap or drag to seek)
-- Studio transport bar: Restart, Play/Pause, Rec (right cluster) with Loop/Clear rocker pill (left). Responsive layout inlines LCD in landscape. Sticky pinned overlay when scrolled past.
+- Studio transport bar: Restart, Play/Pause, Rec (right cluster) with Loop/Clear rocker pill (left). Responsive layout inlines LCD in landscape. Sticky pinned overlay when scrolled past, with the timeline ruler stacking beneath it so bar numbers and beat markers stay visible while scrolling through long track lists.
 - LCD status strip: contextual state display (Ready/Armed/Recording/Clip selected) with IBM Plex Mono text in NjRecessedPanel, always-visible Disarm button, contextual Delete button
 - Controls drawer with toggle button, spring animation, and responsive breakpoints for portrait/landscape/narrow layouts
 - Cursor position with return-to-cursor transport: teal dashed cursor line on timeline, play starts from cursor, pause returns to cursor. Auto-punch-out stops recording at next clip boundary.

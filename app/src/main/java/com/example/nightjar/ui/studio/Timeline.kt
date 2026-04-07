@@ -124,8 +124,8 @@ import java.io.File
 import kotlin.math.abs
 
 // ── Layout constants ────────────────────────────────────────────────────
-private val HEADER_WIDTH = 100.dp
-private val COLOR_TAB_WIDTH = 10.dp
+internal val HEADER_WIDTH = 100.dp
+internal val COLOR_TAB_WIDTH = 10.dp
 private val TRACK_LANE_HEIGHT = 56.dp
 private val RULER_HEIGHT = 28.dp
 private val TIMELINE_END_PADDING_DP = 120.dp
@@ -183,69 +183,16 @@ fun TimelinePanel(
     onAction: (StudioAction) -> Unit,
     onScrub: (Long) -> Unit = {},
     onScrubFinished: (Long) -> Unit = {},
+    // Hoisted timeline state — owned by StudioScreen so the pinned ruler overlay
+    // can share the same horizontal scroll, follow mode, and layout values.
+    scrollState: ScrollState,
+    columnWidth: Dp,
+    timelineWidthDp: Dp,
+    isFollowActive: Boolean,
+    followLineXPx: Float,
+    onDisengageFollow: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val scrollState = rememberScrollState()
-    val timelineWidthDp = remember(totalDurationMs, cursorPositionMs, msPerDp) {
-        val contentDp = (totalDurationMs / msPerDp).dp
-        val cursorDp = (cursorPositionMs / msPerDp).dp
-        maxOf(contentDp, cursorDp) + 600.dp
-    }
-    val density = LocalDensity.current
-
-    // ── Playhead auto-follow ───────────────────────────────────────────
-    // Two phases:
-    //   1. Playhead travels naturally across the screen (normal in-content line)
-    //   2. Once it reaches the 1/4 viewport mark, "locked follow" engages:
-    //      content scrolls, playhead becomes a fixed overlay line.
-    // Disengages when the user touches the timeline. Re-engages on next play.
-    var isFollowActive by remember { mutableStateOf(false) }
-    var isFollowEligible by remember { mutableStateOf(false) }
-    val currentPositionMs by rememberUpdatedState(globalPositionMs)
-
-    // Mark follow-eligible when playback starts; clear on stop
-    LaunchedEffect(isPlaying, isRecording) {
-        if (isPlaying || isRecording) {
-            isFollowEligible = true
-        } else {
-            isFollowEligible = false
-            isFollowActive = false
-        }
-    }
-
-    // Follow loop: once the playhead reaches the 1/4 mark, start scrolling
-    LaunchedEffect(isFollowEligible) {
-        if (!isFollowEligible) return@LaunchedEffect
-
-        while (true) {
-            val playheadPx = with(density) {
-                (currentPositionMs / msPerDp).dp.toPx()
-            }.toInt()
-            val viewportStart = scrollState.value
-            val targetOffset = scrollState.viewportSize / 4
-            val playheadScreenPx = playheadPx - viewportStart
-
-            if (!isFollowActive && playheadScreenPx >= targetOffset) {
-                // Playhead just reached the 1/4 mark — engage locked follow
-                isFollowActive = true
-            }
-
-            if (isFollowActive) {
-                val scrollTarget = (playheadPx - targetOffset).coerceAtLeast(0)
-                if (scrollTarget >= scrollState.maxValue) {
-                    // Scroll hit the end — disengage overlay, let in-content
-                    // playhead travel through the remaining visible area
-                    scrollState.scrollTo(scrollState.maxValue)
-                    isFollowActive = false
-                } else {
-                    scrollState.scrollTo(scrollTarget)
-                }
-            }
-
-            delay(16L)
-        }
-    }
-
     // Drawer animation specs
     val drawerEnter = expandVertically(
         animationSpec = spring(
@@ -262,113 +209,48 @@ fun TimelinePanel(
         )
     )
 
-    // Shared animated column width: all tracks + ruler use this for alignment.
-    // In collapsed mode the column stays narrow even when individual headers
-    // are pulled out (those render as overlays on their row).
-    val columnWidth by animateDpAsState(
-        targetValue = if (headersCollapsedMode) COLOR_TAB_WIDTH else HEADER_WIDTH,
-        animationSpec = spring(dampingRatio = 0.65f, stiffness = 200f),
-        label = "columnWidth"
-    )
-
-    // Pre-compute the fixed playhead X position for follow-mode overlays.
-    // Each ruler/track row draws its own overlay so the line doesn't bleed
-    // through drawers or other non-timeline content.
-    val followLineColor = NjAmber
-    val followLineXPx = if (isFollowActive) {
-        with(density) { columnWidth.toPx() + scrollState.viewportSize / 4f }
-    } else 0f
-
     // Disengage follow only when the user touches scrollable timeline content
     // (ruler or track lanes), not headers, drawers, or other controls.
     val disengageFollowModifier = Modifier.pointerInput(Unit) {
         awaitEachGesture {
             awaitFirstDown(requireUnconsumed = false)
-            isFollowEligible = false
-            isFollowActive = false
+            onDisengageFollow()
         }
     }
+
+    // Capture the follow-line color in composable scope so the per-track Canvas
+    // DrawScope (non-composable) can use it.
+    val followLineColor = NjAmber
 
     Box(modifier = modifier.fillMaxWidth()) {
     Column(
         modifier = Modifier.fillMaxWidth()
     ) {
         // ── Ruler row ──────────────────────────────────────────────
-        Box(Modifier.fillMaxWidth()) {
-            Row(Modifier.fillMaxWidth()) {
-                MasterCollapseHandle(
-                    columnWidth = columnWidth,
-                    anyCollapsed = headersCollapsedMode,
-                    onToggle = { onAction(StudioAction.ToggleAllTrackHeaders) }
-                )
-
-                Box(
-                    modifier = disengageFollowModifier
-                        .weight(1f)
-                        .horizontalScroll(scrollState)
-                ) {
-                    Box(Modifier.width(timelineWidthDp)) {
-                        TimeRuler(
-                            totalDurationMs = totalDurationMs,
-                            msPerDp = msPerDp,
-                            timelineWidth = timelineWidthDp,
-                            bpm = bpm,
-                            timeSignatureNumerator = timeSignatureNumerator,
-                            timeSignatureDenominator = timeSignatureDenominator,
-                            gridResolution = gridResolution
-                        )
-
-                        if (loopStartMs != null && loopEndMs != null) {
-                            LoopOverlaySegment(
-                                loopStartMs = loopStartMs,
-                                loopEndMs = loopEndMs,
-                                isLoopEnabled = isLoopEnabled,
-                                msPerDp = msPerDp,
-                                height = RULER_HEIGHT,
-                                showHandles = true
-                            )
-                        }
-
-                        RulerGestureLayer(
-                            loopStartMs = loopStartMs,
-                            loopEndMs = loopEndMs,
-                            cursorPositionMs = cursorPositionMs,
-                            isRecording = isRecording,
-                            msPerDp = msPerDp,
-                            totalDurationMs = totalDurationMs,
-                            timelineWidth = timelineWidthDp,
-                            onScrub = onScrub,
-                            onScrubFinished = onScrubFinished,
-                            onAction = onAction
-                        )
-
-                        if (!isFollowActive) {
-                            CursorSegment(
-                                cursorPositionMs = cursorPositionMs,
-                                msPerDp = msPerDp,
-                                height = RULER_HEIGHT,
-                                showTriangle = true
-                            )
-                            PlayheadSegment(
-                                globalPositionMs = globalPositionMs,
-                                msPerDp = msPerDp,
-                                height = RULER_HEIGHT
-                            )
-                        }
-                    }
-                }
-            }
-            if (isFollowActive) {
-                Canvas(modifier = Modifier.matchParentSize()) {
-                    drawLine(
-                        color = followLineColor,
-                        start = Offset(followLineXPx, 0f),
-                        end = Offset(followLineXPx, size.height),
-                        strokeWidth = 2.dp.toPx()
-                    )
-                }
-            }
-        }
+        TimelineRulerRow(
+            scrollState = scrollState,
+            columnWidth = columnWidth,
+            headersCollapsedMode = headersCollapsedMode,
+            timelineWidthDp = timelineWidthDp,
+            totalDurationMs = totalDurationMs,
+            cursorPositionMs = cursorPositionMs,
+            globalPositionMs = globalPositionMs,
+            msPerDp = msPerDp,
+            bpm = bpm,
+            timeSignatureNumerator = timeSignatureNumerator,
+            timeSignatureDenominator = timeSignatureDenominator,
+            gridResolution = gridResolution,
+            loopStartMs = loopStartMs,
+            loopEndMs = loopEndMs,
+            isLoopEnabled = isLoopEnabled,
+            isRecording = isRecording,
+            isFollowActive = isFollowActive,
+            followLineXPx = followLineXPx,
+            onDisengageFollow = onDisengageFollow,
+            onScrub = onScrub,
+            onScrubFinished = onScrubFinished,
+            onAction = onAction
+        )
 
         // ── Per-track rows with drawer + take slots ─────────────
         tracks.forEachIndexed { index, track ->
@@ -623,6 +505,128 @@ fun TimelinePanel(
         }
     }
 
+    }
+}
+
+/**
+ * The full timeline ruler row: master collapse handle on the left, then the
+ * horizontally-scrollable bar/beat ruler with loop overlay, scrub gestures,
+ * cursor and playhead indicators, and a follow-mode line overlay.
+ *
+ * Extracted so [StudioScreen] can render an identical pinned overlay when the
+ * user scrolls the in-flow ruler off the top of the viewport. Both call sites
+ * share the same horizontal [scrollState] so bar numbers stay in sync.
+ */
+@Composable
+internal fun TimelineRulerRow(
+    scrollState: ScrollState,
+    columnWidth: Dp,
+    headersCollapsedMode: Boolean,
+    timelineWidthDp: Dp,
+    totalDurationMs: Long,
+    cursorPositionMs: Long,
+    globalPositionMs: Long,
+    msPerDp: Float,
+    bpm: Double,
+    timeSignatureNumerator: Int,
+    timeSignatureDenominator: Int,
+    gridResolution: Int,
+    loopStartMs: Long?,
+    loopEndMs: Long?,
+    isLoopEnabled: Boolean,
+    isRecording: Boolean,
+    isFollowActive: Boolean,
+    followLineXPx: Float,
+    onDisengageFollow: () -> Unit,
+    onScrub: (Long) -> Unit,
+    onScrubFinished: (Long) -> Unit,
+    onAction: (StudioAction) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val disengageFollowModifier = Modifier.pointerInput(Unit) {
+        awaitEachGesture {
+            awaitFirstDown(requireUnconsumed = false)
+            onDisengageFollow()
+        }
+    }
+
+    // Capture follow-line color in composable scope; DrawScope below is not.
+    val followLineColor = NjAmber
+
+    Box(modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth()) {
+            MasterCollapseHandle(
+                columnWidth = columnWidth,
+                anyCollapsed = headersCollapsedMode,
+                onToggle = { onAction(StudioAction.ToggleAllTrackHeaders) }
+            )
+
+            Box(
+                modifier = disengageFollowModifier
+                    .weight(1f)
+                    .horizontalScroll(scrollState)
+            ) {
+                Box(Modifier.width(timelineWidthDp)) {
+                    TimeRuler(
+                        totalDurationMs = totalDurationMs,
+                        msPerDp = msPerDp,
+                        timelineWidth = timelineWidthDp,
+                        bpm = bpm,
+                        timeSignatureNumerator = timeSignatureNumerator,
+                        timeSignatureDenominator = timeSignatureDenominator,
+                        gridResolution = gridResolution
+                    )
+
+                    if (loopStartMs != null && loopEndMs != null) {
+                        LoopOverlaySegment(
+                            loopStartMs = loopStartMs,
+                            loopEndMs = loopEndMs,
+                            isLoopEnabled = isLoopEnabled,
+                            msPerDp = msPerDp,
+                            height = RULER_HEIGHT,
+                            showHandles = true
+                        )
+                    }
+
+                    RulerGestureLayer(
+                        loopStartMs = loopStartMs,
+                        loopEndMs = loopEndMs,
+                        cursorPositionMs = cursorPositionMs,
+                        isRecording = isRecording,
+                        msPerDp = msPerDp,
+                        totalDurationMs = totalDurationMs,
+                        timelineWidth = timelineWidthDp,
+                        onScrub = onScrub,
+                        onScrubFinished = onScrubFinished,
+                        onAction = onAction
+                    )
+
+                    if (!isFollowActive) {
+                        CursorSegment(
+                            cursorPositionMs = cursorPositionMs,
+                            msPerDp = msPerDp,
+                            height = RULER_HEIGHT,
+                            showTriangle = true
+                        )
+                        PlayheadSegment(
+                            globalPositionMs = globalPositionMs,
+                            msPerDp = msPerDp,
+                            height = RULER_HEIGHT
+                        )
+                    }
+                }
+            }
+        }
+        if (isFollowActive) {
+            Canvas(modifier = Modifier.matchParentSize()) {
+                drawLine(
+                    color = followLineColor,
+                    start = Offset(followLineXPx, 0f),
+                    end = Offset(followLineXPx, size.height),
+                    strokeWidth = 2.dp.toPx()
+                )
+            }
+        }
     }
 }
 
@@ -2687,19 +2691,29 @@ private fun RulerGestureLayer(
 
                             var dragged = false
                             var lastMs = tapMs
-                            val slop = awaitHorizontalTouchSlopOrCancellation(down.id) { change, _ ->
-                                change.consume()
-                            }
-                            if (slop != null) {
-                                dragged = true
-                                currentOnScrub(tapMs)
-                                horizontalDrag(slop.id) { change ->
+                            try {
+                                val slop = awaitHorizontalTouchSlopOrCancellation(down.id) { change, _ ->
                                     change.consume()
-                                    val fingerMs = pxToMs(change.position.x)
-                                    lastMs = fingerMs
-                                    currentOnScrub(fingerMs)
                                 }
-                                currentOnScrubFinished(lastMs)
+                                if (slop != null) {
+                                    dragged = true
+                                    currentOnScrub(tapMs)
+                                    horizontalDrag(slop.id) { change ->
+                                        change.consume()
+                                        val fingerMs = pxToMs(change.position.x)
+                                        lastMs = fingerMs
+                                        currentOnScrub(fingerMs)
+                                    }
+                                }
+                            } finally {
+                                // Always clear scrubbing state, even if the
+                                // gesture coroutine is cancelled mid-drag
+                                // (e.g. msPerDp changes, parent recomposes).
+                                // Without this, isScrubbing in StudioScreen
+                                // stays true forever and the playhead freezes.
+                                if (dragged) {
+                                    currentOnScrubFinished(lastMs)
+                                }
                             }
 
                             if (!dragged) {

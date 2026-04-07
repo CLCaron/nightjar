@@ -54,6 +54,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -116,8 +117,42 @@ fun StudioScreen(
 
     val scrollState = rememberScrollState()
     var transportOffsetPx by remember { mutableFloatStateOf(0f) }
+    var rulerOffsetPx by remember { mutableFloatStateOf(0f) }
     var isScrubbing by remember { mutableStateOf(false) }
     var scrubMs by remember { mutableLongStateOf(0L) }
+
+    // Horizontal scroll for the timeline ruler + track lanes. Hoisted so the
+    // pinned ruler overlay can share it with the in-flow ruler/tracks.
+    val timelineHScrollState = rememberScrollState()
+
+    // Playhead auto-follow state — owned here so the pinned ruler overlay can
+    // render the same follow-line as the in-flow ruler.
+    var isFollowActive by remember { mutableStateOf(false) }
+    var isFollowEligible by remember { mutableStateOf(false) }
+
+    val density = LocalDensity.current
+
+    // Shared timeline width: the scrollable content extends past the cursor so
+    // tracks can be dragged out beyond their current end. Both the in-flow and
+    // pinned rulers must use the same width to keep horizontal scroll in sync.
+    val timelineWidthDp = remember(
+        state.totalDurationMs, state.cursorPositionMs, state.msPerDp
+    ) {
+        val contentDp = (state.totalDurationMs / state.msPerDp).dp
+        val cursorDp = (state.cursorPositionMs / state.msPerDp).dp
+        maxOf(contentDp, cursorDp) + 600.dp
+    }
+
+    // Animated header column width — single source of truth shared between
+    // TimelinePanel and the pinned ruler so both stay in sync when toggled.
+    val columnWidth by androidx.compose.animation.core.animateDpAsState(
+        targetValue = if (state.headersCollapsedMode) COLOR_TAB_WIDTH else HEADER_WIDTH,
+        animationSpec = androidx.compose.animation.core.spring(
+            dampingRatio = 0.65f,
+            stiffness = 200f
+        ),
+        label = "columnWidth"
+    )
 
     LaunchedEffect(state.globalPositionMs, isScrubbing, state.totalDurationMs) {
         if (!isScrubbing) {
@@ -127,6 +162,82 @@ fun StudioScreen(
             )
         }
     }
+
+    // Mark follow-eligible when playback starts; clear on stop.
+    LaunchedEffect(state.isPlaying, state.isRecording) {
+        if (state.isPlaying || state.isRecording) {
+            isFollowEligible = true
+        } else {
+            isFollowEligible = false
+            isFollowActive = false
+        }
+    }
+
+    // Follow loop: once the playhead reaches the 1/4 viewport mark, lock follow
+    // mode and scroll the timeline to keep the playhead anchored there. The
+    // playhead becomes a fixed overlay line drawn by both rulers and tracks.
+    //
+    // The try/finally is critical: if the loop is cancelled mid-iteration
+    // (e.g. user taps a clip and onDisengageFollow flips isFollowEligible
+    // false), it can race with the body's `isFollowActive = true` write and
+    // leave isFollowActive stuck true after the loop dies. The finally block
+    // guarantees isFollowActive is cleared no matter how the loop exits.
+    val currentPositionMs by rememberUpdatedState(state.globalPositionMs)
+    LaunchedEffect(isFollowEligible) {
+        if (!isFollowEligible) {
+            isFollowActive = false
+            return@LaunchedEffect
+        }
+        try {
+            while (true) {
+                // Re-check eligibility at the top of every iteration so we
+                // don't write isFollowActive=true after a disengage call.
+                if (!isFollowEligible) break
+
+                val playheadPx = with(density) {
+                    (currentPositionMs / state.msPerDp).dp.toPx()
+                }.toInt()
+                val viewportStart = timelineHScrollState.value
+                val targetOffset = timelineHScrollState.viewportSize / 4
+                val playheadScreenPx = playheadPx - viewportStart
+
+                if (!isFollowActive && playheadScreenPx >= targetOffset) {
+                    isFollowActive = true
+                }
+
+                if (isFollowActive) {
+                    val scrollTarget = (playheadPx - targetOffset).coerceAtLeast(0)
+                    if (scrollTarget >= timelineHScrollState.maxValue) {
+                        // Scroll hit the end — disengage overlay; let the in-content
+                        // playhead travel through the remaining visible area.
+                        timelineHScrollState.scrollTo(timelineHScrollState.maxValue)
+                        isFollowActive = false
+                    } else {
+                        timelineHScrollState.scrollTo(scrollTarget)
+                    }
+                }
+
+                kotlinx.coroutines.delay(16L)
+            }
+        } finally {
+            isFollowActive = false
+        }
+    }
+
+    // Fixed playhead X position when follow mode is engaged. Recomputed when
+    // viewport size or column width changes.
+    val followLineXPx = if (isFollowActive) {
+        with(density) { columnWidth.toPx() + timelineHScrollState.viewportSize / 4f }
+    } else 0f
+
+    val onDisengageFollow: () -> Unit = {
+        isFollowEligible = false
+        isFollowActive = false
+    }
+
+    // Position used for cursor/playhead rendering — reflects scrubbing in real
+    // time, then snaps back to the playback position when the gesture ends.
+    val displayPositionMs = if (isScrubbing) scrubMs else state.globalPositionMs
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -227,9 +338,6 @@ fun StudioScreen(
                     }
                 )
 
-                val displayPositionMs =
-                    if (isScrubbing) scrubMs else state.globalPositionMs
-
                 TimelinePanel(
                     tracks = state.tracks,
                     globalPositionMs = displayPositionMs,
@@ -276,26 +384,107 @@ fun StudioScreen(
                     onScrubFinished = { finalMs ->
                         isScrubbing = false
                         vm.onAction(StudioAction.SeekFinished(finalMs))
+                    },
+                    scrollState = timelineHScrollState,
+                    columnWidth = columnWidth,
+                    timelineWidthDp = timelineWidthDp,
+                    isFollowActive = isFollowActive,
+                    followLineXPx = followLineXPx,
+                    onDisengageFollow = onDisengageFollow,
+                    // The ruler row is the first child of TimelinePanel's column,
+                    // so TimelinePanel's Y position in the scroll column is also
+                    // the ruler's Y position.
+                    modifier = Modifier.onGloballyPositioned { coords ->
+                        rulerOffsetPx = coords.positionInParent().y
                     }
                 )
 
                 Spacer(Modifier.height(80.dp))
             }
 
-            // Pinned transport overlay when scrolled past original position
-            val isPinned = !state.isLoading
+            // Pinned overlays — transport on top, ruler stacked beneath. Both
+            // are derived from vertical scroll position so they snap into the
+            // viewport just as their in-flow counterparts scroll past the top.
+            val isTransportPinned = !state.isLoading
                 && transportOffsetPx > 0f
                 && scrollState.value.toFloat() >= transportOffsetPx
+            val isRulerPinned = !state.isLoading
+                && rulerOffsetPx > 0f
+                && scrollState.value.toFloat() >= rulerOffsetPx
 
-            if (isPinned) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(NjBg)
-                        .padding(horizontal = 16.dp)
-                        .padding(top = 8.dp, bottom = 4.dp)
-                ) {
-                    TransportAndControls(state = state, onAction = vm::onAction)
+            if (isTransportPinned || isRulerPinned) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    if (isTransportPinned) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(NjBg)
+                                .padding(horizontal = 16.dp)
+                                .padding(top = 8.dp, bottom = 4.dp)
+                        ) {
+                            TransportAndControls(
+                                state = state,
+                                onAction = vm::onAction
+                            )
+                        }
+                    }
+
+                    if (isRulerPinned) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(NjBg)
+                                .padding(horizontal = 16.dp)
+                        ) {
+                            TimelineRulerRow(
+                                scrollState = timelineHScrollState,
+                                columnWidth = columnWidth,
+                                headersCollapsedMode = state.headersCollapsedMode,
+                                timelineWidthDp = timelineWidthDp,
+                                totalDurationMs = state.totalDurationMs,
+                                cursorPositionMs = state.cursorPositionMs,
+                                globalPositionMs = displayPositionMs,
+                                msPerDp = state.msPerDp,
+                                bpm = state.bpm,
+                                timeSignatureNumerator = state.timeSignatureNumerator,
+                                timeSignatureDenominator = state.timeSignatureDenominator,
+                                gridResolution = state.gridResolution,
+                                loopStartMs = state.loopStartMs,
+                                loopEndMs = state.loopEndMs,
+                                isLoopEnabled = state.isLoopEnabled,
+                                isRecording = state.isRecording,
+                                isFollowActive = isFollowActive,
+                                followLineXPx = followLineXPx,
+                                onDisengageFollow = onDisengageFollow,
+                                onScrub = { newMs ->
+                                    isScrubbing = true
+                                    scrubMs = newMs
+                                },
+                                onScrubFinished = { finalMs ->
+                                    isScrubbing = false
+                                    vm.onAction(StudioAction.SeekFinished(finalMs))
+                                },
+                                onAction = vm::onAction
+                            )
+                            // Subtle drop shadow so the pinned ruler reads as
+                            // floating above the scrolling track lanes.
+                            Canvas(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .height(4.dp)
+                            ) {
+                                drawRect(
+                                    brush = Brush.verticalGradient(
+                                        colors = listOf(
+                                            Color.Black.copy(alpha = 0.3f),
+                                            Color.Transparent
+                                        )
+                                    ),
+                                    size = size
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
