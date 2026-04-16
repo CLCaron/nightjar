@@ -223,5 +223,21 @@ val NjTrackColors: List<Color> @Composable @ReadOnlyComposable get() = LocalNjCo
 val NjDrumRowColors: List<Color> @Composable @ReadOnlyComposable get() = LocalNjColors.current.drumRowColors
 val NjCursorTeal: Color @Composable @ReadOnlyComposable get() = LocalNjColors.current.cursorTeal
 
+// ── Group (linked-clip) palette ───────────────────────────────────────
+// Six hardware-friendly hues drawn from each theme's LED + accent tokens.
+// Palette index = groupKey.hashCode() mod palette size, so all siblings
+// share the exact same accent.
+val NjGroupColors: List<Color> @Composable @ReadOnlyComposable get() {
+    val c = LocalNjColors.current
+    return listOf(
+        c.ledGreen,
+        c.ledTeal,
+        c.ledYellow,
+        c.recordCoral,
+        c.accent,
+        c.amber,
+    )
+}
+
 // ── Static tokens -- same in all themes ──────────────────────────────
 val NjError = Color(0xFFD4727A)            // muted rose -- errors, destructive actions

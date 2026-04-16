@@ -71,7 +71,11 @@ import com.example.nightjar.ui.theme.NjCursorTeal
 import com.example.nightjar.ui.theme.NjOutline
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.FiberManualRecord
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.SkipPrevious
 import com.example.nightjar.ui.components.NjIcons
 import androidx.compose.material.icons.filled.Close
@@ -338,6 +342,17 @@ fun StudioScreen(
                     }
                 )
 
+                androidx.compose.runtime.CompositionLocalProvider(
+                    LocalAudioClipLinkage provides state.audioClipLinkage,
+                    LocalMidiClipLinkage provides state.midiClipLinkage,
+                    LocalDrumClipLinkage provides state.drumClipLinkage,
+                    LocalPulseTicks provides state.pulseTicks,
+                    LocalSplitMode provides SplitModeUiState(
+                        clipId = state.splitModeClipId,
+                        positionMs = state.splitPositionMs,
+                        valid = state.splitValid
+                    )
+                ) {
                 TimelinePanel(
                     tracks = state.tracks,
                     globalPositionMs = displayPositionMs,
@@ -398,6 +413,7 @@ fun StudioScreen(
                         rulerOffsetPx = coords.positionInParent().y
                     }
                 )
+                } // CompositionLocalProvider
 
                 Spacer(Modifier.height(80.dp))
             }
@@ -566,6 +582,16 @@ fun StudioScreen(
                 )
             },
             onDismiss = { vm.onAction(StudioAction.DismissRenameTake) }
+        )
+    }
+
+    // Clip rename dialog (propagates to linked siblings for audio clips).
+    if (state.renamingClipId != null) {
+        RenameDialog(
+            title = "Rename clip",
+            currentName = state.renamingClipCurrentName,
+            onConfirm = { newName -> vm.onAction(StudioAction.ConfirmRenameClip(newName)) },
+            onDismiss = { vm.onAction(StudioAction.DismissRenameClip) }
         )
     }
 
@@ -903,6 +929,106 @@ private fun ControlsDrawer(
                 }
             }
         }
+
+        // Clip action pillrockers: only when a clip is selected, so the
+        // drawer doesn't inflate when nothing's selected.
+        if (state.expandedClipState != null) {
+            ClipActionsCluster(state = state, onAction = onAction)
+        }
+    }
+}
+
+/**
+ * Split + Duplicate pillrockers for the currently selected clip.
+ * - Split: left half latches the mode; right half confirms (dimmed when no valid line).
+ * - Duplicate: left = Unlinked, right = Linked.
+ */
+@Composable
+private fun ClipActionsCluster(
+    state: StudioUiState,
+    onAction: (StudioAction) -> Unit
+) {
+    val expanded = state.expandedClipState ?: return
+    val clipType = expanded.clipType
+    val isSplitMode = state.splitModeClipId == expanded.clipId
+    val splitValid = isSplitMode && state.splitValid
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Split pillrocker: Split (latch) | Confirm (dim-inert until valid).
+        com.example.nightjar.ui.components.NjPillrocker(
+            left = com.example.nightjar.ui.components.PillrockerHalf(
+                label = "Split",
+                icon = Icons.Filled.ContentCut,
+                mode = com.example.nightjar.ui.components.PillrockerHalfMode.Latching,
+                isLatched = isSplitMode,
+                ledColor = NjAmber,
+                onTap = {
+                    if (isSplitMode) {
+                        onAction(StudioAction.CancelSplit)
+                    } else {
+                        onAction(StudioAction.StartSplitMode(expanded.clipId, clipType))
+                    }
+                }
+            ),
+            right = com.example.nightjar.ui.components.PillrockerHalf(
+                label = "Confirm",
+                icon = Icons.Filled.Check,
+                mode = com.example.nightjar.ui.components.PillrockerHalfMode.Momentary,
+                isEnabled = splitValid,
+                ledColor = null,
+                onTap = { onAction(StudioAction.ConfirmSplit) }
+            ),
+            modifier = Modifier.weight(1f)
+        )
+
+        // Duplicate pillrocker: Unlinked | Linked.
+        com.example.nightjar.ui.components.NjPillrocker(
+            left = com.example.nightjar.ui.components.PillrockerHalf(
+                label = "Copy",
+                icon = Icons.Filled.ContentCopy,
+                mode = com.example.nightjar.ui.components.PillrockerHalfMode.Momentary,
+                onTap = {
+                    val action = when (clipType) {
+                        "audio" -> StudioAction.DuplicateAudioClip(
+                            expanded.trackId, expanded.clipId, linked = false
+                        )
+                        "midi" -> StudioAction.DuplicateMidiClip(
+                            expanded.trackId, expanded.clipId, linked = false
+                        )
+                        "drum" -> StudioAction.DuplicateClip(
+                            expanded.trackId, expanded.clipId, linked = false
+                        )
+                        else -> null
+                    }
+                    action?.let { onAction(it) }
+                }
+            ),
+            right = com.example.nightjar.ui.components.PillrockerHalf(
+                label = "Link",
+                icon = Icons.Filled.Link,
+                mode = com.example.nightjar.ui.components.PillrockerHalfMode.Momentary,
+                onTap = {
+                    val action = when (clipType) {
+                        "audio" -> StudioAction.DuplicateAudioClip(
+                            expanded.trackId, expanded.clipId, linked = true
+                        )
+                        "midi" -> StudioAction.DuplicateMidiClip(
+                            expanded.trackId, expanded.clipId, linked = true
+                        )
+                        "drum" -> StudioAction.DuplicateClip(
+                            expanded.trackId, expanded.clipId, linked = true
+                        )
+                        else -> null
+                    }
+                    action?.let { onAction(it) }
+                }
+            ),
+            modifier = Modifier.weight(1f)
+        )
     }
 }
 

@@ -9,8 +9,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GridOn
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Piano
 import androidx.compose.material3.Icon
@@ -104,8 +107,10 @@ import com.example.nightjar.data.db.entity.MidiNoteEntity
 import com.example.nightjar.data.db.entity.TakeEntity
 import com.example.nightjar.data.db.entity.TrackEntity
 import com.example.nightjar.ui.components.NjWaveform
+import com.example.nightjar.ui.theme.NjAccent
 import com.example.nightjar.ui.theme.NjCursorTeal
 import com.example.nightjar.ui.theme.NjDrumRowColors
+import com.example.nightjar.ui.theme.NjGroupColors
 import com.example.nightjar.ui.theme.NjRecordCoral
 import com.example.nightjar.ui.theme.NjError
 import com.example.nightjar.ui.theme.NjMuted2
@@ -1016,11 +1021,45 @@ private fun AudioTrackLane(
                                     )
                                 }
                             }
+
+                            // Link indicator: 3dp colored top strip + chain glyph
+                            // appears when this clip shares a source with another.
+                            ClipLinkIndicator(
+                                linkage = LocalAudioClipLinkage.current[clip.clipId],
+                                palette = NjGroupColors,
+                                modifier = Modifier.align(Alignment.TopCenter)
+                            )
+
+                            // Split-mode vertical line overlay (only when this
+                            // clip is the split target).
+                            ClipSplitLine(
+                                clipId = clip.clipId,
+                                clipOffsetMs = clip.offsetMs,
+                                clipWidthMs = effectiveDurationMs,
+                                msPerDp = msPerDp
+                            )
                         }
                     },
                     back = {
                         ClipActionButtons(
-                            onDuplicate = { /* no duplicate for audio clips yet */ },
+                            onDuplicate = {
+                                // Flip-panel duplicate defaults to unlinked. The
+                                // controls-drawer pillrocker exposes both halves.
+                                onAction(StudioAction.DuplicateAudioClip(track.id, clip.clipId, linked = false))
+                            },
+                            onRename = {
+                                onAction(
+                                    StudioAction.RequestRenameClip(
+                                        clipId = clip.clipId,
+                                        clipType = "audio",
+                                        currentName = clip.displayName
+                                    )
+                                )
+                            },
+                            onUnlink = {
+                                // Safe no-op for standalone clips.
+                                onAction(StudioAction.UnlinkClip(clip.clipId, "audio"))
+                            },
                             onDelete = {
                                 onAction(StudioAction.DeleteAudioClip(track.id, clip.clipId))
                             },
@@ -1157,40 +1196,54 @@ private fun MidiTrackLane(
                     isFlipped = isFlipped,
                     modifier = Modifier.matchParentSize(),
                     front = {
-                        // Draw mini note bars inside the clip
-                        Canvas(modifier = Modifier.fillMaxSize()) {
-                            val notes = clip.notes
-                            if (notes.isEmpty()) return@Canvas
+                        Box(Modifier.fillMaxSize()) {
+                            // Draw mini note bars inside the clip
+                            Canvas(modifier = Modifier.fillMaxSize()) {
+                                val notes = clip.notes
+                                if (notes.isEmpty()) return@Canvas
 
-                            val pitchRange = notes.minOf { it.pitch }..notes.maxOf { it.pitch }
-                            val pitchSpan = (pitchRange.last - pitchRange.first).coerceAtLeast(1)
-                            val laneH = size.height
-                            val clipWidthPx = size.width
-                            val barHeight = (laneH / (pitchSpan + 2)).coerceIn(2f, 5f)
+                                val pitchRange = notes.minOf { it.pitch }..notes.maxOf { it.pitch }
+                                val pitchSpan = (pitchRange.last - pitchRange.first).coerceAtLeast(1)
+                                val laneH = size.height
+                                val clipWidthPx = size.width
+                                val barHeight = (laneH / (pitchSpan + 2)).coerceIn(2f, 5f)
 
-                            val clipContentMs = clipDurationMs.toFloat()
-                            if (clipContentMs <= 0f) return@Canvas
+                                val clipContentMs = clipDurationMs.toFloat()
+                                if (clipContentMs <= 0f) return@Canvas
 
-                            for (note in notes) {
-                                val noteX = (note.startMs.toFloat() / clipContentMs) * clipWidthPx
-                                val noteW = ((note.durationMs.toFloat() / clipContentMs) * clipWidthPx)
-                                    .coerceAtLeast(2f)
-                                val normalizedPitch = (note.pitch - pitchRange.first).toFloat() / pitchSpan
-                                val y = laneH - (normalizedPitch * (laneH - barHeight)) - barHeight
+                                for (note in notes) {
+                                    val noteX = (note.startMs.toFloat() / clipContentMs) * clipWidthPx
+                                    val noteW = ((note.durationMs.toFloat() / clipContentMs) * clipWidthPx)
+                                        .coerceAtLeast(2f)
+                                    val normalizedPitch = (note.pitch - pitchRange.first).toFloat() / pitchSpan
+                                    val y = laneH - (normalizedPitch * (laneH - barHeight)) - barHeight
 
-                                drawRect(
-                                    color = trackColor,
-                                    topLeft = Offset(noteX, y),
-                                    size = Size(noteW, barHeight)
-                                )
+                                    drawRect(
+                                        color = trackColor,
+                                        topLeft = Offset(noteX, y),
+                                        size = Size(noteW, barHeight)
+                                    )
+                                }
                             }
+                            ClipLinkIndicator(
+                                linkage = LocalMidiClipLinkage.current[clip.clipId],
+                                palette = NjGroupColors,
+                                modifier = Modifier.align(Alignment.TopCenter)
+                            )
+                            ClipSplitLine(
+                                clipId = clip.clipId,
+                                clipOffsetMs = clip.offsetMs,
+                                clipWidthMs = clipDurationMs,
+                                msPerDp = msPerDp
+                            )
                         }
                     },
                     back = {
                         ClipActionButtons(
-                            onDuplicate = { onAction(StudioAction.DuplicateMidiClip(track.id, clip.clipId)) },
+                            onDuplicate = { onAction(StudioAction.DuplicateMidiClip(track.id, clip.clipId, linked = false)) },
                             onDelete = { onAction(StudioAction.DeleteMidiClip(track.id, clip.clipId)) },
                             onEdit = { onAction(StudioAction.OpenPianoRoll(track.id, clip.clipId)) },
+                            onUnlink = { onAction(StudioAction.UnlinkClip(clip.clipId, "midi")) },
                             onDismiss = { onAction(StudioAction.DismissClipPanel) }
                         )
                     }
@@ -1384,6 +1437,7 @@ private fun DrumTrackLane(
                     isFlipped = isFlipped,
                     modifier = Modifier.matchParentSize(),
                     front = {
+                      Box(Modifier.fillMaxSize()) {
                         // Mini step grid -- per-instrument colored dots
                         val gridLineColor = NjMuted
                         Canvas(modifier = Modifier.fillMaxSize()) {
@@ -1429,12 +1483,25 @@ private fun DrumTrackLane(
                                 )
                             }
                         }
+                        ClipLinkIndicator(
+                            linkage = LocalDrumClipLinkage.current[clip.clipId],
+                            palette = NjGroupColors,
+                            modifier = Modifier.align(Alignment.TopCenter)
+                        )
+                        ClipSplitLine(
+                            clipId = clip.clipId,
+                            clipOffsetMs = clip.offsetMs,
+                            clipWidthMs = clipPatternDurationMs.toLong(),
+                            msPerDp = msPerDp
+                        )
+                      }
                     },
                     back = {
                         ClipActionButtons(
-                            onDuplicate = { onAction(StudioAction.DuplicateClip(track.id, clip.clipId)) },
+                            onDuplicate = { onAction(StudioAction.DuplicateClip(track.id, clip.clipId, linked = false)) },
                             onDelete = { onAction(StudioAction.DeleteClip(track.id, clip.clipId)) },
                             onEdit = { onAction(StudioAction.OpenDrumEditor(track.id, clip.clipId)) },
+                            onUnlink = { onAction(StudioAction.UnlinkClip(clip.clipId, "drum")) },
                             onDismiss = { onAction(StudioAction.DismissClipPanel) }
                         )
                     }
@@ -1534,14 +1601,101 @@ private fun FlippableClip(
 }
 
 /**
+ * Split-mode line drawn on top of a clip while the user is positioning a
+ * split. Valid position -> amber solid line. Invalid -> faded.
+ *
+ * [clipOffsetMs] and [clipWidthMs] bound the clip's timeline range so the
+ * line can be clamped visually and hidden when the split cursor sits
+ * outside the clip.
+ */
+@Composable
+private fun ClipSplitLine(
+    clipId: Long,
+    clipOffsetMs: Long,
+    clipWidthMs: Long,
+    msPerDp: Float,
+    modifier: Modifier = Modifier
+) {
+    val split = LocalSplitMode.current
+    if (split.clipId != clipId) return
+    val posMs = split.positionMs ?: return
+    val localMs = posMs - clipOffsetMs
+    if (localMs < 0 || localMs > clipWidthMs) return
+
+    val xDp = (localMs / msPerDp).dp
+    val color = if (split.valid) NjAmber else NjMuted
+    Box(
+        modifier = modifier
+            .offset(x = xDp - 0.75.dp)
+            .width(1.5.dp)
+            .fillMaxHeight()
+            .background(color.copy(alpha = if (split.valid) 0.9f else 0.5f))
+    )
+}
+
+/**
+ * Link indicator strip drawn across the top edge of a linked clip.
+ *
+ * Renders a 3dp-tall colored bar + small chain-link glyph when [linkage]
+ * reports isLinked. Observes LocalPulseTicks so sibling edits flash the
+ * bar via a short LED-style glow (100ms ramp + 150ms settle).
+ */
+@Composable
+private fun ClipLinkIndicator(
+    linkage: ClipLinkage?,
+    palette: List<Color>,
+    modifier: Modifier = Modifier
+) {
+    if (linkage == null || !linkage.isLinked || palette.isEmpty()) return
+    val baseColor = palette[(linkage.groupKey.hashCode() and Int.MAX_VALUE) % palette.size]
+
+    val pulseTicks = LocalPulseTicks.current
+    val tick = pulseTicks[linkage.groupKey] ?: 0L
+    val glow = remember { androidx.compose.animation.core.Animatable(0f) }
+    LaunchedEffect(tick) {
+        if (tick > 0L) {
+            glow.animateTo(1f, androidx.compose.animation.core.tween(100))
+            glow.animateTo(0f, androidx.compose.animation.core.tween(150))
+        }
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(3.dp)
+            .background(
+                color = androidx.compose.ui.graphics.lerp(
+                    baseColor.copy(alpha = 0.9f),
+                    baseColor,
+                    glow.value
+                )
+            )
+    ) {
+        // Chain glyph centered on the strip (scaled down to fit 3dp).
+        Icon(
+            imageVector = Icons.Filled.Link,
+            contentDescription = null,
+            tint = baseColor,
+            modifier = Modifier
+                .align(Alignment.Center)
+                .size(12.dp)
+                .alpha(0.85f + 0.15f * glow.value)
+        )
+    }
+}
+
+/**
  * Icon-only action buttons shown on the back face of a flipped clip.
- * Duplicate (amber), optional Edit (silver), Delete (red).
+ * Duplicate (amber), optional Rename (silver), optional Unlink (accent),
+ * Delete (red). Unlink appears only when the clip is part of a linked group.
  */
 @Composable
 private fun ClipActionButtons(
     onDuplicate: () -> Unit,
     onDelete: () -> Unit,
     onEdit: (() -> Unit)? = null,
+    onRename: (() -> Unit)? = null,
+    onUnlink: (() -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     Row(
@@ -1570,6 +1724,24 @@ private fun ClipActionButtons(
                 icon = Icons.Filled.Edit,
                 onClick = { onEdit(); onDismiss() },
                 textColor = NjMuted.copy(alpha = 0.9f)
+            )
+            Spacer(Modifier.width(12.dp))
+        }
+        if (onRename != null) {
+            NjButton(
+                text = "",
+                icon = Icons.Filled.DriveFileRenameOutline,
+                onClick = { onRename(); onDismiss() },
+                textColor = NjMuted.copy(alpha = 0.9f)
+            )
+            Spacer(Modifier.width(12.dp))
+        }
+        if (onUnlink != null) {
+            NjButton(
+                text = "",
+                icon = Icons.Filled.LinkOff,
+                onClick = { onUnlink(); onDismiss() },
+                textColor = NjAccent.copy(alpha = 0.9f)
             )
             Spacer(Modifier.width(12.dp))
         }
