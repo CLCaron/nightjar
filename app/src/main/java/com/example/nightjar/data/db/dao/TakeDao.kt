@@ -45,4 +45,8 @@ interface TakeDao {
 
     @Query("DELETE FROM takes WHERE id = :id")
     suspend fun deleteTakeById(id: Long)
+
+    /** Re-parent every take from [oldClipId] to [newClipId]. Used during source promotion. */
+    @Query("UPDATE takes SET clipId = :newClipId WHERE clipId = :oldClipId")
+    suspend fun repointTakes(oldClipId: Long, newClipId: Long)
 }

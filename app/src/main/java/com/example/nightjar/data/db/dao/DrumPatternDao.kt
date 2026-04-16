@@ -146,4 +146,8 @@ interface DrumPatternDao {
         ORDER BY dc.offsetMs
     """)
     suspend fun getClipsForTrack(trackId: Long): List<DrumClipEntity>
+
+    /** Number of drum clips sharing a pattern. Used for link-group sizing. */
+    @Query("SELECT COUNT(*) FROM drum_clips WHERE patternId = :patternId")
+    suspend fun getClipCountForPattern(patternId: Long): Int
 }

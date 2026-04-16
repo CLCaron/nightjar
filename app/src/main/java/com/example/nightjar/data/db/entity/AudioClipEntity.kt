@@ -13,21 +13,30 @@ import androidx.room.PrimaryKey
  * which is active at a time. The clip's effective duration is the active
  * take's `durationMs - trimStartMs - trimEndMs`.
  *
- * @property trackId      Foreign key to the parent audio [TrackEntity].
- * @property offsetMs     Timeline position in milliseconds where this clip starts.
- * @property displayName  User-visible label (e.g. "Clip 1", "Verse").
- * @property sortIndex    Ordering among clips of the same track (for display).
- * @property isMuted      When true, this clip is silenced during playback.
+ * ## Linking
+ * `sourceClipId = null` — this clip is a **source**: its takes are the
+ * authoritative content. `sourceClipId = X` — this clip is an **instance**
+ * of source X; content lookups resolve to X's takes. Instances own only
+ * position (`offsetMs`) and per-instance flags (`isMuted`). Deleting the
+ * source requires promoting an instance (see StudioRepository).
  */
 @Entity(
     tableName = "audio_clips",
-    foreignKeys = [ForeignKey(
-        entity = TrackEntity::class,
-        parentColumns = ["id"],
-        childColumns = ["trackId"],
-        onDelete = ForeignKey.CASCADE
-    )],
-    indices = [Index("trackId")]
+    foreignKeys = [
+        ForeignKey(
+            entity = TrackEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["trackId"],
+            onDelete = ForeignKey.CASCADE
+        ),
+        ForeignKey(
+            entity = AudioClipEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["sourceClipId"],
+            onDelete = ForeignKey.NO_ACTION
+        )
+    ],
+    indices = [Index("trackId"), Index("sourceClipId")]
 )
 data class AudioClipEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0L,
@@ -36,5 +45,6 @@ data class AudioClipEntity(
     val displayName: String = "",
     val sortIndex: Int = 0,
     val isMuted: Boolean = false,
-    val createdAtEpochMs: Long = System.currentTimeMillis()
+    val createdAtEpochMs: Long = System.currentTimeMillis(),
+    val sourceClipId: Long? = null
 )

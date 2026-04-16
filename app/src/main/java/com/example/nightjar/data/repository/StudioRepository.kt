@@ -1,13 +1,18 @@
 package com.example.nightjar.data.repository
 
 import android.media.MediaMetadataRetriever
+import androidx.room.withTransaction
+import com.example.nightjar.data.db.NightjarDatabase
 import com.example.nightjar.data.db.dao.AudioClipDao
 import com.example.nightjar.data.db.dao.TakeDao
 import com.example.nightjar.data.db.dao.TrackDao
 import com.example.nightjar.data.db.entity.AudioClipEntity
 import com.example.nightjar.data.db.entity.TakeEntity
 import com.example.nightjar.data.db.entity.TrackEntity
+import com.example.nightjar.data.events.PulseBus
 import com.example.nightjar.data.storage.RecordingStorage
+import com.example.nightjar.ui.studio.ClipLinkage
+import com.example.nightjar.ui.studio.GroupKey
 import java.io.File
 
 /**
@@ -16,12 +21,20 @@ import java.io.File
  * Handles project initialization, track CRUD, clip-based audio arrangement,
  * timeline edits (move, trim, reorder), and mix controls (mute, volume).
  * All operations are non-destructive -- audio files are never modified in place.
+ *
+ * ## Linked clips
+ * Clips with `sourceClipId != null` are instances that share content with
+ * their source. Content reads and writes go through [resolveSourceId] so
+ * that instance mutations are routed to the source; propagating edits emit
+ * a [GroupKey.Audio] onto [PulseBus] so sibling UIs can flash.
  */
 class StudioRepository(
     private val trackDao: TrackDao,
     private val audioClipDao: AudioClipDao,
     private val takeDao: TakeDao,
-    private val storage: RecordingStorage
+    private val storage: RecordingStorage,
+    private val database: NightjarDatabase,
+    private val pulseBus: PulseBus
 ) {
 
     // ── Project lifecycle ───────────────────────────────────────────────
@@ -199,28 +212,56 @@ class StudioRepository(
         audioClipDao.updateClipOffset(clipId, newOffsetMs)
     }
 
+    /**
+     * Rename a clip. For linked clips, writes to the source's displayName so
+     * all siblings render the new name. Emits a pulse on the group.
+     */
     suspend fun renameClip(clipId: Long, name: String) {
-        audioClipDao.updateDisplayName(clipId, name)
+        val sourceId = resolveSourceId(clipId)
+        audioClipDao.updateDisplayName(sourceId, name)
+        pulseBus.emit(GroupKey.Audio(sourceId))
     }
 
     suspend fun setClipMuted(clipId: Long, muted: Boolean) {
+        // Per-instance mute -- does NOT propagate.
         audioClipDao.updateMuted(clipId, muted)
     }
 
-    /** Delete a clip and its audio files. Cascade handles take DB rows. */
+    /**
+     * Delete a clip and its audio files.
+     *
+     * - Instance deletion: trivial; remove the clip row only (takes stay on source).
+     * - Source with no instances: delete takes' audio files, then the clip row
+     *   (CASCADE removes take rows).
+     * - Source with live instances: promote the earliest instance to source,
+     *   re-point all takes, re-parent remaining siblings; audio is preserved.
+     */
     suspend fun deleteClipAndAudio(clipId: Long) {
-        val takes = takeDao.getTakesForClip(clipId)
-        for (take in takes) {
-            storage.deleteAudioFile(take.audioFileName)
+        val clip = audioClipDao.getClipById(clipId) ?: return
+        if (clip.sourceClipId != null) {
+            // Instance deletion. Takes live on the source and are unaffected.
+            audioClipDao.deleteClip(clipId)
+            return
         }
-        audioClipDao.deleteClip(clipId)
+        // Source deletion.
+        val instances = audioClipDao.getInstancesOf(clipId)
+        if (instances.isEmpty()) {
+            val takes = takeDao.getTakesForClip(clipId)
+            for (take in takes) {
+                storage.deleteAudioFile(take.audioFileName)
+            }
+            audioClipDao.deleteClip(clipId)
+        } else {
+            promoteSourceOnDelete(clipId, instances)
+        }
     }
 
     // ── Clip-aware Take methods ──────────────────────────────────────────
 
     /**
      * Add a take to a clip, marking it as active and deactivating the previous.
-     * Returns the new take's ID.
+     * If the clip is an instance of a linked group, the take is written to the
+     * source so every sibling sees it. Returns the new take's ID.
      */
     suspend fun addTakeToClip(
         clipId: Long,
@@ -228,9 +269,10 @@ class StudioRepository(
         durationMs: Long,
         trimStartMs: Long = 0L
     ): Long {
-        val nextIndex = takeDao.getTakeCount(clipId)
+        val sourceId = resolveSourceId(clipId)
+        val nextIndex = takeDao.getTakeCount(sourceId)
         val take = TakeEntity(
-            clipId = clipId,
+            clipId = sourceId,
             audioFileName = audioFile.name,
             displayName = "Take ${nextIndex + 1}",
             sortIndex = nextIndex,
@@ -238,50 +280,64 @@ class StudioRepository(
             trimStartMs = trimStartMs
         )
         val takeId = takeDao.insertTake(take)
-        // Set this new take as active, deactivate others
-        takeDao.setActiveTake(clipId, takeId)
+        takeDao.setActiveTake(sourceId, takeId)
+        pulseBus.emit(GroupKey.Audio(sourceId))
         return takeId
     }
 
     suspend fun setActiveTake(clipId: Long, takeId: Long) {
-        takeDao.setActiveTake(clipId, takeId)
+        val sourceId = resolveSourceId(clipId)
+        takeDao.setActiveTake(sourceId, takeId)
+        pulseBus.emit(GroupKey.Audio(sourceId))
     }
 
     suspend fun deleteTakeAndAudio(takeId: Long) {
         val take = takeDao.getTakeById(takeId) ?: return
-        val clipId = take.clipId
+        val sourceId = take.clipId // takes always live on the source
         val wasActive = take.isActive
 
         takeDao.deleteTakeById(takeId)
         storage.deleteAudioFile(take.audioFileName)
 
-        // If the deleted take was active, activate the next remaining take
         if (wasActive) {
-            val remaining = takeDao.getTakesForClip(clipId)
+            val remaining = takeDao.getTakesForClip(sourceId)
             if (remaining.isNotEmpty()) {
-                takeDao.setActiveTake(clipId, remaining.first().id)
+                takeDao.setActiveTake(sourceId, remaining.first().id)
             } else {
-                // No takes left -- delete the empty clip and its audio
-                audioClipDao.deleteClip(clipId)
+                // No content left on the source. Delete instances first so
+                // the FK on sourceClipId doesn't block the source deletion.
+                val instances = audioClipDao.getInstancesOf(sourceId)
+                database.withTransaction {
+                    for (instance in instances) audioClipDao.deleteClip(instance.id)
+                    audioClipDao.deleteClip(sourceId)
+                }
             }
         }
+        pulseBus.emit(GroupKey.Audio(sourceId))
     }
 
     suspend fun renameTake(takeId: Long, name: String) {
+        val take = takeDao.getTakeById(takeId) ?: return
         takeDao.updateDisplayName(takeId, name)
+        pulseBus.emit(GroupKey.Audio(take.clipId))
     }
 
     suspend fun getTakesForClip(clipId: Long): List<TakeEntity> =
-        takeDao.getTakesForClip(clipId)
+        takeDao.getTakesForClip(resolveSourceId(clipId))
 
-    suspend fun getTakesForClips(clipIds: List<Long>): List<TakeEntity> =
-        if (clipIds.isEmpty()) emptyList() else takeDao.getTakesForClips(clipIds)
+    suspend fun getTakesForClips(clipIds: List<Long>): List<TakeEntity> {
+        if (clipIds.isEmpty()) return emptyList()
+        val resolvedIds = clipIds.map { resolveSourceId(it) }.distinct()
+        return takeDao.getTakesForClips(resolvedIds)
+    }
 
     suspend fun getActiveTake(clipId: Long): TakeEntity? =
-        takeDao.getActiveTakeForClip(clipId)
+        takeDao.getActiveTakeForClip(resolveSourceId(clipId))
 
     suspend fun updateTakeTrim(takeId: Long, trimStartMs: Long, trimEndMs: Long) {
+        val take = takeDao.getTakeById(takeId) ?: return
         takeDao.updateTrim(takeId, trimStartMs, trimEndMs)
+        pulseBus.emit(GroupKey.Audio(take.clipId))
     }
 
     // ── Recording helpers ────────────────────────────────────────────────
@@ -293,7 +349,8 @@ class StudioRepository(
     suspend fun findClipAtPosition(trackId: Long, positionMs: Long): AudioClipEntity? {
         val clips = audioClipDao.getClipsForTrack(trackId)
         for (clip in clips) {
-            val activeTake = takeDao.getActiveTakeForClip(clip.id) ?: continue
+            val sourceId = clip.sourceClipId ?: clip.id
+            val activeTake = takeDao.getActiveTakeForClip(sourceId) ?: continue
             val effectiveDuration = activeTake.durationMs - activeTake.trimStartMs - activeTake.trimEndMs
             if (positionMs >= clip.offsetMs && positionMs < clip.offsetMs + effectiveDuration) {
                 return clip
@@ -335,7 +392,8 @@ class StudioRepository(
         val clips = audioClipDao.getClipsForTrack(trackId)
         var maxEndMs = 0L
         for (clip in clips) {
-            val activeTake = takeDao.getActiveTakeForClip(clip.id) ?: continue
+            val sourceId = clip.sourceClipId ?: clip.id
+            val activeTake = takeDao.getActiveTakeForClip(sourceId) ?: continue
             val effectiveDuration = activeTake.durationMs - activeTake.trimStartMs - activeTake.trimEndMs
             val endMs = clip.offsetMs + effectiveDuration
             if (endMs > maxEndMs) maxEndMs = endMs
@@ -362,6 +420,10 @@ class StudioRepository(
     /**
      * Returns a flat list of active audio slots for an idea.
      * Each slot represents one clip's active take with its absolute position.
+     *
+     * Resolves each clip's `sourceClipId` so instance clips pull their
+     * content from the source's active take. Instance-only state (offsetMs,
+     * isMuted) stays on the instance itself.
      */
     suspend fun getActiveAudioSlotsForIdea(ideaId: Long): List<AudioPlaybackSlot> {
         val tracks = trackDao.getTracksForIdea(ideaId).filter { it.isAudio }
@@ -371,14 +433,15 @@ class StudioRepository(
         val allClips = audioClipDao.getClipsForTracks(trackIds)
         if (allClips.isEmpty()) return emptyList()
 
-        val clipIds = allClips.map { it.id }
-        val allTakes = takeDao.getTakesForClips(clipIds)
+        val sourceIds = allClips.map { it.sourceClipId ?: it.id }.distinct()
+        val allTakes = takeDao.getTakesForClips(sourceIds)
         val activeTakesByClip = allTakes.filter { it.isActive }.associateBy { it.clipId }
         val tracksById = tracks.associateBy { it.id }
 
         val slots = mutableListOf<AudioPlaybackSlot>()
         for (clip in allClips) {
-            val activeTake = activeTakesByClip[clip.id] ?: continue
+            val sourceId = clip.sourceClipId ?: clip.id
+            val activeTake = activeTakesByClip[sourceId] ?: continue
             val track = tracksById[clip.trackId] ?: continue
             slots.add(AudioPlaybackSlot(
                 audioFileName = activeTake.audioFileName,
@@ -391,6 +454,196 @@ class StudioRepository(
             ))
         }
         return slots
+    }
+
+    // ── Duplicate / Split / Unlink / Rename ──────────────────────────────
+
+    /**
+     * Duplicate an audio clip. Place the new clip immediately after the source.
+     *
+     * When [linked] is true, the new clip becomes an instance that shares
+     * content with the source (no take copy). When false, takes are cloned
+     * so the new clip is independent (audio files are reused, not duplicated).
+     *
+     * The new clip is returned. Returns null if [clipId] doesn't exist.
+     */
+    suspend fun duplicateAudioClip(clipId: Long, linked: Boolean): AudioClipEntity? {
+        val source = audioClipDao.getClipById(clipId) ?: return null
+        val sourceId = source.sourceClipId ?: source.id
+        val sourceClip = audioClipDao.getClipById(sourceId) ?: return null
+        val activeTake = takeDao.getActiveTakeForClip(sourceId)
+        val effectiveLen = activeTake?.let {
+            (it.durationMs - it.trimStartMs - it.trimEndMs).coerceAtLeast(0L)
+        } ?: 0L
+        val nextIndex = (audioClipDao.getMaxSortIndex(source.trackId) ?: -1) + 1
+
+        return if (linked) {
+            val newId = audioClipDao.insertClip(
+                sourceClip.copy(
+                    id = 0L,
+                    offsetMs = source.offsetMs + effectiveLen,
+                    sortIndex = nextIndex,
+                    createdAtEpochMs = System.currentTimeMillis(),
+                    sourceClipId = sourceId
+                )
+            )
+            pulseBus.emit(GroupKey.Audio(sourceId))
+            audioClipDao.getClipById(newId)
+        } else {
+            database.withTransaction {
+                val newId = audioClipDao.insertClip(
+                    sourceClip.copy(
+                        id = 0L,
+                        offsetMs = source.offsetMs + effectiveLen,
+                        sortIndex = nextIndex,
+                        createdAtEpochMs = System.currentTimeMillis(),
+                        sourceClipId = null
+                    )
+                )
+                // Deep-copy takes from source so the new clip is independent.
+                val sourceTakes = takeDao.getTakesForClip(sourceId)
+                for (t in sourceTakes) {
+                    takeDao.insertTake(t.copy(id = 0L, clipId = newId))
+                }
+                newId
+            }.let { audioClipDao.getClipById(it) }
+        }
+    }
+
+    /**
+     * Split an audio clip at [sourceSplitMs] (milliseconds into the source's
+     * content window, inclusive of any active-take trimStartMs offset).
+     *
+     * Operates on the active take only. Inactive takes stay on the left-half
+     * source. If the clip is part of a linked group, every sibling spawns a
+     * paired right-half instance; the original group becomes two groups of
+     * the same size.
+     *
+     * Returns the new right-half source clip, or null on invalid input.
+     */
+    suspend fun splitAudioClip(clipId: Long, sourceSplitMs: Long): AudioClipEntity? {
+        val clip = audioClipDao.getClipById(clipId) ?: return null
+        val sourceId = clip.sourceClipId ?: clip.id
+        val source = audioClipDao.getClipById(sourceId) ?: return null
+        val activeTake = takeDao.getActiveTakeForClip(sourceId) ?: return null
+
+        // sourceSplitMs must lie strictly inside the active take's trim window.
+        if (sourceSplitMs <= activeTake.trimStartMs) return null
+        if (sourceSplitMs >= activeTake.durationMs - activeTake.trimEndMs) return null
+
+        val leftEffectiveLen = sourceSplitMs - activeTake.trimStartMs
+        val instances = audioClipDao.getInstancesOf(sourceId)
+        val now = System.currentTimeMillis()
+
+        val newSourceId = database.withTransaction {
+            // 1. Insert right-half source, positioned after the left half.
+            val bId = audioClipDao.insertClip(
+                source.copy(
+                    id = 0L,
+                    offsetMs = source.offsetMs + leftEffectiveLen,
+                    sortIndex = source.sortIndex + 1,
+                    createdAtEpochMs = now,
+                    sourceClipId = null
+                )
+            )
+            // 2. Right-half's active take: same audio file, trimStart=splitMs.
+            takeDao.insertTake(
+                activeTake.copy(
+                    id = 0L,
+                    clipId = bId,
+                    trimStartMs = sourceSplitMs,
+                    isActive = true,
+                    sortIndex = 0
+                )
+            )
+            // 3. Shrink the left-half source's active take.
+            takeDao.updateTrim(
+                activeTake.id,
+                activeTake.trimStartMs,
+                (activeTake.durationMs - sourceSplitMs).coerceAtLeast(0L)
+            )
+            // 4. Pair every instance of the left-half group.
+            for (inst in instances) {
+                audioClipDao.insertClip(
+                    inst.copy(
+                        id = 0L,
+                        offsetMs = inst.offsetMs + leftEffectiveLen,
+                        sortIndex = inst.sortIndex + 1,
+                        createdAtEpochMs = now,
+                        sourceClipId = bId
+                    )
+                )
+            }
+            bId
+        }
+
+        pulseBus.emit(GroupKey.Audio(sourceId))
+        pulseBus.emit(GroupKey.Audio(newSourceId))
+        return audioClipDao.getClipById(newSourceId)
+    }
+
+    /**
+     * Unlink an instance clip from its group by deep-copying the source's
+     * takes onto the instance. The instance becomes its own source.
+     * No-op for source clips or standalone clips.
+     */
+    suspend fun unlinkAudioClip(clipId: Long) {
+        val clip = audioClipDao.getClipById(clipId) ?: return
+        val sourceId = clip.sourceClipId ?: return
+
+        database.withTransaction {
+            val sourceTakes = takeDao.getTakesForClip(sourceId)
+            for (t in sourceTakes) {
+                takeDao.insertTake(t.copy(id = 0L, clipId = clipId))
+            }
+            audioClipDao.updateSourceClipId(clipId, null)
+        }
+        pulseBus.emit(GroupKey.Audio(sourceId))
+    }
+
+    // ── Linked-clip helpers ──────────────────────────────────────────────
+
+    /**
+     * Returns the canonical source clip id for [clipId]. Returns [clipId]
+     * itself if the clip is a source or has been deleted.
+     */
+    suspend fun resolveSourceId(clipId: Long): Long =
+        audioClipDao.resolveSourceId(clipId) ?: clipId
+
+    /** Number of clips in this clip's linked group (1 when standalone). */
+    suspend fun getGroupSize(clipId: Long): Int =
+        audioClipDao.getGroupSize(clipId).coerceAtLeast(1)
+
+    /** Typed [ClipLinkage] for a clip, keyed by its resolved source id. */
+    suspend fun getLinkage(clip: AudioClipEntity): ClipLinkage.Audio {
+        val sourceId = clip.sourceClipId ?: clip.id
+        val size = audioClipDao.getGroupSize(clip.id).coerceAtLeast(1)
+        return ClipLinkage.Audio(GroupKey.Audio(sourceId), size)
+    }
+
+    /**
+     * Promote the earliest (by createdAtEpochMs) instance of [sourceId] into
+     * the new source. Re-points takes, updates remaining instances, deletes
+     * the old source row. Atomic.
+     */
+    private suspend fun promoteSourceOnDelete(
+        sourceId: Long,
+        instances: List<AudioClipEntity>
+    ) {
+        if (instances.isEmpty()) return
+        val promoted = instances.minByOrNull { it.createdAtEpochMs } ?: instances.first()
+
+        database.withTransaction {
+            // 1. Re-point every take from the dying source onto the promotee.
+            takeDao.repointTakes(oldClipId = sourceId, newClipId = promoted.id)
+            // 2. Promotee becomes a source.
+            audioClipDao.updateSourceClipId(promoted.id, null)
+            // 3. Every other instance now points at the promotee.
+            audioClipDao.rewriteSourceClipId(oldSourceId = sourceId, newSourceId = promoted.id)
+            // 4. Safe to drop the old source row (no remaining FK references).
+            audioClipDao.deleteClip(sourceId)
+        }
+        pulseBus.emit(GroupKey.Audio(promoted.id))
     }
 
     // ── Internal ─────────────────────────────────────────────────────────

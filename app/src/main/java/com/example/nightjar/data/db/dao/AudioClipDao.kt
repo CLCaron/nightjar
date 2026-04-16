@@ -38,4 +38,45 @@ interface AudioClipDao {
 
     @Query("SELECT COUNT(*) FROM audio_clips WHERE trackId = :trackId")
     suspend fun getClipCount(trackId: Long): Int
+
+    // -- Linked-clip queries --
+
+    /** All instances (non-source clips) that point to [sourceId]. */
+    @Query("SELECT * FROM audio_clips WHERE sourceClipId = :sourceId ORDER BY createdAtEpochMs ASC")
+    suspend fun getInstancesOf(sourceId: Long): List<AudioClipEntity>
+
+    /**
+     * Every member of a linked group: the source itself plus all its
+     * instances. Input may be either a source or an instance id.
+     */
+    @Query("""
+        SELECT * FROM audio_clips
+        WHERE id = (SELECT COALESCE(sourceClipId, id) FROM audio_clips WHERE id = :clipId)
+           OR sourceClipId = (SELECT COALESCE(sourceClipId, id) FROM audio_clips WHERE id = :clipId)
+        ORDER BY createdAtEpochMs ASC
+    """)
+    suspend fun findSiblingGroup(clipId: Long): List<AudioClipEntity>
+
+    /** Count of members in a clip's linked group (1 if standalone). */
+    @Query("""
+        SELECT COUNT(*) FROM audio_clips
+        WHERE id = (SELECT COALESCE(sourceClipId, id) FROM audio_clips WHERE id = :clipId)
+           OR sourceClipId = (SELECT COALESCE(sourceClipId, id) FROM audio_clips WHERE id = :clipId)
+    """)
+    suspend fun getGroupSize(clipId: Long): Int
+
+    /** Resolve a clip id to its source's id. Returns the clip's own id if it is a source. */
+    @Query("SELECT COALESCE(sourceClipId, id) FROM audio_clips WHERE id = :clipId")
+    suspend fun resolveSourceId(clipId: Long): Long?
+
+    /**
+     * Update a clip's [sourceClipId]. Pass null to mark the clip as a source,
+     * or a source id to mark it as an instance of that source.
+     */
+    @Query("UPDATE audio_clips SET sourceClipId = :sourceId WHERE id = :clipId")
+    suspend fun updateSourceClipId(clipId: Long, sourceId: Long?)
+
+    /** Re-parent every instance of [oldSourceId] to [newSourceId]. */
+    @Query("UPDATE audio_clips SET sourceClipId = :newSourceId WHERE sourceClipId = :oldSourceId")
+    suspend fun rewriteSourceClipId(oldSourceId: Long, newSourceId: Long)
 }

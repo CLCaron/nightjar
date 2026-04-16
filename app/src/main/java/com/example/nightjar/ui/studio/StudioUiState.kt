@@ -178,7 +178,26 @@ data class StudioUiState(
     val cursorPositionMs: Long = 0L,
     val returnToCursor: Boolean = true,
     val collapsedHeaderTrackIds: Set<Long> = emptySet(),
-    val headersCollapsedMode: Boolean = false
+    val headersCollapsedMode: Boolean = false,
+
+    // Split mode
+    val splitModeClipId: Long? = null,
+    val splitModeClipType: String? = null, // "audio" | "midi" | "drum"
+    val splitPositionMs: Long? = null,
+    val splitValid: Boolean = false,
+
+    // Clip rename (distinct from take rename)
+    val renamingClipId: Long? = null,
+    val renamingClipType: String? = null,
+    val renamingClipCurrentName: String = "",
+
+    // Sibling-pulse ticks (per linked group). Bumped on propagating edits.
+    val pulseTicks: Map<GroupKey, Long> = emptyMap(),
+
+    // Per-clip linkage snapshot (keyed by clip type + id).
+    val audioClipLinkage: Map<Long, ClipLinkage.Audio> = emptyMap(),
+    val midiClipLinkage: Map<Long, ClipLinkage.Midi> = emptyMap(),
+    val drumClipLinkage: Map<Long, ClipLinkage.Drum> = emptyMap()
 ) {
     val hasLoopRegion: Boolean get() = loopStartMs != null && loopEndMs != null
 
@@ -251,7 +270,18 @@ data class StudioUiState(
                 cursorPositionMs == other.cursorPositionMs &&
                 returnToCursor == other.returnToCursor &&
                 collapsedHeaderTrackIds == other.collapsedHeaderTrackIds &&
-                headersCollapsedMode == other.headersCollapsedMode
+                headersCollapsedMode == other.headersCollapsedMode &&
+                splitModeClipId == other.splitModeClipId &&
+                splitModeClipType == other.splitModeClipType &&
+                splitPositionMs == other.splitPositionMs &&
+                splitValid == other.splitValid &&
+                renamingClipId == other.renamingClipId &&
+                renamingClipType == other.renamingClipType &&
+                renamingClipCurrentName == other.renamingClipCurrentName &&
+                pulseTicks == other.pulseTicks &&
+                audioClipLinkage == other.audioClipLinkage &&
+                midiClipLinkage == other.midiClipLinkage &&
+                drumClipLinkage == other.drumClipLinkage
     }
 
     override fun hashCode(): Int {
@@ -312,6 +342,17 @@ data class StudioUiState(
         result = 31 * result + returnToCursor.hashCode()
         result = 31 * result + collapsedHeaderTrackIds.hashCode()
         result = 31 * result + headersCollapsedMode.hashCode()
+        result = 31 * result + (splitModeClipId?.hashCode() ?: 0)
+        result = 31 * result + (splitModeClipType?.hashCode() ?: 0)
+        result = 31 * result + (splitPositionMs?.hashCode() ?: 0)
+        result = 31 * result + splitValid.hashCode()
+        result = 31 * result + (renamingClipId?.hashCode() ?: 0)
+        result = 31 * result + (renamingClipType?.hashCode() ?: 0)
+        result = 31 * result + renamingClipCurrentName.hashCode()
+        result = 31 * result + pulseTicks.hashCode()
+        result = 31 * result + audioClipLinkage.hashCode()
+        result = 31 * result + midiClipLinkage.hashCode()
+        result = 31 * result + drumClipLinkage.hashCode()
         return result
     }
 }
@@ -391,6 +432,7 @@ sealed interface StudioAction {
     data object CancelTrimAudioClip : StudioAction
     data class ActivateTake(val clipId: Long, val takeId: Long, val trackId: Long) : StudioAction
     data class DeleteAudioClip(val trackId: Long, val clipId: Long) : StudioAction
+    data class DuplicateAudioClip(val trackId: Long, val clipId: Long, val linked: Boolean) : StudioAction
 
     // Take rename / delete (now clip-scoped)
     data class RequestRenameTake(val takeId: Long, val clipId: Long, val currentName: String) : StudioAction
@@ -421,7 +463,7 @@ sealed interface StudioAction {
     data class CreateMidiClip(val trackId: Long, val offsetMs: Long) : StudioAction
 
     // Drum clips
-    data class DuplicateClip(val trackId: Long, val clipId: Long) : StudioAction
+    data class DuplicateClip(val trackId: Long, val clipId: Long, val linked: Boolean = false) : StudioAction
     data class MoveClip(val trackId: Long, val clipId: Long, val newOffsetMs: Long) : StudioAction
     data class DeleteClip(val trackId: Long, val clipId: Long) : StudioAction
 
@@ -440,7 +482,7 @@ sealed interface StudioAction {
     data class PreviewInstrument(val program: Int) : StudioAction
 
     // MIDI clips
-    data class DuplicateMidiClip(val trackId: Long, val clipId: Long) : StudioAction
+    data class DuplicateMidiClip(val trackId: Long, val clipId: Long, val linked: Boolean = false) : StudioAction
     data class MoveMidiClip(val trackId: Long, val clipId: Long, val newOffsetMs: Long) : StudioAction
     data class DeleteMidiClip(val trackId: Long, val clipId: Long) : StudioAction
     // Clip action panel (tap-to-expand)
@@ -472,6 +514,16 @@ sealed interface StudioAction {
     data class InlineMoveNote(val trackId: Long, val noteId: Long, val newStartMs: Long, val newPitch: Int) : StudioAction
     data class InlineResizeNote(val trackId: Long, val noteId: Long, val newDurationMs: Long) : StudioAction
     data class InlineDeleteNote(val trackId: Long, val noteId: Long) : StudioAction
+
+    // Split / Unlink / Rename clip (uniform across audio | midi | drum)
+    data class StartSplitMode(val clipId: Long, val clipType: String) : StudioAction
+    data class UpdateSplitPosition(val timelinePositionMs: Long) : StudioAction
+    data object ConfirmSplit : StudioAction
+    data object CancelSplit : StudioAction
+    data class UnlinkClip(val clipId: Long, val clipType: String) : StudioAction
+    data class RequestRenameClip(val clipId: Long, val clipType: String, val currentName: String) : StudioAction
+    data class ConfirmRenameClip(val newName: String) : StudioAction
+    data object DismissRenameClip : StudioAction
 }
 
 /** One-shot side effects emitted by [StudioViewModel]. */

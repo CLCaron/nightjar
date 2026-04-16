@@ -10,6 +10,7 @@ import com.example.nightjar.data.db.dao.MidiNoteDao
 import com.example.nightjar.data.db.dao.TagDao
 import com.example.nightjar.data.db.dao.TakeDao
 import com.example.nightjar.data.db.dao.TrackDao
+import com.example.nightjar.data.events.PulseBus
 import com.example.nightjar.data.repository.DrumRepository
 import com.example.nightjar.data.repository.MidiRepository
 import com.example.nightjar.data.repository.StudioRepository
@@ -67,8 +68,12 @@ abstract class AppModule {
             trackDao: TrackDao,
             audioClipDao: AudioClipDao,
             takeDao: TakeDao,
-            storage: RecordingStorage
-        ): StudioRepository = StudioRepository(trackDao, audioClipDao, takeDao, storage)
+            storage: RecordingStorage,
+            database: NightjarDatabase,
+            pulseBus: PulseBus
+        ): StudioRepository = StudioRepository(
+            trackDao, audioClipDao, takeDao, storage, database, pulseBus
+        )
 
         @Provides
         fun provideDrumPatternDao(db: NightjarDatabase): DrumPatternDao = db.drumPatternDao()
@@ -76,8 +81,9 @@ abstract class AppModule {
         @Provides
         @Singleton
         fun provideDrumRepository(
-            drumPatternDao: DrumPatternDao
-        ): DrumRepository = DrumRepository(drumPatternDao)
+            drumPatternDao: DrumPatternDao,
+            pulseBus: PulseBus
+        ): DrumRepository = DrumRepository(drumPatternDao, pulseBus)
 
         @Provides
         fun provideMidiClipDao(db: NightjarDatabase): MidiClipDao = db.midiClipDao()
@@ -90,8 +96,12 @@ abstract class AppModule {
         fun provideMidiRepository(
             midiClipDao: MidiClipDao,
             midiNoteDao: MidiNoteDao,
-            trackDao: TrackDao
-        ): MidiRepository = MidiRepository(midiClipDao, midiNoteDao, trackDao)
+            trackDao: TrackDao,
+            database: NightjarDatabase,
+            pulseBus: PulseBus
+        ): MidiRepository = MidiRepository(
+            midiClipDao, midiNoteDao, trackDao, database, pulseBus
+        )
 
     }
 }

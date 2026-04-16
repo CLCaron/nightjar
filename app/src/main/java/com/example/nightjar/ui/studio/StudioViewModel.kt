@@ -13,6 +13,7 @@ import com.example.nightjar.audio.WavSplitter
 import com.example.nightjar.data.db.entity.AudioClipEntity
 import com.example.nightjar.data.db.entity.MidiNoteEntity
 import com.example.nightjar.data.db.entity.TakeEntity
+import com.example.nightjar.data.events.PulseBus
 import com.example.nightjar.data.repository.DrumRepository
 import com.example.nightjar.data.repository.MidiRepository
 import com.example.nightjar.data.repository.StudioRepository
@@ -68,8 +69,22 @@ class StudioViewModel @Inject constructor(
     private val latencyEstimator: AudioLatencyEstimator,
     private val soundFontManager: SoundFontManager,
     private val metronomePrefs: MetronomePreferences,
-    private val studioPrefs: StudioPreferences
+    private val studioPrefs: StudioPreferences,
+    private val pulseBus: PulseBus
 ) : ViewModel() {
+
+    init {
+        // Collect sibling-pulse events from the repository layer and bump the
+        // per-group tick counter so clip composables can flash their indicator.
+        viewModelScope.launch {
+            pulseBus.pulses.collect { key ->
+                _state.update { s ->
+                    val next = (s.pulseTicks[key] ?: 0L) + 1L
+                    s.copy(pulseTicks = s.pulseTicks + (key to next))
+                }
+            }
+        }
+    }
 
     private var currentIdeaId: Long? = null
 
@@ -394,7 +409,7 @@ class StudioViewModel @Inject constructor(
             is StudioAction.CreateMidiClip -> createMidiClip(action.trackId, action.offsetMs)
 
             // Drum clips
-            is StudioAction.DuplicateClip -> duplicateClip(action.trackId, action.clipId)
+            is StudioAction.DuplicateClip -> duplicateClip(action.trackId, action.clipId, action.linked)
             is StudioAction.MoveClip -> moveClip(action.trackId, action.clipId, action.newOffsetMs)
             is StudioAction.DeleteClip -> deleteClip(action.trackId, action.clipId)
 
@@ -417,7 +432,7 @@ class StudioViewModel @Inject constructor(
             is StudioAction.PreviewInstrument -> previewInstrument(action.program)
 
             // MIDI clips
-            is StudioAction.DuplicateMidiClip -> duplicateMidiClip(action.trackId, action.clipId)
+            is StudioAction.DuplicateMidiClip -> duplicateMidiClip(action.trackId, action.clipId, action.linked)
             is StudioAction.MoveMidiClip -> moveMidiClip(action.trackId, action.clipId, action.newOffsetMs)
             is StudioAction.DeleteMidiClip -> deleteMidiClip(action.trackId, action.clipId)
             is StudioAction.StartDragMidiClip -> startDragMidiClip(action.trackId, action.clipId)
@@ -484,6 +499,36 @@ class StudioViewModel @Inject constructor(
             is StudioAction.InlineMoveNote -> inlineMoveNote(action.trackId, action.noteId, action.newStartMs, action.newPitch)
             is StudioAction.InlineResizeNote -> inlineResizeNote(action.trackId, action.noteId, action.newDurationMs)
             is StudioAction.InlineDeleteNote -> inlineDeleteNote(action.trackId, action.noteId)
+
+            // Audio clip duplicate (pillrocker: unlinked | linked)
+            is StudioAction.DuplicateAudioClip ->
+                duplicateAudioClip(action.trackId, action.clipId, action.linked)
+
+            // Split / Unlink / Rename (uniform across clip types)
+            is StudioAction.StartSplitMode -> startSplitMode(action.clipId, action.clipType)
+            is StudioAction.UpdateSplitPosition -> updateSplitPosition(action.timelinePositionMs)
+            is StudioAction.ConfirmSplit -> confirmSplit()
+            is StudioAction.CancelSplit -> cancelSplit()
+            is StudioAction.UnlinkClip -> unlinkClip(action.clipId, action.clipType)
+            is StudioAction.RequestRenameClip -> {
+                _state.update {
+                    it.copy(
+                        renamingClipId = action.clipId,
+                        renamingClipType = action.clipType,
+                        renamingClipCurrentName = action.currentName
+                    )
+                }
+            }
+            is StudioAction.ConfirmRenameClip -> confirmRenameClip(action.newName)
+            is StudioAction.DismissRenameClip -> {
+                _state.update {
+                    it.copy(
+                        renamingClipId = null,
+                        renamingClipType = null,
+                        renamingClipCurrentName = ""
+                    )
+                }
+            }
         }
     }
 
@@ -958,7 +1003,9 @@ class StudioViewModel @Inject constructor(
     ) {
         val audioTracks = tracks.filter { it.isAudio }
         if (audioTracks.isEmpty()) {
-            _state.update { it.copy(audioClips = emptyMap()) }
+            _state.update {
+                it.copy(audioClips = emptyMap(), audioClipLinkage = emptyMap())
+            }
             return
         }
 
@@ -966,10 +1013,23 @@ class StudioViewModel @Inject constructor(
         val allClips = studioRepo.getClipsForTracks(trackIds)
 
         val clipsByTrack = mutableMapOf<Long, List<AudioClipUiState>>()
+        val linkageByClip = mutableMapOf<Long, ClipLinkage.Audio>()
+
         if (allClips.isNotEmpty()) {
             val clipIds = allClips.map { it.id }
             val allTakes = studioRepo.getTakesForClips(clipIds)
             val takesByClip = allTakes.groupBy { it.clipId }
+
+            // Precompute group sizes from in-memory clips (O(N)) instead of
+            // per-clip DB COUNT queries. Audio groups key by resolved sourceId.
+            val sourceCounts = allClips.groupingBy { it.sourceClipId ?: it.id }.eachCount()
+            for (clip in allClips) {
+                val sourceId = clip.sourceClipId ?: clip.id
+                linkageByClip[clip.id] = ClipLinkage.Audio(
+                    GroupKey.Audio(sourceId),
+                    sourceCounts[sourceId] ?: 1
+                )
+            }
 
             for ((trackId, clips) in allClips.groupBy { it.trackId }) {
                 clipsByTrack[trackId] = clips.map { clip ->
@@ -988,8 +1048,9 @@ class StudioViewModel @Inject constructor(
             }
         }
 
-        // Full replacement -- ensures deleted tracks/clips are cleaned up
-        _state.update { it.copy(audioClips = clipsByTrack) }
+        _state.update {
+            it.copy(audioClips = clipsByTrack, audioClipLinkage = linkageByClip)
+        }
     }
 
     /** Reload audio clips for a single track. */
@@ -1013,7 +1074,29 @@ class StudioViewModel @Inject constructor(
             )
         }
 
-        _state.update { it.copy(audioClips = it.audioClips + (trackId to clipStates)) }
+        // Reloading a single track only sees its own clips. For accurate
+        // group sizing across tracks we'd need a global query; for MVP,
+        // cross-track links aren't created (duplicate places on same track).
+        val sourceCounts = clips.groupingBy { it.sourceClipId ?: it.id }.eachCount()
+        val linkage = clips.associate { clip ->
+            val sourceId = clip.sourceClipId ?: clip.id
+            clip.id to ClipLinkage.Audio(
+                GroupKey.Audio(sourceId),
+                sourceCounts[sourceId] ?: 1
+            )
+        }
+
+        _state.update {
+            it.copy(
+                audioClips = it.audioClips + (trackId to clipStates),
+                audioClipLinkage = it.audioClipLinkage
+                    .filterKeys { id -> clipStates.none { it.clipId == id } }
+                    .let { filtered ->
+                        // Remove stale entries for this track, then overlay fresh ones.
+                        filtered + linkage
+                    }
+            )
+        }
     }
 
     /** Reload audio clips for all currently loaded audio tracks. */
@@ -1229,10 +1312,19 @@ class StudioViewModel @Inject constructor(
     private fun setCursorPosition(positionMs: Long) {
         if (_state.value.isRecording) return // cursor locked during recording
         val snapped = snapIfEnabled(positionMs.coerceAtLeast(0L))
-        _state.update { it.copy(cursorPositionMs = snapped, expandedClipState = null) }
+        val inSplitMode = _state.value.splitModeClipId != null
+        _state.update {
+            // In split mode, keep the selected clip so the controls drawer
+            // stays visible; outside split mode, tapping the timeline clears
+            // the clip selection as before.
+            if (inSplitMode) it.copy(cursorPositionMs = snapped)
+            else it.copy(cursorPositionMs = snapped, expandedClipState = null)
+        }
         if (!_state.value.isPlaying) {
             audioEngine.seekTo(snapped)
         }
+        // If split mode is active, track cursor changes as the proposed split.
+        if (inSplitMode) updateSplitPosition(snapped)
     }
 
     private fun toggleReturnToCursor() {
@@ -1962,7 +2054,7 @@ class StudioViewModel @Inject constructor(
 
     // ── Drum clips ──────────────────────────────────────────────────────
 
-    private fun duplicateClip(trackId: Long, clipId: Long) {
+    private fun duplicateClip(trackId: Long, clipId: Long, linked: Boolean) {
         viewModelScope.launch {
             try {
                 val drumState = _state.value.drumPatterns[trackId]
@@ -1972,7 +2064,7 @@ class StudioViewModel @Inject constructor(
                 val patternDurationMs = com.example.nightjar.audio.MusicalTimeConverter
                     .msPerMeasure(st.bpm, st.timeSignatureNumerator, st.timeSignatureDenominator)
                     .toLong() * bars
-                drumRepo.duplicateClipWithPattern(clipId, patternDurationMs)
+                drumRepo.duplicateClip(clipId, patternDurationMs, linked = linked)
                 reloadClipsForTrack(trackId)
             } catch (e: Exception) {
                 _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to duplicate clip."))
@@ -2107,8 +2199,24 @@ class StudioViewModel @Inject constructor(
             .coerceIn(0, (clipUiStates.size - 1).coerceAtLeast(0))
 
         val newDrumState = DrumPatternUiState(clips = clipUiStates, selectedClipIndex = selectedIdx)
+
+        // Linkage: drum clips link via shared patternId. Group size = count
+        // of clips sharing that pattern across this track (cross-track shared
+        // patterns are not created by any current flow).
+        val patternCounts = clipEntities.groupingBy { it.patternId }.eachCount()
+        val linkage = clipEntities.associate { clip ->
+            clip.id to ClipLinkage.Drum(
+                GroupKey.Drum(clip.patternId),
+                patternCounts[clip.patternId] ?: 1
+            )
+        }
+
         _state.update {
-            it.copy(drumPatterns = it.drumPatterns + (trackId to newDrumState))
+            it.copy(
+                drumPatterns = it.drumPatterns + (trackId to newDrumState),
+                drumClipLinkage = it.drumClipLinkage
+                    .filterKeys { id -> clipEntities.none { it.id == id } } + linkage
+            )
         }
 
         // Re-observe the selected clip's pattern
@@ -2170,12 +2278,27 @@ class StudioViewModel @Inject constructor(
         if (!ensureSoundFontLoaded()) return
 
         val midiTrackStates = mutableMapOf<Long, MidiTrackUiState>()
+        val linkage = mutableMapOf<Long, ClipLinkage.Midi>()
         for (track in midiTracks) {
             midiTrackStates[track.id] = buildMidiTrackUiState(track)
+            val rawClips = midiRepo.getClipsForTrack(track.id)
+            val sourceCounts = rawClips.groupingBy { it.sourceClipId ?: it.id }.eachCount()
+            for (clip in rawClips) {
+                val sourceId = clip.sourceClipId ?: clip.id
+                linkage[clip.id] = ClipLinkage.Midi(
+                    GroupKey.Midi(sourceId),
+                    sourceCounts[sourceId] ?: 1
+                )
+            }
             observeMidiNotes(track.id)
         }
 
-        _state.update { it.copy(midiTracks = it.midiTracks + midiTrackStates) }
+        _state.update {
+            it.copy(
+                midiTracks = it.midiTracks + midiTrackStates,
+                midiClipLinkage = it.midiClipLinkage + linkage
+            )
+        }
         pushAllMidiToEngine()
         audioEngine.setMidiSequencerEnabled(true)
     }
@@ -2228,8 +2351,21 @@ class StudioViewModel @Inject constructor(
             val existing = _state.value.midiTracks[trackId]
             val updatedState = buildMidiTrackUiState(track)
                 .copy(selectedClipId = existing?.selectedClipId)
+            val rawClips = midiRepo.getClipsForTrack(trackId)
+            val sourceCounts = rawClips.groupingBy { it.sourceClipId ?: it.id }.eachCount()
+            val linkage = rawClips.associate { clip ->
+                val sourceId = clip.sourceClipId ?: clip.id
+                clip.id to ClipLinkage.Midi(
+                    GroupKey.Midi(sourceId),
+                    sourceCounts[sourceId] ?: 1
+                )
+            }
             _state.update { st ->
-                st.copy(midiTracks = st.midiTracks + (trackId to updatedState))
+                st.copy(
+                    midiTracks = st.midiTracks + (trackId to updatedState),
+                    midiClipLinkage = st.midiClipLinkage
+                        .filterKeys { id -> rawClips.none { it.id == id } } + linkage
+                )
             }
             pushAllMidiToEngine()
         }
@@ -2395,7 +2531,7 @@ class StudioViewModel @Inject constructor(
 
     // ── MIDI clip operations ──────────────────────────────────────────────
 
-    private fun duplicateMidiClip(trackId: Long, clipId: Long) {
+    private fun duplicateMidiClip(trackId: Long, clipId: Long, linked: Boolean) {
         viewModelScope.launch {
             try {
                 val clip = midiRepo.getClipById(clipId) ?: return@launch
@@ -2408,7 +2544,7 @@ class StudioViewModel @Inject constructor(
                         _state.value.timeSignatureDenominator
                     ).toLong()
                 )
-                midiRepo.duplicateClip(clipId, durationMs)
+                midiRepo.duplicateClip(clipId, durationMs, linked = linked)
                 midiRepo.recomputeTrackDuration(trackId)
                 reloadMidiTrackState(trackId)
             } catch (e: Exception) {
@@ -2682,5 +2818,198 @@ class StudioViewModel @Inject constructor(
         audioEngine.setMetronomeEnabled(st.isMetronomeEnabled)
         audioEngine.setMetronomeVolume(st.metronomeVolume)
         audioEngine.setMetronomeBeatsPerBar(st.timeSignatureNumerator)
+    }
+
+    // ── Audio-clip Duplicate / Split / Unlink / Rename ───────────────────
+
+    private fun duplicateAudioClip(trackId: Long, clipId: Long, linked: Boolean) {
+        viewModelScope.launch {
+            try {
+                studioRepo.duplicateAudioClip(clipId, linked)
+                studioRepo.recomputeAudioTrackDuration(trackId)
+                reloadAudioClips(trackId)
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to duplicate clip."))
+            }
+        }
+    }
+
+    private fun startSplitMode(clipId: Long, clipType: String) {
+        _state.update {
+            it.copy(
+                splitModeClipId = clipId,
+                splitModeClipType = clipType,
+                splitPositionMs = it.cursorPositionMs,
+                splitValid = false
+            )
+        }
+        updateSplitPosition(_state.value.cursorPositionMs)
+    }
+
+    private fun cancelSplit() {
+        _state.update {
+            it.copy(
+                splitModeClipId = null,
+                splitModeClipType = null,
+                splitPositionMs = null,
+                splitValid = false
+            )
+        }
+    }
+
+    private fun updateSplitPosition(timelinePositionMs: Long) {
+        val st = _state.value
+        val clipId = st.splitModeClipId ?: return
+        val type = st.splitModeClipType ?: return
+        val snapped = if (st.isSnapEnabled) snapIfEnabled(timelinePositionMs) else timelinePositionMs
+
+        val (valid, clipStart, clipEnd) = resolveClipWindow(type, clipId) ?: run {
+            _state.update { it.copy(splitPositionMs = snapped, splitValid = false) }
+            return
+        }
+        val isValid = snapped > clipStart && snapped < clipEnd
+        _state.update { it.copy(splitPositionMs = snapped, splitValid = isValid) }
+    }
+
+    private fun resolveClipWindow(clipType: String, clipId: Long): Triple<Boolean, Long, Long>? {
+        val st = _state.value
+        return when (clipType) {
+            "audio" -> {
+                val clip = st.audioClips.values.flatten().firstOrNull { it.clipId == clipId } ?: return null
+                val end = clip.offsetMs + clip.effectiveDurationMs
+                Triple(true, clip.offsetMs, end)
+            }
+            "midi" -> {
+                val clip = st.midiTracks.values.flatMap { it.clips }
+                    .firstOrNull { it.clipId == clipId } ?: return null
+                val end = clip.offsetMs + clip.contentDurationMs
+                Triple(true, clip.offsetMs, end)
+            }
+            "drum" -> {
+                val clip = st.drumPatterns.values.flatMap { it.clips }
+                    .firstOrNull { it.clipId == clipId } ?: return null
+                val measure = com.example.nightjar.audio.MusicalTimeConverter
+                    .msPerMeasure(st.bpm, st.timeSignatureNumerator, st.timeSignatureDenominator)
+                    .toLong() * clip.bars
+                Triple(true, clip.offsetMs, clip.offsetMs + measure)
+            }
+            else -> null
+        }
+    }
+
+    private fun confirmSplit() {
+        val st = _state.value
+        val clipId = st.splitModeClipId ?: return
+        val type = st.splitModeClipType ?: return
+        val timelinePos = st.splitPositionMs ?: return
+        if (!st.splitValid) return
+
+        viewModelScope.launch {
+            try {
+                when (type) {
+                    "audio" -> splitAudioClipAt(clipId, timelinePos)
+                    "midi" -> splitMidiClipAt(clipId, timelinePos)
+                    "drum" -> splitDrumClipAt(clipId, timelinePos)
+                }
+                cancelSplit()
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to split clip."))
+                cancelSplit()
+            }
+        }
+    }
+
+    private suspend fun splitAudioClipAt(clipId: Long, timelinePos: Long) {
+        val clip = _state.value.audioClips.values.flatten().firstOrNull { it.clipId == clipId } ?: return
+        val take = clip.activeTake ?: return
+        val sourceSplitMs = (timelinePos - clip.offsetMs) + take.trimStartMs
+        studioRepo.splitAudioClip(clipId, sourceSplitMs)
+        studioRepo.recomputeAudioTrackDuration(clip.trackId)
+        reloadAudioClips(clip.trackId)
+    }
+
+    private suspend fun splitMidiClipAt(clipId: Long, timelinePos: Long) {
+        val trackEntry = _state.value.midiTracks.entries
+            .firstOrNull { entry -> entry.value.clips.any { it.clipId == clipId } } ?: return
+        val trackId = trackEntry.key
+        val clip = trackEntry.value.clips.first { it.clipId == clipId }
+        val sourceSplitMs = timelinePos - clip.offsetMs
+        midiRepo.splitMidiClip(clipId, sourceSplitMs)
+        midiRepo.recomputeTrackDuration(trackId)
+        reloadMidiTrackState(trackId)
+    }
+
+    private suspend fun splitDrumClipAt(clipId: Long, timelinePos: Long) {
+        val trackEntry = _state.value.drumPatterns.entries
+            .firstOrNull { entry -> entry.value.clips.any { it.clipId == clipId } } ?: return
+        val trackId = trackEntry.key
+        val clip = trackEntry.value.clips.first { it.clipId == clipId }
+        val st = _state.value
+        val msPerStep = com.example.nightjar.audio.MusicalTimeConverter
+            .msPerMeasure(st.bpm, st.timeSignatureNumerator, st.timeSignatureDenominator)
+            .toLong() / clip.stepsPerBar.coerceAtLeast(1)
+        val stepOffset = ((timelinePos - clip.offsetMs) / msPerStep.coerceAtLeast(1L)).toInt()
+        drumRepo.splitClip(clipId, stepOffset, msPerStep)
+        reloadClipsForTrack(trackId)
+    }
+
+    private fun unlinkClip(clipId: Long, clipType: String) {
+        viewModelScope.launch {
+            try {
+                when (clipType) {
+                    "audio" -> {
+                        val trackId = _state.value.audioClips.entries
+                            .firstOrNull { entry -> entry.value.any { it.clipId == clipId } }?.key
+                        studioRepo.unlinkAudioClip(clipId)
+                        trackId?.let { reloadAudioClips(it) }
+                    }
+                    "midi" -> {
+                        val trackId = _state.value.midiTracks.entries
+                            .firstOrNull { entry -> entry.value.clips.any { it.clipId == clipId } }?.key
+                        midiRepo.unlinkClip(clipId)
+                        trackId?.let { reloadMidiTrackState(it) }
+                    }
+                    "drum" -> {
+                        val trackId = _state.value.drumPatterns.entries
+                            .firstOrNull { entry -> entry.value.clips.any { it.clipId == clipId } }?.key
+                        drumRepo.unlinkClip(clipId)
+                        trackId?.let { reloadClipsForTrack(it) }
+                    }
+                }
+                _effects.emit(StudioEffect.ShowStatus("Unlinked from group."))
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to unlink clip."))
+            }
+        }
+    }
+
+    private fun confirmRenameClip(newName: String) {
+        val st = _state.value
+        val clipId = st.renamingClipId ?: return
+        val type = st.renamingClipType ?: return
+        viewModelScope.launch {
+            try {
+                when (type) {
+                    "audio" -> {
+                        studioRepo.renameClip(clipId, newName)
+                        val trackId = _state.value.audioClips.entries
+                            .firstOrNull { entry -> entry.value.any { it.clipId == clipId } }?.key
+                        trackId?.let { reloadAudioClips(it) }
+                    }
+                    // MIDI and drum clips don't currently carry a displayName
+                    // field; rename is a no-op until those entities gain one.
+                }
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to rename clip."))
+            } finally {
+                _state.update {
+                    it.copy(
+                        renamingClipId = null,
+                        renamingClipType = null,
+                        renamingClipCurrentName = ""
+                    )
+                }
+            }
+        }
     }
 }

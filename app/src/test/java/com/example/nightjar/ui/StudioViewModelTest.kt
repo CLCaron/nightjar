@@ -2,9 +2,15 @@ package com.example.nightjar.ui
 
 import app.cash.turbine.test
 import com.example.nightjar.audio.AudioLatencyEstimator
+import com.example.nightjar.audio.MetronomePreferences
 import com.example.nightjar.audio.OboeAudioEngine
+import com.example.nightjar.audio.SoundFontManager
+import com.example.nightjar.audio.StudioPreferences
 import com.example.nightjar.data.db.entity.IdeaEntity
 import com.example.nightjar.data.db.entity.TrackEntity
+import com.example.nightjar.data.events.PulseBus
+import com.example.nightjar.data.repository.DrumRepository
+import com.example.nightjar.data.repository.MidiRepository
 import com.example.nightjar.data.repository.StudioRepository
 import com.example.nightjar.data.repository.IdeaRepository
 import com.example.nightjar.data.storage.RecordingStorage
@@ -65,9 +71,15 @@ class StudioViewModelTest {
     ): StudioViewModel = StudioViewModel(
         ideaRepo = ideaRepo,
         studioRepo = studioRepo,
+        drumRepo = mockk<DrumRepository>(relaxed = true),
+        midiRepo = mockk<MidiRepository>(relaxed = true),
         audioEngine = audioEngine,
         recordingStorage = mockk<RecordingStorage>(relaxed = true),
-        latencyEstimator = mockk<AudioLatencyEstimator>(relaxed = true)
+        latencyEstimator = mockk<AudioLatencyEstimator>(relaxed = true),
+        soundFontManager = mockk<SoundFontManager>(relaxed = true),
+        metronomePrefs = mockk<MetronomePreferences>(relaxed = true),
+        studioPrefs = mockk<StudioPreferences>(relaxed = true),
+        pulseBus = PulseBus()
     )
 
     @Test

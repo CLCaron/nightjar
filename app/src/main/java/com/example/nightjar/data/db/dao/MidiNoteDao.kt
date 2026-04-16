@@ -68,4 +68,8 @@ interface MidiNoteDao {
         WHERE trackId IN (SELECT id FROM tracks WHERE ideaId = :ideaId AND trackType = 'midi')
     """)
     suspend fun scaleNotePositions(ideaId: Long, scaleFactor: Double)
+
+    /** Re-parent every note from [oldClipId] to [newClipId]. Used during source promotion. */
+    @Query("UPDATE midi_notes SET clipId = :newClipId WHERE clipId = :oldClipId")
+    suspend fun repointNotes(oldClipId: Long, newClipId: Long)
 }

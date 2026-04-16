@@ -47,6 +47,9 @@ import com.example.nightjar.data.db.entity.TrackEntity
  *             Restructured `takes` table: `trackId` FK replaced by `clipId` FK
  *             to `audio_clips`, added `isActive`, removed `offsetMs`/`isMuted`.
  *             Each existing take becomes its own clip with one active take.
+ * - **v13** — Added `sourceClipId` (nullable self-FK) to `audio_clips` and
+ *             `midi_clips` for linked-clip instance→source pointers. Drums
+ *             link via existing shared `patternId`, no change to `drum_clips`.
  */
 @Database(
     entities = [
@@ -56,7 +59,7 @@ import com.example.nightjar.data.db.entity.TrackEntity
         DrumClipEntity::class,
         MidiClipEntity::class, MidiNoteEntity::class
     ],
-    version = 12,
+    version = 13,
     exportSchema = false
 )
 abstract class NightjarDatabase : RoomDatabase() {
@@ -540,6 +543,39 @@ abstract class NightjarDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v12 -> v13: Linked clips support.
+         *
+         * Add nullable self-referencing `sourceClipId` column to `audio_clips`
+         * and `midi_clips`. NULL = clip is a source (owns its takes/notes).
+         * Non-NULL = clip is an instance of that source id. FK uses NO ACTION
+         * on delete; promotion is handled explicitly in repository transactions.
+         *
+         * Drum clips already share content via `patternId`, so no change there.
+         *
+         * All existing clips become sources (sourceClipId defaults to NULL).
+         */
+        private val MIGRATION_12_13 = object : androidx.room.migration.Migration(12, 13) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE audio_clips ADD COLUMN sourceClipId INTEGER " +
+                    "REFERENCES audio_clips(id) ON DELETE NO ACTION"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_audio_clips_sourceClipId " +
+                    "ON audio_clips(sourceClipId)"
+                )
+                db.execSQL(
+                    "ALTER TABLE midi_clips ADD COLUMN sourceClipId INTEGER " +
+                    "REFERENCES midi_clips(id) ON DELETE NO ACTION"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_midi_clips_sourceClipId " +
+                    "ON midi_clips(sourceClipId)"
+                )
+            }
+        }
+
         fun getInstance(context: Context): NightjarDatabase {
             return INSTANCE ?: synchronized(this) {
                 val db = Room.databaseBuilder(
@@ -550,7 +586,7 @@ abstract class NightjarDatabase : RoomDatabase() {
                     MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4,
                     MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
                     MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10,
-                    MIGRATION_10_11, MIGRATION_11_12
+                    MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13
                 ).build()
                 INSTANCE = db
                 db

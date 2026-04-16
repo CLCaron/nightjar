@@ -18,17 +18,26 @@ import androidx.room.PrimaryKey
  */
 @Entity(
     tableName = "midi_clips",
-    foreignKeys = [ForeignKey(
-        entity = TrackEntity::class,
-        parentColumns = ["id"],
-        childColumns = ["trackId"],
-        onDelete = ForeignKey.CASCADE
-    )],
-    indices = [Index("trackId")]
+    foreignKeys = [
+        ForeignKey(
+            entity = TrackEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["trackId"],
+            onDelete = ForeignKey.CASCADE
+        ),
+        ForeignKey(
+            entity = MidiClipEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["sourceClipId"],
+            onDelete = ForeignKey.NO_ACTION
+        )
+    ],
+    indices = [Index("trackId"), Index("sourceClipId")]
 )
 data class MidiClipEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0L,
     val trackId: Long,
     val offsetMs: Long = 0L,
-    val sortIndex: Int = 0
+    val sortIndex: Int = 0,
+    val sourceClipId: Long? = null
 )
