@@ -34,6 +34,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.gestures.horizontalDrag
 import androidx.compose.foundation.horizontalScroll
@@ -1036,7 +1037,8 @@ private fun AudioTrackLane(
                                 clipId = clip.clipId,
                                 clipOffsetMs = clip.offsetMs,
                                 clipWidthMs = effectiveDurationMs,
-                                msPerDp = msPerDp
+                                msPerDp = msPerDp,
+                                onAction = onAction
                             )
                         }
                     },
@@ -1234,7 +1236,8 @@ private fun MidiTrackLane(
                                 clipId = clip.clipId,
                                 clipOffsetMs = clip.offsetMs,
                                 clipWidthMs = clipDurationMs,
-                                msPerDp = msPerDp
+                                msPerDp = msPerDp,
+                                onAction = onAction
                             )
                         }
                     },
@@ -1492,7 +1495,8 @@ private fun DrumTrackLane(
                             clipId = clip.clipId,
                             clipOffsetMs = clip.offsetMs,
                             clipWidthMs = clipPatternDurationMs.toLong(),
-                            msPerDp = msPerDp
+                            msPerDp = msPerDp,
+                            onAction = onAction
                         )
                       }
                     },
@@ -1602,11 +1606,14 @@ private fun FlippableClip(
 
 /**
  * Split-mode line drawn on top of a clip while the user is positioning a
- * split. Valid position -> amber solid line. Invalid -> faded.
+ * split. Valid position -> amber solid line with knurled grip at top.
+ * Invalid -> faded.
  *
  * [clipOffsetMs] and [clipWidthMs] bound the clip's timeline range so the
  * line can be clamped visually and hidden when the split cursor sits
- * outside the clip.
+ * outside the clip. Horizontal drag on the line updates splitPositionMs
+ * through [onAction]; the 24dp-wide invisible touch zone is centered on
+ * the 1.5dp-wide visual.
  */
 @Composable
 private fun ClipSplitLine(
@@ -1614,6 +1621,7 @@ private fun ClipSplitLine(
     clipOffsetMs: Long,
     clipWidthMs: Long,
     msPerDp: Float,
+    onAction: (StudioAction) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val split = LocalSplitMode.current
@@ -1622,15 +1630,52 @@ private fun ClipSplitLine(
     val localMs = posMs - clipOffsetMs
     if (localMs < 0 || localMs > clipWidthMs) return
 
+    val density = LocalDensity.current
     val xDp = (localMs / msPerDp).dp
     val color = if (split.valid) NjAmber else NjMuted
+    val accent = if (split.valid) 0.9f else 0.5f
+
     Box(
         modifier = modifier
-            .offset(x = xDp - 0.75.dp)
-            .width(1.5.dp)
+            .offset(x = xDp - 12.dp)
+            .width(24.dp)
             .fillMaxHeight()
-            .background(color.copy(alpha = if (split.valid) 0.9f else 0.5f))
-    )
+            .pointerInput(clipId) {
+                var accumulatedPx = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = { accumulatedPx = 0f },
+                    onDragEnd = { accumulatedPx = 0f },
+                    onDragCancel = { accumulatedPx = 0f }
+                ) { change, dragAmount ->
+                    change.consume()
+                    accumulatedPx += dragAmount
+                    val deltaDp = accumulatedPx / density.density
+                    val newPosMs = (posMs + (deltaDp * msPerDp).toLong())
+                        .coerceIn(clipOffsetMs, clipOffsetMs + clipWidthMs)
+                    onAction(StudioAction.UpdateSplitPosition(newPosMs))
+                }
+            }
+    ) {
+        // Vertical line (1.5dp wide, centered in the 24dp touch zone).
+        Box(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .width(1.5.dp)
+                .fillMaxHeight()
+                .background(color.copy(alpha = accent))
+        )
+        // Knurled-grip knob at the top (6dp tall, matches trim-handle language).
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .width(10.dp)
+                .height(10.dp)
+                .background(
+                    color = color.copy(alpha = accent),
+                    shape = RoundedCornerShape(2.dp)
+                )
+        )
+    }
 }
 
 /**
