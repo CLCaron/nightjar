@@ -2,6 +2,8 @@ package com.example.nightjar.ui.studio
 
 import android.view.HapticFeedbackConstants
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
@@ -29,6 +31,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,6 +57,7 @@ import com.example.nightjar.ui.theme.NjAmber
 import com.example.nightjar.ui.theme.NjPanelInset
 import com.example.nightjar.ui.theme.NjSurface
 import com.example.nightjar.ui.theme.NjTrackColors
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 
 /** Row height per semitone. */
@@ -164,6 +168,12 @@ fun MiniPianoRoll(
     var lastTapTimeMs by remember { mutableLongStateOf(0L) }
     var lastTapNoteId by remember { mutableStateOf<Long?>(null) }
 
+    // Gap-reject feedback: when the user taps in a gap region, flash the
+    // enclosing gap with a brief amber wash so the rejection is visible.
+    val scope = rememberCoroutineScope()
+    val gapFlickerAlpha = remember { Animatable(0f) }
+    var gapFlickerRange by remember { mutableStateOf<Pair<Long, Long>?>(null) }
+
     // Sticky note duration: captures last resize for subsequent placements.
     var stickyDuration by remember { mutableStateOf<Long?>(null) }
     LaunchedEffect(gridResolution) { stickyDuration = null }
@@ -180,10 +190,11 @@ fun MiniPianoRoll(
     // position persists when they page vertically.
     val hScrollState = rememberScrollState()
 
-    // On first open, center the viewport on the selected clip (or the first
-    // clip if no selection yet). Follow-up task handles animated re-center
-    // when the timeline selection changes.
-    LaunchedEffect(Unit) {
+    // Center the viewport on the selected clip on first open, and animate
+    // to a new selection whenever the user taps a different clip on the
+    // timeline. Fires once at initial composition (short animation from 0)
+    // and then on every selectedClipId change.
+    LaunchedEffect(selectedClipId) {
         val target = clips.find { it.clipId == selectedClipId } ?: clips.firstOrNull()
         if (target != null) {
             val centerMs = target.offsetMs + target.effectiveLengthMs / 2
@@ -191,7 +202,7 @@ fun MiniPianoRoll(
             // Scroll so the clip's midpoint lands roughly a third from the
             // left edge of the visible area. We don't know viewport width
             // at this scope, so use a conservative offset.
-            hScrollState.scrollTo((centerPx - 120).coerceAtLeast(0))
+            hScrollState.animateScrollTo((centerPx - 120).coerceAtLeast(0))
         }
     }
 
@@ -386,6 +397,16 @@ fun MiniPianoRoll(
                                                                     noteDuration.coerceAtLeast(50)
                                                                 )
                                                             )
+                                                        } else {
+                                                            // Tap in a gap region: flash it so the
+                                                            // rejection is visible. No haptic per spec.
+                                                            gapFlickerRange = findEnclosingGap(
+                                                                snappedAbsMs, clips, totalMs
+                                                            )
+                                                            scope.launch {
+                                                                gapFlickerAlpha.snapTo(1f)
+                                                                gapFlickerAlpha.animateTo(0f, tween(160))
+                                                            }
                                                         }
                                                     }
                                                     lastTapNoteId = hit?.note?.id
@@ -555,7 +576,21 @@ fun MiniPianoRoll(
                                 }
                             }
 
-                            // 5) Playhead sweep: a thin amber line across the drawer canvas
+                            // 5) Gap-reject flicker: brief amber wash over the enclosing
+                            // gap region when the user tapped it. Driven by an Animatable
+                            // that fades from 1 to 0 over 160ms.
+                            val flickerAlpha = gapFlickerAlpha.value
+                            val flickerRange = gapFlickerRange
+                            if (flickerAlpha > 0f && flickerRange != null) {
+                                val (s, e) = flickerRange
+                                drawRect(
+                                    color = amberBoundary.copy(alpha = 0.35f * flickerAlpha),
+                                    topLeft = Offset(s * pxPerMs, 0f),
+                                    size = Size((e - s) * pxPerMs, size.height)
+                                )
+                            }
+
+                            // 6) Playhead sweep: a thin amber line across the drawer canvas
                             // during playback, with a soft bloom behind it for readability.
                             if (isPlaying) {
                                 val playheadX = globalPositionMs * pxPerMs
@@ -729,6 +764,28 @@ private fun hitTestAbsolute(
         }
     }
     return null
+}
+
+/**
+ * Resolve the gap region that encloses [absMs]. Returns (gapStartMs,
+ * gapEndMs) where the range is bounded by neighboring clip edges (or by 0
+ * and [totalMs] at the extremes). Called only when no clip contains the
+ * position, so the range is guaranteed to be non-empty.
+ */
+private fun findEnclosingGap(
+    absMs: Long,
+    clips: List<MidiClipUiState>,
+    totalMs: Long
+): Pair<Long, Long> {
+    val sorted = clips.sortedBy { it.offsetMs }
+    var gapStart = 0L
+    for (clip in sorted) {
+        if (absMs < clip.offsetMs) {
+            return gapStart to clip.offsetMs
+        }
+        gapStart = maxOf(gapStart, clip.offsetMs + clip.effectiveLengthMs)
+    }
+    return gapStart to totalMs
 }
 
 private fun isNearRightEdgeAbs(
