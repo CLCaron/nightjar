@@ -32,14 +32,16 @@ void StepSequencer::updatePattern(int stepsPerBar, int bars, int64_t offsetFrame
                                    const std::vector<DrumHit>& hits,
                                    const std::vector<int64_t>& clipOffsetFrames,
                                    int beatsPerBar) {
-    // Convert legacy single-pattern call to per-clip format
+    // Convert legacy single-pattern call to per-clip format.
+    // Legacy callers pass `bars`; translate to totalSteps here.
     std::vector<ClipSlot> clips;
     int bpb = beatsPerBar > 0 ? beatsPerBar : 4;
+    int totalSteps = stepsPerBar * bars;
 
     if (clipOffsetFrames.empty()) {
         ClipSlot slot;
         slot.stepsPerBar = stepsPerBar;
-        slot.bars = bars;
+        slot.totalSteps = totalSteps;
         slot.beatsPerBar = bpb;
         slot.offsetFrames = offsetFrames;
         slot.hits = hits;
@@ -48,7 +50,7 @@ void StepSequencer::updatePattern(int stepsPerBar, int bars, int64_t offsetFrame
         for (int64_t clipOffset : clipOffsetFrames) {
             ClipSlot slot;
             slot.stepsPerBar = stepsPerBar;
-            slot.bars = bars;
+            slot.totalSteps = totalSteps;
             slot.beatsPerBar = bpb;
             slot.offsetFrames = clipOffset;
             slot.hits = hits;
@@ -81,7 +83,7 @@ const std::vector<NoteEvent>& StepSequencer::tick(
     // Process each clip independently with its own step tracking
     for (size_t ci = 0; ci < pat->clips.size(); ++ci) {
         const auto& clip = pat->clips[ci];
-        int totalSteps = clip.totalSteps();
+        int totalSteps = clip.totalSteps;
         if (totalSteps <= 0 || clip.hits.empty()) continue;
 
         double stepsPerBeat = clip.stepsPerBar / static_cast<double>(clip.beatsPerBar);
@@ -138,6 +140,9 @@ const std::vector<NoteEvent>& StepSequencer::tick(
                                static_cast<int64_t>(chunkFrames - 1)));
 
                 for (const auto& hit : clip.hits) {
+                    // Honor the clip length ceiling: any hit beyond totalSteps
+                    // is preserved in data but silent (uniform-clip-length).
+                    if (hit.stepIndex >= totalSteps) continue;
                     if (hit.stepIndex == step) {
                         int vel = static_cast<int>(
                             static_cast<float>(hit.velocity) * pat->volume);
@@ -162,7 +167,7 @@ int64_t StepSequencer::getMaxEndFrame(double bpm) const {
 
     int64_t maxEnd = 0;
     for (const auto& clip : pat->clips) {
-        int totalSteps = clip.totalSteps();
+        int totalSteps = clip.totalSteps;
         if (totalSteps <= 0) continue;
 
         double stepsPerBeat = clip.stepsPerBar / static_cast<double>(clip.beatsPerBar);

@@ -25,6 +25,9 @@ interface MidiClipDao {
     @Query("UPDATE midi_clips SET offsetMs = :offsetMs WHERE id = :clipId")
     suspend fun updateClipOffset(clipId: Long, offsetMs: Long)
 
+    @Query("UPDATE midi_clips SET lengthMs = :lengthMs WHERE id = :clipId")
+    suspend fun updateClipLength(clipId: Long, lengthMs: Long?)
+
     @Query("DELETE FROM midi_clips WHERE id = :clipId")
     suspend fun deleteClip(clipId: Long)
 

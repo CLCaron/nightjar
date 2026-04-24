@@ -17,7 +17,12 @@ import androidx.room.PrimaryKey
  *
  * @property trackId     Foreign key to the parent drum [TrackEntity].
  * @property stepsPerBar Number of step subdivisions per bar (default 16 = sixteenth notes).
- * @property bars        Number of bars in the pattern (default 1).
+ * @property bars        Deprecated. Kept in schema for the v14 transition;
+ *                       runtime reads `lengthSteps` instead. Removed in a
+ *                       later cleanup migration.
+ * @property lengthSteps Authoritative pattern length in step units. Drives
+ *                       timeline width and playback ceiling. Allows sub-bar
+ *                       and non-bar-aligned clips (what `bars` could not).
  */
 @Entity(
     tableName = "drum_patterns",
@@ -33,5 +38,6 @@ data class DrumPatternEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0L,
     val trackId: Long,
     val stepsPerBar: Int = 16,
-    val bars: Int = 1
+    val bars: Int = 1,
+    val lengthSteps: Int = 16
 )

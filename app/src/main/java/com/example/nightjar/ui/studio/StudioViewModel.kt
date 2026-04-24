@@ -1658,7 +1658,7 @@ class StudioViewModel @Inject constructor(
                         clipId = it.id, offsetMs = it.offsetMs,
                         patternId = pattern.id,
                         stepsPerBar = pattern.stepsPerBar,
-                        bars = pattern.bars
+                        lengthSteps = pattern.lengthSteps
                     )
                 }
 
@@ -1708,7 +1708,7 @@ class StudioViewModel @Inject constructor(
                         clipId = it.id, offsetMs = it.offsetMs,
                         patternId = pattern.id,
                         stepsPerBar = pattern.stepsPerBar,
-                        bars = pattern.bars, steps = steps
+                        lengthSteps = pattern.lengthSteps, steps = steps
                     )
                 }
             } else {
@@ -1720,7 +1720,7 @@ class StudioViewModel @Inject constructor(
                         clipId = clip.id, offsetMs = clip.offsetMs,
                         patternId = clip.patternId,
                         stepsPerBar = pat?.stepsPerBar ?: 16,
-                        bars = pat?.bars ?: 1, steps = steps
+                        lengthSteps = pat?.lengthSteps ?: 16, steps = steps
                     )
                 }
             }
@@ -1779,7 +1779,7 @@ class StudioViewModel @Inject constructor(
         if (clips.isEmpty()) return
 
         val clipStepsPerBar = IntArray(clips.size)
-        val clipBars = IntArray(clips.size)
+        val clipTotalSteps = IntArray(clips.size)
         val clipBeatsPerBar = IntArray(clips.size)
         val clipOffsetsMs = LongArray(clips.size)
         val clipHitCounts = IntArray(clips.size)
@@ -1793,7 +1793,7 @@ class StudioViewModel @Inject constructor(
         for (i in clips.indices) {
             val clip = clips[i]
             clipStepsPerBar[i] = clip.stepsPerBar
-            clipBars[i] = clip.bars
+            clipTotalSteps[i] = clip.lengthSteps
             clipBeatsPerBar[i] = beatsPerBar
             clipOffsetsMs[i] = clip.offsetMs
             clipHitCounts[i] = clip.steps.size
@@ -1809,7 +1809,7 @@ class StudioViewModel @Inject constructor(
             volume = track.volume,
             muted = track.isMuted,
             clipStepsPerBar = clipStepsPerBar,
-            clipBars = clipBars,
+            clipTotalSteps = clipTotalSteps,
             clipBeatsPerBar = clipBeatsPerBar,
             clipOffsetsMs = clipOffsetsMs,
             clipHitCounts = clipHitCounts,
@@ -1937,11 +1937,13 @@ class StudioViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 drumRepo.updatePatternGrid(selectedClip.patternId, selectedClip.stepsPerBar, clamped)
-                // Update local state immediately
+                // Update local state immediately. `bars` on DrumClipUiState is
+                // derived from lengthSteps, so drive lengthSteps to match.
                 val updatedClips = drumState.clips.toMutableList()
                 val idx = drumState.selectedClipIndex
                 if (idx in updatedClips.indices) {
-                    updatedClips[idx] = updatedClips[idx].copy(bars = clamped)
+                    val newLength = selectedClip.stepsPerBar * clamped
+                    updatedClips[idx] = updatedClips[idx].copy(lengthSteps = newLength)
                 }
                 _state.update {
                     it.copy(
@@ -2037,11 +2039,16 @@ class StudioViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val snapped = snapIfEnabled(offsetMs).coerceAtLeast(0L)
+                val st = _state.value
+                val measureMs = com.example.nightjar.audio.MusicalTimeConverter
+                    .msPerMeasure(st.bpm, st.timeSignatureNumerator, st.timeSignatureDenominator)
+                    .toLong()
                 midiRepo.insertClip(
                     com.example.nightjar.data.db.entity.MidiClipEntity(
                         trackId = trackId,
                         offsetMs = snapped,
-                        sortIndex = (_state.value.midiTracks[trackId]?.clips?.size ?: 0)
+                        sortIndex = (_state.value.midiTracks[trackId]?.clips?.size ?: 0),
+                        lengthMs = measureMs
                     )
                 )
                 midiRepo.recomputeTrackDuration(trackId)
@@ -2060,10 +2067,12 @@ class StudioViewModel @Inject constructor(
                 val drumState = _state.value.drumPatterns[trackId]
                 val clip = drumState?.clips?.find { it.clipId == clipId }
                 val st = _state.value
-                val bars = clip?.bars ?: 1
-                val patternDurationMs = com.example.nightjar.audio.MusicalTimeConverter
+                val measureMs = com.example.nightjar.audio.MusicalTimeConverter
                     .msPerMeasure(st.bpm, st.timeSignatureNumerator, st.timeSignatureDenominator)
-                    .toLong() * bars
+                val stepsPerBar = clip?.stepsPerBar ?: 16
+                val lengthSteps = clip?.lengthSteps ?: stepsPerBar
+                val msPerStep = if (stepsPerBar > 0) measureMs / stepsPerBar else 0.0
+                val patternDurationMs = (msPerStep * lengthSteps).toLong()
                 drumRepo.duplicateClip(clipId, patternDurationMs, linked = linked)
                 reloadClipsForTrack(trackId)
             } catch (e: Exception) {
@@ -2112,17 +2121,10 @@ class StudioViewModel @Inject constructor(
                 val drumState = st.drumPatterns[drag.trackId]
                 val clamped = if (drumState != null) {
                     val clip = drumState.clips.find { it.clipId == drag.clipId }
-                    val clipDurationMs = MusicalTimeConverter
-                        .msPerMeasure(st.bpm, st.timeSignatureNumerator, st.timeSignatureDenominator)
-                        .toLong() * (clip?.bars ?: 1)
+                    val clipDurationMs = clip?.let { drumClipDurationMs(it, st) } ?: 0L
                     val siblings = drumState.clips
                         .filter { it.clipId != drag.clipId }
-                        .map { sib ->
-                            val sibDur = MusicalTimeConverter
-                                .msPerMeasure(st.bpm, st.timeSignatureNumerator, st.timeSignatureDenominator)
-                                .toLong() * sib.bars
-                            sib.offsetMs to sib.offsetMs + sibDur
-                        }
+                        .map { sib -> sib.offsetMs to sib.offsetMs + drumClipDurationMs(sib, st) }
                     clampToNoOverlap(drag.clipId, snapped, clipDurationMs, siblings)
                 } else snapped
                 st.copy(clipDragState = drag.copy(previewOffsetMs = clamped))
@@ -2136,21 +2138,26 @@ class StudioViewModel @Inject constructor(
         val finalOffset = if (drumState != null) {
             val snapped = snapIfEnabled(newOffsetMs).coerceAtLeast(0L)
             val clip = drumState.clips.find { it.clipId == clipId }
-            val clipDurationMs = MusicalTimeConverter
-                .msPerMeasure(st.bpm, st.timeSignatureNumerator, st.timeSignatureDenominator)
-                .toLong() * (clip?.bars ?: 1)
+            val clipDurationMs = clip?.let { drumClipDurationMs(it, st) } ?: 0L
             val siblings = drumState.clips
                 .filter { it.clipId != clipId }
-                .map { sib ->
-                    val sibDur = MusicalTimeConverter
-                        .msPerMeasure(st.bpm, st.timeSignatureNumerator, st.timeSignatureDenominator)
-                        .toLong() * sib.bars
-                    sib.offsetMs to sib.offsetMs + sibDur
-                }
+                .map { sib -> sib.offsetMs to sib.offsetMs + drumClipDurationMs(sib, st) }
             clampToNoOverlap(clipId, snapped, clipDurationMs, siblings)
         } else newOffsetMs
         _state.update { it.copy(clipDragState = null) }
         moveClip(trackId, clipId, finalOffset)
+    }
+
+    /**
+     * Authoritative drum clip duration in ms from `lengthSteps` (post-v14).
+     * Mirrors Timeline.kt rendering so drag-clamp overlap checks respect the
+     * clip's actual window — not the bar-rounded width.
+     */
+    private fun drumClipDurationMs(clip: DrumClipUiState, st: StudioUiState): Long {
+        val measureMs = MusicalTimeConverter
+            .msPerMeasure(st.bpm, st.timeSignatureNumerator, st.timeSignatureDenominator)
+        val msPerStep = if (clip.stepsPerBar > 0) measureMs / clip.stepsPerBar else 0.0
+        return (msPerStep * clip.lengthSteps).toLong()
     }
 
     private fun cancelDragClip() {
@@ -2190,7 +2197,7 @@ class StudioViewModel @Inject constructor(
                 clipId = clip.id, offsetMs = clip.offsetMs,
                 patternId = clip.patternId,
                 stepsPerBar = pat?.stepsPerBar ?: 16,
-                bars = pat?.bars ?: 1, steps = steps
+                lengthSteps = pat?.lengthSteps ?: 16, steps = steps
             )
         }
 
@@ -2307,12 +2314,22 @@ class StudioViewModel @Inject constructor(
     private suspend fun buildMidiTrackUiState(
         track: com.example.nightjar.data.db.entity.TrackEntity
     ): MidiTrackUiState {
+        val st = _state.value
         val clips = midiRepo.getClipsForTrack(track.id)
         val clipStates = clips.map { clip ->
+            val notes = midiRepo.getNotesForClip(clip.id)
+            val maxNoteEnd = notes.maxOfOrNull { it.startMs + it.durationMs } ?: 0L
             MidiClipUiState(
                 clipId = clip.id,
                 offsetMs = clip.offsetMs,
-                notes = midiRepo.getNotesForClip(clip.id)
+                notes = notes,
+                effectiveLengthMs = com.example.nightjar.audio.MidiClipLength.resolve(
+                    storedLengthMs = clip.lengthMs,
+                    maxNoteEndMs = maxNoteEnd,
+                    bpm = st.bpm,
+                    timeSignatureNumerator = st.timeSignatureNumerator,
+                    timeSignatureDenominator = st.timeSignatureDenominator
+                )
             )
         }
         val allNotes = clipStates.flatMap { it.notes }
@@ -2440,6 +2457,10 @@ class StudioViewModel @Inject constructor(
     /**
      * Generate sorted noteOn/noteOff event pairs from MIDI clips.
      * Applies clip offsets to convert clip-relative positions to absolute timeline positions.
+     * Honors each clip's `effectiveLengthMs`: notes starting past the clip length
+     * are dropped, and notes crossing the clip boundary get a synthetic noteOff
+     * emitted at exactly `effectiveLengthMs` (the DB note is untouched, so
+     * re-expanding the clip restores the full note next build).
      */
     private fun generateMidiEventsFromClips(
         clips: List<MidiClipUiState>,
@@ -2449,9 +2470,13 @@ class StudioViewModel @Inject constructor(
         val sampleRate = 44100L
 
         for (clip in clips) {
+            val clipLengthMs = clip.effectiveLengthMs
             for (note in clip.notes) {
+                if (clipLengthMs > 0 && note.startMs >= clipLengthMs) continue
+                val rawEndMs = note.startMs + note.durationMs
+                val effectiveEndMs = if (clipLengthMs > 0) rawEndMs.coerceAtMost(clipLengthMs) else rawEndMs
                 val absoluteStartMs = clip.offsetMs + note.startMs
-                val absoluteEndMs = absoluteStartMs + note.durationMs
+                val absoluteEndMs = clip.offsetMs + effectiveEndMs
                 val startFrame = (absoluteStartMs * sampleRate) / 1000
                 val endFrame = (absoluteEndMs * sampleRate) / 1000
                 val velocity = (note.velocity * 127).toInt().coerceIn(1, 127)
@@ -2537,13 +2562,7 @@ class StudioViewModel @Inject constructor(
                 val clip = midiRepo.getClipById(clipId) ?: return@launch
                 val clips = _state.value.midiTracks[trackId]?.clips ?: return@launch
                 val clipState = clips.find { it.clipId == clipId } ?: return@launch
-                val durationMs = clipState.contentDurationMs.coerceAtLeast(
-                    MusicalTimeConverter.msPerMeasure(
-                        _state.value.bpm,
-                        _state.value.timeSignatureNumerator,
-                        _state.value.timeSignatureDenominator
-                    ).toLong()
-                )
+                val durationMs = clipState.effectiveLengthMs
                 midiRepo.duplicateClip(clipId, durationMs, linked = linked)
                 midiRepo.recomputeTrackDuration(trackId)
                 reloadMidiTrackState(trackId)
@@ -2600,17 +2619,12 @@ class StudioViewModel @Inject constructor(
             val ds = st.midiClipDragState ?: return@update st
             val snapped = snapIfEnabled(previewOffsetMs).coerceAtLeast(0L)
             val midiState = st.midiTracks[ds.trackId]
-            val measureMs = MusicalTimeConverter
-                .msPerMeasure(st.bpm, st.timeSignatureNumerator, st.timeSignatureDenominator).toLong()
             val clamped = if (midiState != null) {
                 val clip = midiState.clips.find { it.clipId == ds.clipId }
-                val clipDurationMs = clip?.contentDurationMs?.coerceAtLeast(measureMs) ?: measureMs
+                val clipDurationMs = clip?.effectiveLengthMs ?: 0L
                 val siblings = midiState.clips
                     .filter { it.clipId != ds.clipId }
-                    .map { sib ->
-                        val sibDur = sib.contentDurationMs.coerceAtLeast(measureMs)
-                        sib.offsetMs to sib.offsetMs + sibDur
-                    }
+                    .map { sib -> sib.offsetMs to sib.offsetMs + sib.effectiveLengthMs }
                 clampToNoOverlap(ds.clipId, snapped, clipDurationMs, siblings)
             } else snapped
             st.copy(midiClipDragState = ds.copy(previewOffsetMs = clamped))
@@ -2620,18 +2634,13 @@ class StudioViewModel @Inject constructor(
     private fun finishDragMidiClip(trackId: Long, clipId: Long, newOffsetMs: Long) {
         val st = _state.value
         val midiState = st.midiTracks[trackId]
-        val measureMs = MusicalTimeConverter
-            .msPerMeasure(st.bpm, st.timeSignatureNumerator, st.timeSignatureDenominator).toLong()
         val finalOffset = if (midiState != null) {
             val snapped = snapIfEnabled(newOffsetMs).coerceAtLeast(0L)
             val clip = midiState.clips.find { it.clipId == clipId }
-            val clipDurationMs = clip?.contentDurationMs?.coerceAtLeast(measureMs) ?: measureMs
+            val clipDurationMs = clip?.effectiveLengthMs ?: 0L
             val siblings = midiState.clips
                 .filter { it.clipId != clipId }
-                .map { sib ->
-                    val sibDur = sib.contentDurationMs.coerceAtLeast(measureMs)
-                    sib.offsetMs to sib.offsetMs + sibDur
-                }
+                .map { sib -> sib.offsetMs to sib.offsetMs + sib.effectiveLengthMs }
             clampToNoOverlap(clipId, snapped, clipDurationMs, siblings)
         } else newOffsetMs
         _state.update { it.copy(midiClipDragState = null) }
@@ -2882,16 +2891,17 @@ class StudioViewModel @Inject constructor(
             "midi" -> {
                 val clip = st.midiTracks.values.flatMap { it.clips }
                     .firstOrNull { it.clipId == clipId } ?: return null
-                val end = clip.offsetMs + clip.contentDurationMs
+                val end = clip.offsetMs + clip.effectiveLengthMs
                 Triple(true, clip.offsetMs, end)
             }
             "drum" -> {
                 val clip = st.drumPatterns.values.flatMap { it.clips }
                     .firstOrNull { it.clipId == clipId } ?: return null
-                val measure = com.example.nightjar.audio.MusicalTimeConverter
+                val measureMs = com.example.nightjar.audio.MusicalTimeConverter
                     .msPerMeasure(st.bpm, st.timeSignatureNumerator, st.timeSignatureDenominator)
-                    .toLong() * clip.bars
-                Triple(true, clip.offsetMs, clip.offsetMs + measure)
+                val msPerStep = if (clip.stepsPerBar > 0) measureMs / clip.stepsPerBar else 0.0
+                val dur = (msPerStep * clip.lengthSteps).toLong()
+                Triple(true, clip.offsetMs, clip.offsetMs + dur)
             }
             else -> null
         }
@@ -2934,7 +2944,7 @@ class StudioViewModel @Inject constructor(
         val trackId = trackEntry.key
         val clip = trackEntry.value.clips.first { it.clipId == clipId }
         val sourceSplitMs = timelinePos - clip.offsetMs
-        midiRepo.splitMidiClip(clipId, sourceSplitMs)
+        midiRepo.splitMidiClip(clipId, sourceSplitMs, clip.effectiveLengthMs)
         midiRepo.recomputeTrackDuration(trackId)
         reloadMidiTrackState(trackId)
     }

@@ -12,10 +12,20 @@ data class DrumClipUiState(
     val offsetMs: Long,
     val patternId: Long = 0L,
     val stepsPerBar: Int = 16,
-    val bars: Int = 1,
+    val lengthSteps: Int = 16,
     val steps: List<DrumStepEntity> = emptyList()
 ) {
-    val totalSteps: Int get() = stepsPerBar * bars
+    /** Authoritative step count. Drives timeline width and playback ceiling. */
+    val totalSteps: Int get() = lengthSteps
+
+    /**
+     * Derived bar count, rounded up so a partial-bar clip shows one "last bar"
+     * with trailing empty cells. Retained for editor UIs that still think in
+     * whole bars; Timeline rendering uses [lengthSteps] directly.
+     */
+    val bars: Int get() =
+        if (lengthSteps <= 0 || stepsPerBar <= 0) 1
+        else (lengthSteps + stepsPerBar - 1) / stepsPerBar
 }
 
 /** Transient state while the user is long-press-dragging a clip to reposition it. */
@@ -56,18 +66,28 @@ data class DrumPatternUiState(
     // Backward compatibility: these delegate to the selected clip's data
     val patternId: Long get() = selectedClip?.patternId ?: 0L
     val stepsPerBar: Int get() = selectedClip?.stepsPerBar ?: 16
+    val lengthSteps: Int get() = selectedClip?.lengthSteps ?: 16
     val bars: Int get() = selectedClip?.bars ?: 1
     val steps: List<DrumStepEntity> get() = selectedClip?.steps ?: emptyList()
-    val totalSteps: Int get() = stepsPerBar * bars
+    val totalSteps: Int get() = lengthSteps
 }
 
 /** Snapshot of a single MIDI clip for UI rendering. */
 data class MidiClipUiState(
     val clipId: Long,
     val offsetMs: Long,
-    val notes: List<MidiNoteEntity> = emptyList()
+    val notes: List<MidiNoteEntity> = emptyList(),
+    /**
+     * Authoritative clip length in ms. Pre-resolved by the ViewModel via
+     * [com.example.nightjar.audio.MidiClipLength.resolve] so legacy clips
+     * (entity `lengthMs == null`) fall back to
+     * `max(contentDurationMs, msPerMeasure)`. Rendering and playback MUST
+     * read this field — never the entity's nullable `lengthMs`.
+     */
+    val effectiveLengthMs: Long = 0L
 ) {
-    /** Duration of the clip content (max note end). */
+    /** Duration of the clip content (max note end). Kept for UI logic that
+     *  needs to know the raw note span; rendering uses [effectiveLengthMs]. */
     val contentDurationMs: Long
         get() = notes.maxOfOrNull { it.startMs + it.durationMs } ?: 0L
 }

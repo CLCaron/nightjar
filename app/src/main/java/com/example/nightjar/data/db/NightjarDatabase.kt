@@ -50,6 +50,12 @@ import com.example.nightjar.data.db.entity.TrackEntity
  * - **v13** — Added `sourceClipId` (nullable self-FK) to `audio_clips` and
  *             `midi_clips` for linked-clip instance→source pointers. Drums
  *             link via existing shared `patternId`, no change to `drum_clips`.
+ * - **v14** — Uniform clip length model. Added nullable `lengthMs` to
+ *             `midi_clips` (null = legacy, resolved to
+ *             max(contentDuration, msPerMeasure) on read). Added non-null
+ *             `lengthSteps` to `drum_patterns`, back-filled as
+ *             `bars * stepsPerBar`. `bars` column stays for now but is no
+ *             longer read at runtime (dropped in a later cleanup).
  */
 @Database(
     entities = [
@@ -59,7 +65,7 @@ import com.example.nightjar.data.db.entity.TrackEntity
         DrumClipEntity::class,
         MidiClipEntity::class, MidiNoteEntity::class
     ],
-    version = 13,
+    version = 14,
     exportSchema = false
 )
 abstract class NightjarDatabase : RoomDatabase() {
@@ -576,6 +582,29 @@ abstract class NightjarDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v13 -> v14: Uniform clip length model.
+         *
+         * MIDI: add nullable `lengthMs`. NULL means "legacy clip" — readers
+         * fall back to `max(maxNoteEnd, msPerMeasure)`. The first explicit
+         * length mutation (split, trim, resize) writes a non-null value.
+         *
+         * Drum: add non-null `lengthSteps` to `drum_patterns`, back-filled
+         * as `bars * stepsPerBar` so existing patterns render at identical
+         * width. `bars` stays in schema (deprecated) until a later cleanup.
+         */
+        private val MIGRATION_13_14 = object : androidx.room.migration.Migration(13, 14) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE midi_clips ADD COLUMN lengthMs INTEGER")
+                db.execSQL(
+                    "ALTER TABLE drum_patterns ADD COLUMN lengthSteps INTEGER NOT NULL DEFAULT 16"
+                )
+                db.execSQL(
+                    "UPDATE drum_patterns SET lengthSteps = bars * stepsPerBar"
+                )
+            }
+        }
+
         fun getInstance(context: Context): NightjarDatabase {
             return INSTANCE ?: synchronized(this) {
                 val db = Room.databaseBuilder(
@@ -586,7 +615,8 @@ abstract class NightjarDatabase : RoomDatabase() {
                     MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4,
                     MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
                     MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10,
-                    MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13
+                    MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
+                    MIGRATION_13_14
                 ).build()
                 INSTANCE = db
                 db

@@ -299,7 +299,7 @@ JNIEXPORT void JNICALL
 Java_com_example_nightjar_audio_OboeAudioEngine_nativeUpdateDrumPatternClips(
         JNIEnv* env, jobject /* thiz */,
         jfloat volume, jboolean muted,
-        jintArray clipStepsPerBarArr, jintArray clipBarsArr,
+        jintArray clipStepsPerBarArr, jintArray clipTotalStepsArr,
         jintArray clipBeatsPerBarArr, jlongArray clipOffsetsMsArr,
         jintArray clipHitCountsArr,
         jintArray hitStepIndicesArr, jintArray hitDrumNotesArr,
@@ -308,7 +308,7 @@ Java_com_example_nightjar_audio_OboeAudioEngine_nativeUpdateDrumPatternClips(
 
     jint clipCount = env->GetArrayLength(clipStepsPerBarArr);
     jint* clipStepsPerBar = env->GetIntArrayElements(clipStepsPerBarArr, nullptr);
-    jint* clipBars = env->GetIntArrayElements(clipBarsArr, nullptr);
+    jint* clipTotalSteps = env->GetIntArrayElements(clipTotalStepsArr, nullptr);
     jint* clipBeatsPerBar = env->GetIntArrayElements(clipBeatsPerBarArr, nullptr);
     jlong* clipOffsetsMs = env->GetLongArrayElements(clipOffsetsMsArr, nullptr);
     jint* clipHitCounts = env->GetIntArrayElements(clipHitCountsArr, nullptr);
@@ -320,7 +320,7 @@ Java_com_example_nightjar_audio_OboeAudioEngine_nativeUpdateDrumPatternClips(
     sEngine->updateDrumPatternClips(
         static_cast<float>(volume), static_cast<bool>(muted),
         static_cast<const int*>(clipStepsPerBar),
-        static_cast<const int*>(clipBars),
+        static_cast<const int*>(clipTotalSteps),
         static_cast<const int*>(clipBeatsPerBar),
         reinterpret_cast<const int64_t*>(clipOffsetsMs),
         static_cast<const int*>(clipHitCounts),
@@ -330,7 +330,7 @@ Java_com_example_nightjar_audio_OboeAudioEngine_nativeUpdateDrumPatternClips(
         static_cast<const float*>(hitVelocities));
 
     env->ReleaseIntArrayElements(clipStepsPerBarArr, clipStepsPerBar, JNI_ABORT);
-    env->ReleaseIntArrayElements(clipBarsArr, clipBars, JNI_ABORT);
+    env->ReleaseIntArrayElements(clipTotalStepsArr, clipTotalSteps, JNI_ABORT);
     env->ReleaseIntArrayElements(clipBeatsPerBarArr, clipBeatsPerBar, JNI_ABORT);
     env->ReleaseLongArrayElements(clipOffsetsMsArr, clipOffsetsMs, JNI_ABORT);
     env->ReleaseIntArrayElements(clipHitCountsArr, clipHitCounts, JNI_ABORT);

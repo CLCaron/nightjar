@@ -89,7 +89,7 @@ public:
      * Flat arrays: per-clip metadata + concatenated hit arrays.
      */
     void updateDrumPatternClips(float volume, bool muted,
-                                const int* clipStepsPerBar, const int* clipBars,
+                                const int* clipStepsPerBar, const int* clipTotalSteps,
                                 const int* clipBeatsPerBar, const int64_t* clipOffsetsMs,
                                 const int* clipHitCounts, int clipCount,
                                 const int* hitStepIndices, const int* hitDrumNotes,

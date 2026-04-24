@@ -199,7 +199,7 @@ class OboeAudioEngine @Inject constructor() {
         volume: Float,
         muted: Boolean,
         clipStepsPerBar: IntArray,
-        clipBars: IntArray,
+        clipTotalSteps: IntArray,
         clipBeatsPerBar: IntArray,
         clipOffsetsMs: LongArray,
         clipHitCounts: IntArray,
@@ -208,7 +208,7 @@ class OboeAudioEngine @Inject constructor() {
         hitVelocities: FloatArray
     ) = nativeUpdateDrumPatternClips(
         volume, muted,
-        clipStepsPerBar, clipBars, clipBeatsPerBar, clipOffsetsMs, clipHitCounts,
+        clipStepsPerBar, clipTotalSteps, clipBeatsPerBar, clipOffsetsMs, clipHitCounts,
         hitStepIndices, hitDrumNotes, hitVelocities
     )
 
@@ -347,7 +347,7 @@ class OboeAudioEngine @Inject constructor() {
     )
     private external fun nativeUpdateDrumPatternClips(
         volume: Float, muted: Boolean,
-        clipStepsPerBar: IntArray, clipBars: IntArray,
+        clipStepsPerBar: IntArray, clipTotalSteps: IntArray,
         clipBeatsPerBar: IntArray, clipOffsetsMs: LongArray,
         clipHitCounts: IntArray,
         hitStepIndices: IntArray, hitDrumNotes: IntArray,

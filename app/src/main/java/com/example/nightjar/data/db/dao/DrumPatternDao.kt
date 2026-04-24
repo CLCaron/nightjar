@@ -30,8 +30,11 @@ interface DrumPatternDao {
     @Query("SELECT * FROM drum_patterns WHERE id = :patternId")
     suspend fun getPatternById(patternId: Long): DrumPatternEntity?
 
-    @Query("UPDATE drum_patterns SET stepsPerBar = :stepsPerBar, bars = :bars WHERE id = :id")
+    @Query("UPDATE drum_patterns SET stepsPerBar = :stepsPerBar, bars = :bars, lengthSteps = :stepsPerBar * :bars WHERE id = :id")
     suspend fun updatePatternGrid(id: Long, stepsPerBar: Int, bars: Int)
+
+    @Query("UPDATE drum_patterns SET lengthSteps = :lengthSteps WHERE id = :id")
+    suspend fun updatePatternLengthSteps(id: Long, lengthSteps: Int)
 
     @Query("DELETE FROM drum_patterns WHERE id = :id")
     suspend fun deletePattern(id: Long)

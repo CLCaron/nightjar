@@ -310,7 +310,7 @@ void AudioEngine::updateDrumPattern(int stepsPerBar, int bars, int64_t offsetMs,
 }
 
 void AudioEngine::updateDrumPatternClips(float volume, bool muted,
-                                          const int* clipStepsPerBar, const int* clipBars,
+                                          const int* clipStepsPerBar, const int* clipTotalSteps,
                                           const int* clipBeatsPerBar, const int64_t* clipOffsetsMs,
                                           const int* clipHitCounts, int clipCount,
                                           const int* hitStepIndices, const int* hitDrumNotes,
@@ -324,7 +324,7 @@ void AudioEngine::updateDrumPatternClips(float volume, bool muted,
     for (int c = 0; c < clipCount; ++c) {
         StepSequencer::ClipSlot slot;
         slot.stepsPerBar = clipStepsPerBar[c];
-        slot.bars = clipBars[c];
+        slot.totalSteps = clipTotalSteps[c];
         slot.beatsPerBar = clipBeatsPerBar[c] > 0 ? clipBeatsPerBar[c] : 4;
         slot.offsetFrames = msToFrames(clipOffsetsMs[c]);
 

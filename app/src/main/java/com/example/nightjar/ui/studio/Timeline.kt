@@ -1132,7 +1132,7 @@ private fun MidiTrackLane(
             val isFlipped = isSelected && (expandedClipState?.isFlipped == true)
             val displayOffsetMs = if (isDragging) midiClipDragState!!.previewOffsetMs else clip.offsetMs
 
-            val clipDurationMs = clip.contentDurationMs.coerceAtLeast(measureMs)
+            val clipDurationMs = clip.effectiveLengthMs
             val offsetDp = (displayOffsetMs / msPerDp).dp
             val widthDp = (clipDurationMs / msPerDp).dp.coerceAtLeast(40.dp)
 
@@ -1214,8 +1214,14 @@ private fun MidiTrackLane(
                                 if (clipContentMs <= 0f) return@Canvas
 
                                 for (note in notes) {
+                                    // Clip notes to the clip's length window. Notes entirely
+                                    // past lengthMs are hidden; crossing notes are truncated
+                                    // at the right edge.
+                                    if (note.startMs >= clipDurationMs) continue
+                                    val noteEndMs = (note.startMs + note.durationMs).coerceAtMost(clipDurationMs)
+                                    val visibleDurationMs = noteEndMs - note.startMs
                                     val noteX = (note.startMs.toFloat() / clipContentMs) * clipWidthPx
-                                    val noteW = ((note.durationMs.toFloat() / clipContentMs) * clipWidthPx)
+                                    val noteW = ((visibleDurationMs.toFloat() / clipContentMs) * clipWidthPx)
                                         .coerceAtLeast(2f)
                                     val normalizedPitch = (note.pitch - pitchRange.first).toFloat() / pitchSpan
                                     val y = laneH - (normalizedPitch * (laneH - barHeight)) - barHeight
@@ -1257,8 +1263,7 @@ private fun MidiTrackLane(
         // "+" buttons in gaps between clips
         if (clips.isNotEmpty()) {
             val clipBounds = clips.map { clip ->
-                val dur = clip.contentDurationMs.coerceAtLeast(measureMs)
-                clip.offsetMs to clip.offsetMs + dur
+                clip.offsetMs to clip.offsetMs + clip.effectiveLengthMs
             }
             val timelineEndMs = (with(density) { timelineWidth.toPx() } * msPerDp / density.density).toLong()
             val gaps = computeGaps(clipBounds, timelineEndMs)
@@ -1348,13 +1353,17 @@ private fun DrumTrackLane(
             .height(laneHeight)
     ) {
         clipOffsets.forEach { clip ->
-            // Per-clip pattern data
+            // Per-clip pattern data — lengthSteps is authoritative (v14+). Width
+            // is derived from step count rather than bar count so sub-bar
+            // clips (split/trim results) render at their correct length.
             val clipStepsPerBar = clip.stepsPerBar
-            val clipBars = clip.bars
-            val clipTotalSteps = clipStepsPerBar * clipBars
+            val clipTotalSteps = clip.lengthSteps
             val clipStepsPerBeat = if (beatsPerBar > 0) clipStepsPerBar / beatsPerBar else 4
-            val clipPatternDurationMs = com.example.nightjar.audio.MusicalTimeConverter
-                .msPerMeasure(bpm, timeSignatureNumerator, timeSignatureDenominator) * clipBars
+            val msPerStep = if (clipStepsPerBar > 0) {
+                com.example.nightjar.audio.MusicalTimeConverter
+                    .msPerMeasure(bpm, timeSignatureNumerator, timeSignatureDenominator) / clipStepsPerBar
+            } else 0.0
+            val clipPatternDurationMs = (msPerStep * clipTotalSteps).toLong()
             val clipWidthDp = (clipPatternDurationMs / msPerDp).dp.coerceAtLeast(40.dp)
 
             val clipStepHits = remember(clip.steps) {
@@ -1494,7 +1503,7 @@ private fun DrumTrackLane(
                         ClipSplitLine(
                             clipId = clip.clipId,
                             clipOffsetMs = clip.offsetMs,
-                            clipWidthMs = clipPatternDurationMs.toLong(),
+                            clipWidthMs = clipPatternDurationMs,
                             msPerDp = msPerDp,
                             onAction = onAction
                         )
@@ -1516,9 +1525,11 @@ private fun DrumTrackLane(
         // "+" buttons in gaps between clips
         if (clips.isNotEmpty()) {
             val clipBounds = clipOffsets.map { clip ->
-                val dur = com.example.nightjar.audio.MusicalTimeConverter
-                    .msPerMeasure(bpm, timeSignatureNumerator, timeSignatureDenominator) * clip.bars
-                clip.offsetMs to clip.offsetMs + dur.toLong()
+                val measureMs = com.example.nightjar.audio.MusicalTimeConverter
+                    .msPerMeasure(bpm, timeSignatureNumerator, timeSignatureDenominator)
+                val msPerStep = if (clip.stepsPerBar > 0) measureMs / clip.stepsPerBar else 0.0
+                val dur = (msPerStep * clip.lengthSteps).toLong()
+                clip.offsetMs to clip.offsetMs + dur
             }
             val timelineEndMs = (with(density) { timelineWidth.toPx() } * msPerDp / density.density).toLong()
             val gaps = computeGaps(clipBounds, timelineEndMs)

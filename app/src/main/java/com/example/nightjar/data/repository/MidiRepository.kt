@@ -89,7 +89,8 @@ class MidiRepository(
                     trackId = clip.trackId,
                     offsetMs = newOffset,
                     sortIndex = maxSort + 1,
-                    sourceClipId = sourceId
+                    sourceClipId = sourceId,
+                    lengthMs = clipDurationMs
                 )
             )
             pulseBus.emit(GroupKey.Midi(sourceId))
@@ -101,7 +102,8 @@ class MidiRepository(
                         trackId = clip.trackId,
                         offsetMs = newOffset,
                         sortIndex = maxSort + 1,
-                        sourceClipId = null
+                        sourceClipId = null,
+                        lengthMs = clipDurationMs
                     )
                 )
                 val notes = midiNoteDao.getNotesForClip(sourceId)
@@ -122,14 +124,26 @@ class MidiRepository(
      * after move to a new right source, with startMs shifted to the new origin.
      * Notes that cross the split are cut into two notes at the boundary. If
      * the clip is part of a linked group, instances pair automatically.
+     *
+     * [originalLengthMs] is the pre-split effective length of the source (as
+     * resolved by `MidiClipLength.resolve`). The left half's `lengthMs`
+     * becomes [sourceSplitMs]; the right half's becomes
+     * `originalLengthMs - sourceSplitMs`. Without this split, legacy clips
+     * (entity `lengthMs == null`) would resolve to two different widths on
+     * each side of the cut.
      */
-    suspend fun splitMidiClip(clipId: Long, sourceSplitMs: Long): MidiClipEntity? {
-        if (sourceSplitMs <= 0L) return null
+    suspend fun splitMidiClip(
+        clipId: Long,
+        sourceSplitMs: Long,
+        originalLengthMs: Long
+    ): MidiClipEntity? {
+        if (sourceSplitMs <= 0L || sourceSplitMs >= originalLengthMs) return null
         val clip = midiClipDao.getClipById(clipId) ?: return null
         val sourceId = clip.sourceClipId ?: clip.id
         val source = midiClipDao.getClipById(sourceId) ?: return null
         val instances = midiClipDao.getInstancesOf(sourceId)
         val sourceNotes = midiNoteDao.getNotesForClip(sourceId)
+        val rightLengthMs = originalLengthMs - sourceSplitMs
 
         val newId = database.withTransaction {
             val bId = midiClipDao.insertClip(
@@ -137,9 +151,13 @@ class MidiRepository(
                     trackId = source.trackId,
                     offsetMs = source.offsetMs + sourceSplitMs,
                     sortIndex = source.sortIndex + 1,
-                    sourceClipId = null
+                    sourceClipId = null,
+                    lengthMs = rightLengthMs
                 )
             )
+
+            // Source (left half) shrinks to the split point.
+            midiClipDao.updateClipLength(source.id, sourceSplitMs)
 
             // Partition notes. Any note crossing the boundary becomes two.
             for (note in sourceNotes) {
@@ -179,12 +197,16 @@ class MidiRepository(
             }
 
             for (inst in instances) {
+                // Left half: truncate existing instance's length.
+                midiClipDao.updateClipLength(inst.id, sourceSplitMs)
+                // Right half: paired instance of the new source.
                 midiClipDao.insertClip(
                     MidiClipEntity(
                         trackId = inst.trackId,
                         offsetMs = inst.offsetMs + sourceSplitMs,
                         sortIndex = inst.sortIndex + 1,
-                        sourceClipId = bId
+                        sourceClipId = bId,
+                        lengthMs = rightLengthMs
                     )
                 )
             }

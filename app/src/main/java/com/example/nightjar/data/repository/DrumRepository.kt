@@ -37,10 +37,17 @@ class DrumRepository(
         if (existing != null) return existing
 
         val id = drumPatternDao.insertPattern(
-            DrumPatternEntity(trackId = trackId, stepsPerBar = stepsPerBar)
+            DrumPatternEntity(
+                trackId = trackId,
+                stepsPerBar = stepsPerBar,
+                lengthSteps = stepsPerBar
+            )
         )
         return drumPatternDao.getPatternForTrack(trackId)
-            ?: DrumPatternEntity(id = id, trackId = trackId, stepsPerBar = stepsPerBar)
+            ?: DrumPatternEntity(
+                id = id, trackId = trackId, stepsPerBar = stepsPerBar,
+                lengthSteps = stepsPerBar
+            )
     }
 
     suspend fun updatePatternGrid(patternId: Long, stepsPerBar: Int, bars: Int) {
@@ -135,7 +142,7 @@ class DrumRepository(
                 DrumPatternEntity(
                     trackId = sourcePattern.trackId,
                     stepsPerBar = sourcePattern.stepsPerBar,
-                    bars = sourcePattern.bars
+                    lengthSteps = sourcePattern.lengthSteps
                 )
             )
             if (sourceSteps.isNotEmpty()) {
@@ -179,7 +186,7 @@ class DrumRepository(
             DrumPatternEntity(
                 trackId = sourcePattern.trackId,
                 stepsPerBar = sourcePattern.stepsPerBar,
-                bars = sourcePattern.bars
+                lengthSteps = sourcePattern.lengthSteps
             )
         )
 
@@ -207,7 +214,11 @@ class DrumRepository(
      */
     suspend fun createEmptyClip(trackId: Long, offsetMs: Long, stepsPerBar: Int = 16) {
         val newPatternId = drumPatternDao.insertPattern(
-            DrumPatternEntity(trackId = trackId, stepsPerBar = stepsPerBar)
+            DrumPatternEntity(
+                trackId = trackId,
+                stepsPerBar = stepsPerBar,
+                lengthSteps = stepsPerBar
+            )
         )
         val maxSort = drumPatternDao.getMaxClipSortIndexForTrack(trackId) ?: 0
         drumPatternDao.insertClip(
@@ -257,7 +268,7 @@ class DrumRepository(
     ): DrumClipEntity? {
         val clip = drumPatternDao.getClipById(clipId) ?: return null
         val pattern = drumPatternDao.getPatternById(clip.patternId) ?: return null
-        val total = pattern.stepsPerBar * pattern.bars
+        val total = pattern.lengthSteps
         if (sourceSplitStepIndex <= 0 || sourceSplitStepIndex >= total) return null
 
         val steps = drumPatternDao.getStepsForPattern(pattern.id)
@@ -265,9 +276,11 @@ class DrumRepository(
         val rightSteps = steps.filter { it.stepIndex >= sourceSplitStepIndex }
         val siblings = drumPatternDao.getClipsForPattern(pattern.id)
         val leftOffsetMs = sourceSplitStepIndex * stepDurationMs
+        val rightLengthSteps = total - sourceSplitStepIndex
 
-        // 1. Rewrite source pattern with only left-half steps.
+        // 1. Rewrite source pattern with only left-half steps and truncate length.
         drumPatternDao.deleteAllStepsForPattern(pattern.id)
+        drumPatternDao.updatePatternLengthSteps(pattern.id, sourceSplitStepIndex)
         if (leftSteps.isNotEmpty()) {
             drumPatternDao.insertSteps(leftSteps.map { it.copy(id = 0L, patternId = pattern.id) })
         }
@@ -277,7 +290,7 @@ class DrumRepository(
             DrumPatternEntity(
                 trackId = pattern.trackId,
                 stepsPerBar = pattern.stepsPerBar,
-                bars = pattern.bars
+                lengthSteps = rightLengthSteps
             )
         )
         if (rightSteps.isNotEmpty()) {
@@ -323,7 +336,7 @@ class DrumRepository(
             DrumPatternEntity(
                 trackId = pattern.trackId,
                 stepsPerBar = pattern.stepsPerBar,
-                bars = pattern.bars
+                lengthSteps = pattern.lengthSteps
             )
         )
         if (steps.isNotEmpty()) {

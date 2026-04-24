@@ -43,12 +43,12 @@ public:
     /** A single clip with its own pattern data and timeline position. */
     struct ClipSlot {
         int stepsPerBar = 16;
-        int bars = 1;
+        // Authoritative step count. Allows sub-bar and non-bar-aligned clips.
+        // Fed from DrumPatternEntity.lengthSteps on the Kotlin side.
+        int totalSteps = 16;
         int beatsPerBar = 4;
         int64_t offsetFrames = 0;
         std::vector<DrumHit> hits;
-
-        int totalSteps() const { return stepsPerBar * bars; }
     };
 
     /**

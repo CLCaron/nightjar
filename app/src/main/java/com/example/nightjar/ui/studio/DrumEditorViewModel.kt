@@ -28,10 +28,16 @@ data class DrumEditorClip(
     val patternId: Long,
     val offsetMs: Long,
     val stepsPerBar: Int,
-    val bars: Int,
+    val lengthSteps: Int,
     val steps: List<DrumStepEntity>
 ) {
-    val totalSteps: Int get() = stepsPerBar * bars
+    val totalSteps: Int get() = lengthSteps
+
+    /** Derived bar count, rounded up for partial bars. Editor UIs that think
+     *  in whole bars read this; playback and layout use [lengthSteps]. */
+    val bars: Int get() =
+        if (lengthSteps <= 0 || stepsPerBar <= 0) 1
+        else (lengthSteps + stepsPerBar - 1) / stepsPerBar
 }
 
 /** UI state for the full-screen drum editor. */
@@ -119,7 +125,7 @@ class DrumEditorViewModel @Inject constructor(
                         patternId = clip.patternId,
                         offsetMs = clip.offsetMs,
                         stepsPerBar = pattern?.stepsPerBar ?: 16,
-                        bars = pattern?.bars ?: 1,
+                        lengthSteps = pattern?.lengthSteps ?: 16,
                         steps = steps
                     )
                 }
@@ -271,7 +277,7 @@ class DrumEditorViewModel @Inject constructor(
         if (clips.isEmpty()) return
 
         val clipStepsPerBar = IntArray(clips.size)
-        val clipBars = IntArray(clips.size)
+        val clipTotalSteps = IntArray(clips.size)
         val clipBeatsPerBar = IntArray(clips.size)
         val clipOffsetsMs = LongArray(clips.size)
         val clipHitCounts = IntArray(clips.size)
@@ -283,7 +289,7 @@ class DrumEditorViewModel @Inject constructor(
         for (i in clips.indices) {
             val clip = clips[i]
             clipStepsPerBar[i] = clip.stepsPerBar
-            clipBars[i] = clip.bars
+            clipTotalSteps[i] = clip.lengthSteps
             clipBeatsPerBar[i] = st.timeSignatureNumerator
             clipOffsetsMs[i] = clip.offsetMs
             clipHitCounts[i] = clip.steps.size
@@ -299,7 +305,7 @@ class DrumEditorViewModel @Inject constructor(
             volume = st.trackVolume,
             muted = st.trackMuted,
             clipStepsPerBar = clipStepsPerBar,
-            clipBars = clipBars,
+            clipTotalSteps = clipTotalSteps,
             clipBeatsPerBar = clipBeatsPerBar,
             clipOffsetsMs = clipOffsetsMs,
             clipHitCounts = clipHitCounts,
