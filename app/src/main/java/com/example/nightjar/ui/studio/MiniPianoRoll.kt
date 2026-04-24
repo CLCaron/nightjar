@@ -39,6 +39,7 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.input.pointer.pointerInput
@@ -590,19 +591,32 @@ fun MiniPianoRoll(
                                 )
                             }
 
-                            // 6) Playhead sweep: a thin amber line across the drawer canvas
-                            // during playback, with a soft bloom behind it for readability.
+                            // 6) Playhead sweep: a warm amber trail fades in behind
+                            // the playhead line, echoing the drum sequencer's glow
+                            // aesthetic but rendered continuously since piano roll
+                            // coords are time-based, not cell-indexed.
                             if (isPlaying) {
                                 val playheadX = globalPositionMs * pxPerMs
                                 if (playheadX in 0f..size.width) {
+                                    val trailLenPx = 260f * pxPerMs
+                                    val trailStartX = (playheadX - trailLenPx).coerceAtLeast(0f)
+                                    val trailW = playheadX - trailStartX
+                                    if (trailW > 0f) {
+                                        drawRect(
+                                            brush = Brush.horizontalGradient(
+                                                colorStops = arrayOf(
+                                                    0f to amberBoundary.copy(alpha = 0f),
+                                                    1f to amberBoundary.copy(alpha = 0.32f)
+                                                ),
+                                                startX = trailStartX,
+                                                endX = playheadX
+                                            ),
+                                            topLeft = Offset(trailStartX, 0f),
+                                            size = Size(trailW, size.height)
+                                        )
+                                    }
                                     drawLine(
-                                        color = amberBoundary.copy(alpha = 0.22f),
-                                        start = Offset(playheadX, 0f),
-                                        end = Offset(playheadX, size.height),
-                                        strokeWidth = 4f
-                                    )
-                                    drawLine(
-                                        color = amberBoundary.copy(alpha = 0.9f),
+                                        color = amberBoundary.copy(alpha = 0.95f),
                                         start = Offset(playheadX, 0f),
                                         end = Offset(playheadX, size.height),
                                         strokeWidth = 1.5f
