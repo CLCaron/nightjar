@@ -1018,7 +1018,15 @@ private fun DrawScope.drawGrid(
     }
 }
 
-/** Find a note whose right edge is near the touch position (extends past the note boundary). */
+/**
+ * Find a note whose right-edge resize zone contains the tap.
+ *
+ * The edge zone is the last [edgeZonePx] pixels **inside** the note body,
+ * clamped to the note's start so narrow notes stay grabbable (the whole
+ * note becomes the edge zone). Tapping in empty space past the note's end
+ * does not match — that previously caused phantom selections when users
+ * tapped near, but outside, a note whose right edge was within 16dp.
+ */
 private fun findNoteEdgeAt(
     position: Offset,
     notes: List<MidiNoteEntity>,
@@ -1028,8 +1036,11 @@ private fun findNoteEdgeAt(
 ): MidiNoteEntity? {
     val pitch = TOTAL_NOTES - 1 - (position.y / rowHeightPx).toInt()
     return notes.find { note ->
-        note.pitch == pitch &&
-            abs(position.x - (note.startMs + note.durationMs) * pxPerMs) < edgeZonePx
+        if (note.pitch != pitch) return@find false
+        val startPx = note.startMs * pxPerMs
+        val endPx = (note.startMs + note.durationMs) * pxPerMs
+        val edgeStart = (endPx - edgeZonePx).coerceAtLeast(startPx)
+        position.x in edgeStart..endPx
     }
 }
 
