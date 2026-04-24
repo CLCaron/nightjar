@@ -433,6 +433,8 @@ fun TimelinePanel(
                             timeSignatureDenominator = timeSignatureDenominator,
                             isSnapEnabled = isSnapEnabled,
                             gridResolution = gridResolution,
+                            globalPositionMs = globalPositionMs,
+                            isPlaying = isPlaying,
                             onAction = onAction
                         )
                     }

@@ -53,6 +53,8 @@ fun MidiTrackDrawer(
     timeSignatureDenominator: Int,
     isSnapEnabled: Boolean,
     gridResolution: Int,
+    globalPositionMs: Long,
+    isPlaying: Boolean,
     onAction: (StudioAction) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -175,6 +177,8 @@ fun MidiTrackDrawer(
                 timeSignatureDenominator = timeSignatureDenominator,
                 isSnapEnabled = isSnapEnabled,
                 gridResolution = gridResolution,
+                globalPositionMs = globalPositionMs,
+                isPlaying = isPlaying,
                 onAction = onAction
             )
         }

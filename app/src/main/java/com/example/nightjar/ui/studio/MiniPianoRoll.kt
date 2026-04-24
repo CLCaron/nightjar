@@ -109,6 +109,8 @@ fun MiniPianoRoll(
     timeSignatureDenominator: Int,
     isSnapEnabled: Boolean,
     gridResolution: Int,
+    globalPositionMs: Long,
+    isPlaying: Boolean,
     onAction: (StudioAction) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -530,6 +532,46 @@ fun MiniPianoRoll(
                                         drawLine(Color.Black.copy(alpha = 0.6f * noteAlpha), Offset(x, ny + h), Offset(x + w, ny + h), bevelW)
                                         drawLine(Color.Black.copy(alpha = 0.4f * noteAlpha), Offset(x + w, ny), Offset(x + w, ny + h), bevelW)
                                     }
+
+                                    // Playing-note glow: while playback's absolute position
+                                    // falls inside this note's window (bounded by the clip's
+                                    // effective length since anything past that is synth-off'd),
+                                    // wash the note with an amber overlay.
+                                    if (isPlaying) {
+                                        val noteEndCappedMs = minOf(
+                                            note.startMs + note.durationMs,
+                                            clip.effectiveLengthMs
+                                        )
+                                        val absEndMs = clip.offsetMs + noteEndCappedMs
+                                        if (globalPositionMs in absStartMs until absEndMs) {
+                                            drawRoundRect(
+                                                color = amberBoundary.copy(alpha = 0.55f * noteAlpha),
+                                                topLeft = Offset(x, ny),
+                                                size = Size(w, h),
+                                                cornerRadius = cr
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 5) Playhead sweep: a thin amber line across the drawer canvas
+                            // during playback, with a soft bloom behind it for readability.
+                            if (isPlaying) {
+                                val playheadX = globalPositionMs * pxPerMs
+                                if (playheadX in 0f..size.width) {
+                                    drawLine(
+                                        color = amberBoundary.copy(alpha = 0.22f),
+                                        start = Offset(playheadX, 0f),
+                                        end = Offset(playheadX, size.height),
+                                        strokeWidth = 4f
+                                    )
+                                    drawLine(
+                                        color = amberBoundary.copy(alpha = 0.9f),
+                                        start = Offset(playheadX, 0f),
+                                        end = Offset(playheadX, size.height),
+                                        strokeWidth = 1.5f
+                                    )
                                 }
                             }
                         }
