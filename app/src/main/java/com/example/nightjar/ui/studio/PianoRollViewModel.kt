@@ -30,6 +30,28 @@ data class PianoRollClipInfo(
     val endMs: Long
 )
 
+/**
+ * Per-note metadata used by move/resize operations.
+ *
+ * Linked clips share the same DB note rows (instance clips carry no notes of
+ * their own — reads resolve through the source). A single note thus appears in
+ * [PianoRollState.notes] once per linked instance, each copy at a different
+ * absolute [MidiNoteEntity.startMs]. This struct carries the *invariant* info
+ * about the underlying DB row so operations don't depend on which visual
+ * instance was iterated last when the map was built.
+ *
+ * @property clipId       The note's owning clip id from the DB (always the
+ *                        source clip id for linked groups).
+ * @property clipOffsetMs The source clip's absolute offset on the timeline.
+ * @property rawStartMs   The note's clip-relative startMs as stored in the DB
+ *                        (i.e. before any display-time offset is applied).
+ */
+private data class NoteClipInfo(
+    val clipId: Long,
+    val clipOffsetMs: Long,
+    val rawStartMs: Long
+)
+
 /** UI state for the piano roll editor. */
 data class PianoRollState(
     val trackId: Long = 0L,
@@ -126,10 +148,17 @@ class PianoRollViewModel @Inject constructor(
     private var previewNoteOffJob: Job? = null
 
     /**
-     * Maps noteId -> (clipId, clipOffsetMs) for converting between
-     * absolute (display) positions and clip-relative (storage) positions.
+     * Maps noteId -> [NoteClipInfo] carrying the note's DB-side identity and
+     * clip-relative startMs. Populated during rebuild.
+     *
+     * For linked-clip groups the same note row renders at multiple absolute
+     * positions, so we can't derive the clip-relative startMs by subtracting
+     * "the" clip offset from a transformed display value — there isn't one.
+     * Storing the DB's raw startMs directly makes the map idempotent across
+     * iterations of a linked group and removes the dependency on iteration
+     * order.
      */
-    private var noteClipMap = mapOf<Long, Pair<Long, Long>>()
+    private var noteClipMap = mapOf<Long, NoteClipInfo>()
 
     /** Cached clip entities for resolving note placement. */
     private var clipEntities = listOf<MidiClipEntity>()
@@ -157,8 +186,9 @@ class PianoRollViewModel @Inject constructor(
 
                 // Build absolute notes from all clips
                 val absoluteNotes = mutableListOf<MidiNoteEntity>()
-                val clipMap = mutableMapOf<Long, Pair<Long, Long>>()
+                val clipMap = mutableMapOf<Long, NoteClipInfo>()
                 val clipInfos = mutableListOf<PianoRollClipInfo>()
+                val offsetByClipId = clips.associate { it.id to it.offsetMs }
 
                 for (clip in clips) {
                     val clipNotes = midiRepo.getNotesForClip(clip.id)
@@ -171,7 +201,13 @@ class PianoRollViewModel @Inject constructor(
                         // Shift to absolute position
                         val absNote = note.copy(startMs = clip.offsetMs + note.startMs)
                         absoluteNotes.add(absNote)
-                        clipMap[note.id] = clip.id to clip.offsetMs
+                        // Canonicalize to the note's owning (source) clip — `note.clipId`
+                        // is the source's id even when the iteration is on an instance.
+                        clipMap[note.id] = NoteClipInfo(
+                            clipId = note.clipId,
+                            clipOffsetMs = offsetByClipId[note.clipId] ?: clip.offsetMs,
+                            rawStartMs = note.startMs
+                        )
                     }
                 }
 
@@ -229,8 +265,9 @@ class PianoRollViewModel @Inject constructor(
             )
 
             val absoluteNotes = mutableListOf<MidiNoteEntity>()
-            val clipMap = mutableMapOf<Long, Pair<Long, Long>>()
+            val clipMap = mutableMapOf<Long, NoteClipInfo>()
             val clipInfos = mutableListOf<PianoRollClipInfo>()
+            val offsetByClipId = clips.associate { it.id to it.offsetMs }
 
             for (clip in clips) {
                 val clipNotes = midiRepo.getNotesForClip(clip.id)
@@ -242,7 +279,11 @@ class PianoRollViewModel @Inject constructor(
                 for (note in clipNotes) {
                     val absNote = note.copy(startMs = clip.offsetMs + note.startMs)
                     absoluteNotes.add(absNote)
-                    clipMap[note.id] = clip.id to clip.offsetMs
+                    clipMap[note.id] = NoteClipInfo(
+                        clipId = note.clipId,
+                        clipOffsetMs = offsetByClipId[note.clipId] ?: clip.offsetMs,
+                        rawStartMs = note.startMs
+                    )
                 }
             }
 
@@ -368,8 +409,8 @@ class PianoRollViewModel @Inject constructor(
 
                 for (id in noteIds) {
                     val note = st.notes.find { it.id == id } ?: continue
-                    val (_, clipOffset) = noteClipMap[id] ?: continue
-                    val oldClipRelativeMs = note.startMs - clipOffset
+                    val info = noteClipMap[id] ?: continue
+                    val oldClipRelativeMs = info.rawStartMs
                     val newClipRelativeMs = (oldClipRelativeMs + deltaMs).coerceAtLeast(0L)
                     val newPitch = (note.pitch + deltaPitch).coerceIn(0, 127)
 
@@ -411,8 +452,8 @@ class PianoRollViewModel @Inject constructor(
 
                 for (id in noteIds) {
                     val note = st.notes.find { it.id == id } ?: continue
-                    val (_, clipOffset) = noteClipMap[id] ?: continue
-                    val clipRelativeMs = note.startMs - clipOffset
+                    val info = noteClipMap[id] ?: continue
+                    val clipRelativeMs = info.rawStartMs
                     val clamped = (note.durationMs + deltaDurationMs).coerceAtLeast(50L)
 
                     midiRepo.updateNoteTiming(id, clipRelativeMs, clamped)
