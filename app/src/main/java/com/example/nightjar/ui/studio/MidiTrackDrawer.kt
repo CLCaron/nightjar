@@ -28,7 +28,6 @@ import com.example.nightjar.ui.components.NjKnob
 import com.example.nightjar.ui.theme.NjAccent
 import com.example.nightjar.ui.theme.NjError
 import com.example.nightjar.ui.theme.NjMuted
-import com.example.nightjar.ui.theme.NjMuted2
 import com.example.nightjar.ui.theme.NjAmber
 import com.example.nightjar.ui.theme.NjLedTeal
 import com.example.nightjar.ui.theme.NjLedYellow
@@ -37,7 +36,8 @@ import com.example.nightjar.ui.theme.NjSurface2
 /**
  * Inline track drawer for MIDI instrument tracks.
  *
- * Two-row control layout plus an inline MiniPianoRoll for the selected clip.
+ * Two-row control layout plus an inline MiniPianoRoll that renders the whole
+ * track in absolute timeline coordinates.
  *   Row 1: Volume knob, S/M toggles, Inst button, Edit button
  *   Row 2: Instrument name, Rename button, Delete button
  *   Row 3: MiniPianoRoll (edge-to-edge, no horizontal padding)
@@ -162,11 +162,12 @@ fun MidiTrackDrawer(
             }
         }
 
-        // MiniPianoRoll: full width, no horizontal padding
-        val selectedClip = midiState?.clips?.find { it.clipId == midiState.selectedClipId }
-        if (selectedClip != null) {
+        // MiniPianoRoll: renders the whole track. Clip windows are tinted,
+        // notes in the selected clip are bright, notes in other clips dim,
+        // gap regions darken to show non-writeable zones.
+        if (midiState != null && midiState.clips.isNotEmpty()) {
             MiniPianoRoll(
-                clip = selectedClip,
+                trackState = midiState,
                 trackId = track.id,
                 trackIndex = trackIndex,
                 bpm = bpm,
@@ -175,13 +176,6 @@ fun MidiTrackDrawer(
                 isSnapEnabled = isSnapEnabled,
                 gridResolution = gridResolution,
                 onAction = onAction
-            )
-        } else if (midiState != null && midiState.clips.isNotEmpty()) {
-            Text(
-                text = "Tap a clip on the timeline to edit",
-                style = MaterialTheme.typography.labelSmall,
-                color = NjMuted2,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
             )
         }
     }
