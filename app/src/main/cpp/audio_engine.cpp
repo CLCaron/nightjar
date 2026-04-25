@@ -259,6 +259,10 @@ void AudioEngine::synthNoteOff(int channel, int note) {
     if (synthEngine_) synthEngine_->noteOff(channel, note);
 }
 
+void AudioEngine::synthProgramChange(int channel, int program) {
+    if (synthEngine_) synthEngine_->programChange(channel, program);
+}
+
 void AudioEngine::setSynthVolume(float volume) {
     if (synthEngine_) synthEngine_->setVolume(volume);
 }

@@ -241,6 +241,12 @@ Java_com_example_nightjar_audio_OboeAudioEngine_nativeSynthNoteOff(
 }
 
 JNIEXPORT void JNICALL
+Java_com_example_nightjar_audio_OboeAudioEngine_nativeSynthProgramChange(
+        JNIEnv* /* env */, jobject /* thiz */, jint channel, jint program) {
+    if (sEngine) sEngine->synthProgramChange(static_cast<int>(channel), static_cast<int>(program));
+}
+
+JNIEXPORT void JNICALL
 Java_com_example_nightjar_audio_OboeAudioEngine_nativeSetSynthVolume(
         JNIEnv* /* env */, jobject /* thiz */, jfloat volume) {
     if (sEngine) sEngine->setSynthVolume(static_cast<float>(volume));

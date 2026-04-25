@@ -134,6 +134,12 @@ void SynthEngine::noteOff(int channel, int note) {
     }
 }
 
+void SynthEngine::programChange(int channel, int program) {
+    if (synth_) {
+        fluid_synth_program_change(FS_SYNTH, channel, program);
+    }
+}
+
 void SynthEngine::setVolume(float volume) {
     volume_.store(volume, std::memory_order_relaxed);
 }

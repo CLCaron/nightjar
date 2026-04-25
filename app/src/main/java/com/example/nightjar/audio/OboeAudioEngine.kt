@@ -164,6 +164,29 @@ class OboeAudioEngine @Inject constructor() {
     fun synthNoteOff(channel: Int, note: Int) =
         nativeSynthNoteOff(channel, note)
 
+    /**
+     * Send a MIDI program change to a specific channel (no scheduler
+     * involvement). Used by the preview path to align the preview
+     * channel with the track's currently-selected instrument before
+     * each preview noteOn.
+     */
+    fun synthProgramChange(channel: Int, program: Int) =
+        nativeSynthProgramChange(channel, program)
+
+    /**
+     * Fire a one-shot preview note: align the channel's program, send a
+     * noteOn, and let the caller schedule the matching noteOff (the
+     * caller owns the timing and cancellation, since previews fire from
+     * gesture handlers that need to cancel on a fresh interaction).
+     *
+     * Audible regardless of transport state because the synth render
+     * thread keeps cycling when paused (see `synth_engine.cpp`).
+     */
+    fun previewNote(channel: Int, pitch: Int, velocity: Int, program: Int) {
+        nativeSynthProgramChange(channel, program)
+        nativeSynthNoteOn(channel, pitch, velocity)
+    }
+
     fun setSynthVolume(volume: Float) =
         nativeSetSynthVolume(volume)
 
@@ -335,6 +358,7 @@ class OboeAudioEngine @Inject constructor() {
     private external fun nativeLoadSoundFont(path: String): Boolean
     private external fun nativeSynthNoteOn(channel: Int, note: Int, velocity: Int)
     private external fun nativeSynthNoteOff(channel: Int, note: Int)
+    private external fun nativeSynthProgramChange(channel: Int, program: Int)
     private external fun nativeSetSynthVolume(volume: Float)
     private external fun nativeSynthAllSoundsOff()
 

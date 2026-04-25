@@ -77,6 +77,13 @@ public:
     /** Send a MIDI note-off. Thread-safe. */
     void noteOff(int channel, int note);
 
+    /** Send a MIDI program-change to a single channel. Thread-safe
+     *  (FluidSynth's internal mutex serializes this against the render
+     *  thread's noteOn/noteOff calls). Used to align the preview channel
+     *  with the track's currently-selected instrument before a preview
+     *  note fires. */
+    void programChange(int channel, int program);
+
     /** Set master synth volume (0.0 - 1.0). Lock-free. */
     void setVolume(float volume);
 

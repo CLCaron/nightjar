@@ -685,8 +685,16 @@ class PianoRollViewModel @Inject constructor(
 
     private fun previewPitch(pitch: Int) {
         previewNoteOffJob?.cancel()
-        val program = _state.value.midiProgram
-        audioEngine.synthNoteOn(PREVIEW_CHANNEL, pitch, PREVIEW_VELOCITY)
+        // Align the preview channel with the track's currently-selected
+        // instrument before noteOn so the preview reflects what the user
+        // chose; otherwise FluidSynth defaults the preview channel to
+        // Acoustic Grand and ignores the picker.
+        audioEngine.previewNote(
+            channel = PREVIEW_CHANNEL,
+            pitch = pitch,
+            velocity = PREVIEW_VELOCITY,
+            program = _state.value.midiProgram
+        )
 
         previewNoteOffJob = viewModelScope.launch {
             delay(PREVIEW_DURATION_MS)
