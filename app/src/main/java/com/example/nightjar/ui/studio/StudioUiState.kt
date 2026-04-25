@@ -534,6 +534,13 @@ sealed interface StudioAction {
     data class InlineMoveNote(val trackId: Long, val noteId: Long, val newStartMs: Long, val newPitch: Int) : StudioAction
     data class InlineResizeNote(val trackId: Long, val noteId: Long, val newDurationMs: Long) : StudioAction
     data class InlineDeleteNote(val trackId: Long, val noteId: Long) : StudioAction
+    /**
+     * Fire an audible preview of [pitch] using [trackId]'s currently
+     * selected MIDI instrument. Dispatched from MiniPianoRoll on
+     * tap-to-place, long-press grab, and pitch-boundary crossings during
+     * a drag (debounced — never per-pixel).
+     */
+    data class InlinePreviewPitch(val trackId: Long, val pitch: Int) : StudioAction
 
     // Split / Unlink / Rename clip (uniform across audio | midi | drum)
     data class StartSplitMode(val clipId: Long, val clipType: String) : StudioAction

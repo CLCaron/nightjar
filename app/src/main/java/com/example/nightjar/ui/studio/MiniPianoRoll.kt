@@ -420,6 +420,13 @@ fun MiniPianoRoll(
                                                 // Immediate visual latch — see the matching
                                                 // comment in the edge branch above.
                                                 dragPreview = DragPreview(noteId = bodyHit.note.id)
+                                                // Audible confirmation at the latch moment, using
+                                                // the track's selected instrument.
+                                                onAction(StudioAction.InlinePreviewPitch(trackId, bodyHit.note.pitch))
+                                                // Debounce preview during drag: only fire when
+                                                // the previewed pitch crosses a row boundary,
+                                                // not on every pixel of finger motion.
+                                                var lastPreviewedPitch = bodyHit.note.pitch
                                                 val ownerOffset = offsetByClipIdState.value[bodyHit.note.clipId] ?: 0L
                                                 handleMoveDragInline(
                                                     anchor = bodyHit.note,
@@ -440,6 +447,12 @@ fun MiniPianoRoll(
                                                             deltaMs = dMs,
                                                             deltaPitch = dPitch
                                                         )
+                                                        val newPitch = (bodyHit.note.pitch + dPitch)
+                                                            .coerceIn(0, TOTAL_PITCHES - 1)
+                                                        if (newPitch != lastPreviewedPitch) {
+                                                            lastPreviewedPitch = newPitch
+                                                            onAction(StudioAction.InlinePreviewPitch(trackId, newPitch))
+                                                        }
                                                     },
                                                     onCommit = { dMs, dPitch ->
                                                         dragPreview = null
@@ -506,6 +519,9 @@ fun MiniPianoRoll(
                                                                     trackId, clipId, pitch, startMs, durationMs
                                                                 )
                                                             )
+                                                            // Audible feedback for the placed note
+                                                            // at the track's selected instrument.
+                                                            onAction(StudioAction.InlinePreviewPitch(trackId, pitch))
                                                         },
                                                         onGapTap = { range ->
                                                             gapFlickerRange = range

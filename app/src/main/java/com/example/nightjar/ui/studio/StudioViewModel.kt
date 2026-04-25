@@ -499,6 +499,7 @@ class StudioViewModel @Inject constructor(
             is StudioAction.InlineMoveNote -> inlineMoveNote(action.trackId, action.noteId, action.newStartMs, action.newPitch)
             is StudioAction.InlineResizeNote -> inlineResizeNote(action.trackId, action.noteId, action.newDurationMs)
             is StudioAction.InlineDeleteNote -> inlineDeleteNote(action.trackId, action.noteId)
+            is StudioAction.InlinePreviewPitch -> inlinePreviewPitch(action.trackId, action.pitch)
 
             // Audio clip duplicate (pillrocker: unlinked | linked)
             is StudioAction.DuplicateAudioClip ->
@@ -2536,8 +2537,12 @@ class StudioViewModel @Inject constructor(
     /** Preview an instrument by playing a short note on the preview channel. */
     private fun previewInstrument(program: Int) {
         previewNoteOffJob?.cancel()
-        // Program change on preview channel, then play middle C
-        audioEngine.synthNoteOn(previewChannel, 60, 80)
+        audioEngine.previewNote(
+            channel = previewChannel,
+            pitch = 60,
+            velocity = 80,
+            program = program
+        )
         previewNoteOffJob = viewModelScope.launch {
             delay(300L)
             audioEngine.synthNoteOff(previewChannel, 60)
@@ -2739,6 +2744,29 @@ class StudioViewModel @Inject constructor(
         viewModelScope.launch {
             midiRepo.deleteNote(noteId)
             midiRepo.recomputeTrackDuration(trackId)
+        }
+    }
+
+    /**
+     * Audible preview of [pitch] using the track's currently-selected MIDI
+     * instrument. Fired by the drawer's MiniPianoRoll on tap-to-place,
+     * long-press grab, and pitch-boundary crossings during a drag.
+     *
+     * Reuses [previewNoteOffJob] so a fresh interaction cancels any
+     * still-sustaining previous preview before starting its own.
+     */
+    private fun inlinePreviewPitch(trackId: Long, pitch: Int) {
+        val program = _state.value.tracks.find { it.id == trackId }?.midiProgram ?: 0
+        previewNoteOffJob?.cancel()
+        audioEngine.previewNote(
+            channel = previewChannel,
+            pitch = pitch,
+            velocity = 80,
+            program = program
+        )
+        previewNoteOffJob = viewModelScope.launch {
+            delay(200L)
+            audioEngine.synthNoteOff(previewChannel, pitch)
         }
     }
 
