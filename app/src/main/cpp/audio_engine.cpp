@@ -263,6 +263,10 @@ void AudioEngine::synthProgramChange(int channel, int program) {
     if (synthEngine_) synthEngine_->programChange(channel, program);
 }
 
+void AudioEngine::synthRequestPreviewFlush() {
+    if (synthEngine_) synthEngine_->requestPreviewFlush();
+}
+
 void AudioEngine::setSynthVolume(float volume) {
     if (synthEngine_) synthEngine_->setVolume(volume);
 }

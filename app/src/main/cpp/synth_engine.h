@@ -90,6 +90,15 @@ public:
     /** Request a ring buffer flush + all-sounds-off. Used on seek/loop. */
     void requestFlush();
 
+    /** Drop pre-rendered audio from the ring buffer WITHOUT silencing
+     *  active voices. Used by the preview path so a freshly-fired
+     *  synthNoteOn isn't buried behind ~186ms of queued silence (the
+     *  ring buffer's near-capacity steady state when paused). The
+     *  render thread honors this only when transport is paused;
+     *  during playback the flag is consumed without flushing to avoid
+     *  a glitch in arrangement audio. */
+    void requestPreviewFlush();
+
     /** Immediately silence all sounding notes on all channels (CC 120). */
     void allSoundsOff();
 
@@ -160,6 +169,7 @@ private:
     std::atomic<bool> soundFontLoaded_{false};
     std::atomic<float> volume_{1.0f};
     std::atomic<bool> flushRequested_{false};
+    std::atomic<bool> previewFlushRequested_{false};
 
     // Step sequencer
     StepSequencer sequencer_;

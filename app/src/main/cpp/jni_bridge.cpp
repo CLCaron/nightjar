@@ -247,6 +247,12 @@ Java_com_example_nightjar_audio_OboeAudioEngine_nativeSynthProgramChange(
 }
 
 JNIEXPORT void JNICALL
+Java_com_example_nightjar_audio_OboeAudioEngine_nativeSynthRequestPreviewFlush(
+        JNIEnv* /* env */, jobject /* thiz */) {
+    if (sEngine) sEngine->synthRequestPreviewFlush();
+}
+
+JNIEXPORT void JNICALL
 Java_com_example_nightjar_audio_OboeAudioEngine_nativeSetSynthVolume(
         JNIEnv* /* env */, jobject /* thiz */, jfloat volume) {
     if (sEngine) sEngine->setSynthVolume(static_cast<float>(volume));

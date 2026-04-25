@@ -148,6 +148,10 @@ void SynthEngine::requestFlush() {
     flushRequested_.store(true, std::memory_order_release);
 }
 
+void SynthEngine::requestPreviewFlush() {
+    previewFlushRequested_.store(true, std::memory_order_release);
+}
+
 void SynthEngine::allSoundsOff() {
     if (synth_) {
         fluid_synth_all_sounds_off(FS_SYNTH, -1);  // -1 = all channels
@@ -316,6 +320,16 @@ void SynthEngine::renderThreadFunc() {
             renderPos_ = transport_.posFrames.load(std::memory_order_relaxed);
             midiSequencer_.resetToPosition(renderPos_);
             flushRequested_.store(false, std::memory_order_release);
+        }
+
+        // Preview flush: drop queued audio so a freshly-fired preview
+        // noteOn isn't buried behind the ring buffer's near-capacity
+        // (~186ms) backlog of silence. Only honored when paused -- during
+        // playback the flush would glitch the arrangement audio, and the
+        // user is hearing scheduled notes anyway.
+        if (previewFlushRequested_.exchange(false, std::memory_order_acq_rel) &&
+            !transport_.playing.load(std::memory_order_relaxed)) {
+            ringBuffer_.reset();
         }
 
         // Track play/pause transitions

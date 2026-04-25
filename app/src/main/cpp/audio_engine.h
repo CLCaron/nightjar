@@ -73,6 +73,7 @@ public:
     void synthNoteOn(int channel, int note, int velocity);
     void synthNoteOff(int channel, int note);
     void synthProgramChange(int channel, int program);
+    void synthRequestPreviewFlush();
     void setSynthVolume(float volume);
     void synthAllSoundsOff();
 

@@ -183,6 +183,14 @@ class OboeAudioEngine @Inject constructor() {
      * thread keeps cycling when paused (see `synth_engine.cpp`).
      */
     fun previewNote(channel: Int, pitch: Int, velocity: Int, program: Int) {
+        // Drop any pre-rendered silence in the synth's output ring buffer
+        // before kicking off the noteOn. Otherwise the freshly-fired
+        // voice waits behind ~186ms of buffered silence (the ring's
+        // near-capacity steady state when paused), which usually outlasts
+        // a 200ms preview duration and renders the preview inaudible.
+        // Render thread only honors this when paused, so playback isn't
+        // glitched.
+        nativeSynthRequestPreviewFlush()
         nativeSynthProgramChange(channel, program)
         nativeSynthNoteOn(channel, pitch, velocity)
     }
@@ -359,6 +367,7 @@ class OboeAudioEngine @Inject constructor() {
     private external fun nativeSynthNoteOn(channel: Int, note: Int, velocity: Int)
     private external fun nativeSynthNoteOff(channel: Int, note: Int)
     private external fun nativeSynthProgramChange(channel: Int, program: Int)
+    private external fun nativeSynthRequestPreviewFlush()
     private external fun nativeSetSynthVolume(volume: Float)
     private external fun nativeSynthAllSoundsOff()
 

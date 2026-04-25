@@ -84,9 +84,24 @@ oboe::DataCallbackResult OboePlaybackStream::onAudioReady(
     auto* output = static_cast<float*>(audioData);
 
     if (!transport_.playing.load(std::memory_order_acquire)) {
-        // Not playing — output silence
+        // Paused: skip the timeline-driven track mixer and position
+        // advance, but still mix in synth audio from the ring buffer
+        // so direct synth API calls (preview noteOn from the piano
+        // roll) reach the speaker. Without this the playback callback
+        // would output silence regardless of what the synth produced.
         std::memset(output, 0,
                     static_cast<size_t>(numFrames) * kOutputChannelCount * sizeof(float));
+        if (synth_ && synth_->isRunning()) {
+            synth_->readFrames(output, numFrames);
+            // Soft-clip the synth output for symmetry with the playing
+            // branch below; preview velocities are typically below 1.0
+            // so this is rarely active, but keeps the signal path
+            // consistent.
+            int32_t totalSamples = numFrames * kOutputChannelCount;
+            for (int32_t i = 0; i < totalSamples; ++i) {
+                output[i] = std::tanh(output[i]);
+            }
+        }
         return oboe::DataCallbackResult::Continue;
     }
 
