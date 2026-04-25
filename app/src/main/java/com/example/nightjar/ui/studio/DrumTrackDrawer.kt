@@ -2,6 +2,7 @@ package com.example.nightjar.ui.studio
 
 import com.example.nightjar.ui.components.NjButton
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.foundation.background
@@ -209,7 +210,7 @@ fun DrumTrackDrawer(
                     }
                 }
 
-                // Row 2: Edit + Rename + Delete (right-aligned)
+                // Row 2: Edit + Ren + Del (right-aligned, compact for narrow)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End,
@@ -225,7 +226,8 @@ fun DrumTrackDrawer(
                     )
                     Spacer(Modifier.width(8.dp))
                     NjButton(
-                        text = "Rename",
+                        text = "Ren",
+                        icon = Icons.AutoMirrored.Filled.Label,
                         onClick = {
                             onAction(
                                 StudioAction.RequestRenameTrack(
@@ -238,7 +240,7 @@ fun DrumTrackDrawer(
                     )
                     Spacer(Modifier.width(8.dp))
                     NjButton(
-                        text = "Delete",
+                        text = "Del",
                         icon = Icons.Filled.Delete,
                         onClick = {
                             onAction(StudioAction.ConfirmDeleteTrack(track.id))
