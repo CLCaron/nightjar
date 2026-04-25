@@ -7,6 +7,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,6 +30,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,6 +40,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.input.pointer.AwaitPointerEventScope
+import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -56,7 +60,6 @@ import com.example.nightjar.ui.theme.NjPanelInset
 import com.example.nightjar.ui.theme.NjSurface
 import com.example.nightjar.ui.theme.NjTrackColors
 import kotlinx.coroutines.launch
-import kotlin.math.abs
 
 /** Row height per semitone. */
 private val ROW_HEIGHT = 18.dp
@@ -70,6 +73,12 @@ private const val TOTAL_PITCHES = 128
 private val BUTTON_COL_WIDTH = 32.dp
 /** Width of key labels. */
 private val KEY_LABEL_WIDTH = 36.dp
+/** Right-edge zone (extends past the note) where a long-press triggers
+ *  a resize drag instead of a move. Makes the resize handle reachable on
+ *  short notes without eating area that should pan the timeline. */
+private val EDGE_TOUCH_ZONE = 16.dp
+/** Tap-vs-double-tap threshold. */
+private const val DOUBLE_TAP_TIMEOUT_MS = 400L
 
 private val NOTE_NAMES = arrayOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 private val BLACK_KEY_INDICES = setOf(1, 3, 6, 8, 10)
@@ -91,6 +100,16 @@ private data class NoteHit(
     val hitClipOffsetMs: Long
 )
 
+/** Live drag preview applied on top of the stored note positions during
+ *  a move or resize drag. Cleared on commit / cancel. */
+private data class DragPreview(
+    val noteId: Long,
+    val isResize: Boolean = false,
+    val deltaMs: Long = 0L,
+    val deltaPitch: Int = 0,
+    val deltaDurationMs: Long = 0L
+)
+
 /**
  * Inline piano roll editor for the MidiTrackDrawer.
  *
@@ -107,6 +126,16 @@ private data class NoteHit(
  * positions the desired octaves inside that window. Octave-up/down flips
  * translate the canvas smoothly so notes that remain visible physically
  * slide instead of disappearing off-screen and coming back.
+ *
+ * ## Gestures (mirrors the full-screen piano roll)
+ * - Down events are NOT consumed, so the wrapping `horizontalScroll` can
+ *   claim quick swipes for timeline pan.
+ * - Long-press on a note body or right-edge starts a move/resize drag.
+ *   The drag uses absolute position tracking (canvas-x + scroll offset)
+ *   so the canvas can pan during the drag without corrupting the delta.
+ * - Quick tap on a note toggles selection; double-tap deletes.
+ * - Tap on empty cell inside a clip places a note there.
+ * - Tap in a gap region between clips flashes the gap (no placement).
  */
 @Composable
 fun MiniPianoRoll(
@@ -134,12 +163,14 @@ fun MiniPianoRoll(
     val selectedClipId = trackState.selectedClipId
     val offsetByClipId = remember(clips) { clips.associate { it.clipId to it.offsetMs } }
 
-    // Current base octave (MIDI octave, where octave 4 = C4 = MIDI 60).
-    // Shows 2 octaves: currentOctave and currentOctave+1.
+    // Live state references for the gesture handler. Wrapping in
+    // rememberUpdatedState lets the long-running pointerInput coroutine
+    // read fresh values without re-launching when notes update.
+    val clipsState = rememberUpdatedState(clips)
+    val offsetByClipIdState = rememberUpdatedState(offsetByClipId)
+
     var currentOctave by remember { mutableIntStateOf(3) }
 
-    // Auto-center the octave window on the track's average pitch when the
-    // drawer first composes for this track.
     LaunchedEffect(Unit) {
         val allPitches = clips.flatMap { it.notes }.map { it.pitch }
         if (allPitches.isNotEmpty()) {
@@ -151,14 +182,10 @@ fun MiniPianoRoll(
     val visibleGridHeight = ROW_HEIGHT * VISIBLE_PITCHES
     val totalGridHeight = ROW_HEIGHT * TOTAL_PITCHES
 
-    // Musical time helpers
     val msPerBeat = MusicalTimeConverter.msPerBeat(bpm, timeSignatureDenominator)
     val msPerMeasure = MusicalTimeConverter.msPerMeasure(bpm, timeSignatureNumerator, timeSignatureDenominator)
     val gridStepMs = MusicalTimeConverter.msPerGridStep(bpm, gridResolution, timeSignatureDenominator)
 
-    // Canvas spans the whole track horizontally: from 0 to the far edge of
-    // the last clip, floored at 2 measures so a single short clip still has
-    // breathing room.
     val minDurationMs = (msPerMeasure * 2).toLong()
     val trackEndMs = clips.maxOfOrNull { it.offsetMs + it.effectiveLengthMs } ?: 0L
     val totalMs = maxOf(trackEndMs + msPerMeasure.toLong(), minDurationMs)
@@ -167,26 +194,22 @@ fun MiniPianoRoll(
     val amberBoundary = NjAmber
     val rowHeightPx = with(density) { ROW_HEIGHT.toPx() }
     val pxPerMs = with(density) { 0.15f * this.density }
+    val edgeZonePx = with(density) { EDGE_TOUCH_ZONE.toPx() }
     val canvasWidthPx = (totalMs * pxPerMs).coerceAtLeast(with(density) { 200.dp.toPx() })
     val canvasWidthDp = with(density) { (canvasWidthPx / this.density).dp }
 
-    // Gesture + selection state
     var selectedNoteId by remember { mutableStateOf<Long?>(null) }
     var lastTapTimeMs by remember { mutableLongStateOf(0L) }
     var lastTapNoteId by remember { mutableStateOf<Long?>(null) }
+    var dragPreview by remember { mutableStateOf<DragPreview?>(null) }
 
-    // Gap-reject feedback: when the user taps in a gap region, flash the
-    // enclosing gap with a brief amber wash so the rejection is visible.
     val scope = rememberCoroutineScope()
     val gapFlickerAlpha = remember { Animatable(0f) }
     var gapFlickerRange by remember { mutableStateOf<Pair<Long, Long>?>(null) }
 
-    // Sticky note duration: captures last resize for subsequent placements.
     var stickyDuration by remember { mutableStateOf<Long?>(null) }
     LaunchedEffect(gridResolution) { stickyDuration = null }
 
-    // Pre-measure all 128 pitch labels so we don't pay layout cost on every
-    // frame. Re-runs only if the TextMeasurer changes (e.g., font/density).
     val labelStyle = remember { TextStyle(fontSize = 8.sp, color = Color.White.copy(alpha = 0.6f)) }
     val pitchLabels: Map<Int, TextLayoutResult> = remember(textMeasurer, labelStyle) {
         (0 until TOTAL_PITCHES).associateWith { pitch ->
@@ -196,41 +219,24 @@ fun MiniPianoRoll(
         }
     }
 
-    // Indicator dots on the octave buttons: are there notes outside the
-    // currently-visible 2-octave window?
     val lowPitch = (currentOctave + 1) * 12
     val highPitchLimit = lowPitch + VISIBLE_PITCHES - 1
     val allNotes = remember(clips) { clips.flatMap { it.notes } }
     val notesAbove = allNotes.count { it.pitch > highPitchLimit }
     val notesBelow = allNotes.count { it.pitch < lowPitch }
 
-    // Vertical scroll that brings the desired 2-octave window into the
-    // viewport. The highest visible pitch sits at the TOP of the window.
-    // In canvas coords (pitch 127 at row 0), that pitch is at row index
-    // `(TOTAL_PITCHES - 1 - highVisible)`, so the scroll position is that
-    // many rows worth of pixels (positive = scrolled down).
     val highestVisiblePitch = highPitchLimit
     val topRowIndex = (TOTAL_PITCHES - 1) - highestVisiblePitch
     val targetVScrollPx = (topRowIndex * rowHeightPx).toInt()
 
-    // Vertical scroll state, initialized at the right octave so the first
-    // frame already shows the correct pitches (no warm-up animation).
     val vScrollState = rememberScrollState(initial = targetVScrollPx)
 
-    // Animate to a new octave when the user clicks an arrow button. On
-    // first composition target equals initial, so animateScrollTo is a
-    // no-op; subsequent currentOctave changes glide over 220ms.
     LaunchedEffect(targetVScrollPx) {
         vScrollState.animateScrollTo(targetVScrollPx, animationSpec = tween(220))
     }
 
-    // Shared horizontal scroll across octave flips so the user's timeline
-    // position persists when they page vertically.
     val hScrollState = rememberScrollState()
 
-    // Center the viewport on the selected clip on first open, and animate
-    // to a new selection whenever the user taps a different clip on the
-    // timeline.
     LaunchedEffect(selectedClipId) {
         val target = clips.find { it.clipId == selectedClipId } ?: clips.firstOrNull()
         if (target != null) {
@@ -241,7 +247,6 @@ fun MiniPianoRoll(
     }
 
     Row(modifier = modifier.fillMaxWidth().height(visibleGridHeight)) {
-        // Octave buttons column
         Column(
             modifier = Modifier
                 .width(BUTTON_COL_WIDTH)
@@ -263,12 +268,6 @@ fun MiniPianoRoll(
             )
         }
 
-        // Visible 2-octave window — verticalScroll handles the tall grid.
-        // Drag-to-scroll is disabled; only programmatic animateScrollTo
-        // fires when the octave buttons change `currentOctave`. Notes that
-        // remain visible across an octave change physically slide as the
-        // scroll animates; notes leaving and entering do so as a side
-        // effect of the same scroll.
         Box(
             modifier = Modifier
                 .weight(1f)
@@ -279,7 +278,6 @@ fun MiniPianoRoll(
                     .fillMaxWidth()
                     .verticalScroll(vScrollState, enabled = false)
             ) {
-                // Key labels — full pitch range
                 Canvas(
                     modifier = Modifier
                         .width(KEY_LABEL_WIDTH)
@@ -320,7 +318,6 @@ fun MiniPianoRoll(
                     }
                 }
 
-                // Horizontally scrollable note grid — full pitch range
                 Box(
                     modifier = Modifier
                         .weight(1f)
@@ -332,182 +329,199 @@ fun MiniPianoRoll(
                             .height(totalGridHeight)
                             .background(panelInset)
                             .pointerInput(
-                                clips, selectedClipId,
-                                pxPerMs, rowHeightPx, isSnapEnabled, gridStepMs, msPerBeat
+                                trackId, selectedClipId,
+                                pxPerMs, rowHeightPx, edgeZonePx,
+                                isSnapEnabled, gridStepMs, msPerBeat,
+                                bpm, gridResolution, timeSignatureDenominator
                             ) {
                                 awaitEachGesture {
                                     val down = awaitFirstDown(requireUnconsumed = false)
+                                    // DON'T consume down -- horizontalScroll
+                                    // needs the first crack at quick swipes.
                                     val downPos = down.position
                                     val downTime = System.currentTimeMillis()
-                                    val scrollAtDown = hScrollState.value
 
-                                    val hit = hitTestAbsolute(
-                                        x = downPos.x,
-                                        y = downPos.y,
-                                        clips = clips,
-                                        pxPerMs = pxPerMs,
-                                        rowHeightPx = rowHeightPx
+                                    val edgeHit = findEdgeHitAbs(
+                                        downPos, clipsState.value, pxPerMs, rowHeightPx, edgeZonePx
                                     )
-                                    val hitEdge = hit?.let {
-                                        isNearRightEdgeAbs(downPos.x, it.hitClipOffsetMs, it.note, pxPerMs)
-                                    } ?: false
+                                    val bodyHit = if (edgeHit == null) {
+                                        findBodyHitAbs(downPos, clipsState.value, pxPerMs, rowHeightPx)
+                                    } else null
 
-                                    if (hit != null) down.consume()
-
-                                    val isDoubleTap = hit != null &&
-                                        hit.note.id == lastTapNoteId &&
-                                        (downTime - lastTapTimeMs) < 400
-
-                                    if (isDoubleTap && hit != null) {
-                                        view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                                        onAction(StudioAction.InlineDeleteNote(trackId, hit.note.id))
-                                        lastTapNoteId = null
-                                        lastTapTimeMs = 0
-                                        return@awaitEachGesture
-                                    }
-
-                                    val initialRawStartMs = hit?.note?.startMs ?: 0L
-                                    val initialDurationMs = hit?.note?.durationMs ?: 0L
-                                    val initialPitch = hit?.note?.pitch ?: 0
-
-                                    var moved = false
-                                    var lastPos = downPos
-                                    val touchSlop = viewConfiguration.touchSlop
-                                    // For empty-area drags (no note hit), once the gesture
-                                    // crosses the slop we lock its dominant axis. Vertical
-                                    // drags get consumed so the parent Studio's vertical
-                                    // scroll can't steal them; horizontal drags pass
-                                    // through so the wrapping horizontalScroll still works.
-                                    var emptyDragVertical = false
-
-                                    while (true) {
-                                        val event = awaitPointerEvent()
-                                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
-
-                                        if (!change.pressed) {
-                                            val scrolled = hScrollState.value != scrollAtDown
-                                            change.consume()
-
-                                            if (!moved && !scrolled) {
-                                                if (hit != null) {
-                                                    selectedNoteId = hit.note.id
-                                                } else {
-                                                    val tappedAbsMs = (downPos.x / pxPerMs).toLong()
-                                                    val tappedPitch = (TOTAL_PITCHES - 1) -
-                                                        (downPos.y / rowHeightPx).toInt()
-                                                    val snappedAbsMs = if (isSnapEnabled && gridStepMs > 0) {
-                                                        MusicalTimeConverter.snapToGrid(
-                                                            tappedAbsMs, bpm, gridResolution, timeSignatureDenominator
+                                    when {
+                                        edgeHit != null -> {
+                                            val longPress = awaitLongPressOrCancellation(down.id)
+                                            if (longPress != null) {
+                                                longPress.consume()
+                                                view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                                // Immediate visual latch — render the note as
+                                                // "grabbed" the moment long-press fires, so the
+                                                // haptic and the pressed-in visual land together
+                                                // instead of waiting for the first finger move.
+                                                dragPreview = DragPreview(
+                                                    noteId = edgeHit.note.id, isResize = true
+                                                )
+                                                val ownerOffset = offsetByClipIdState.value[edgeHit.note.clipId] ?: 0L
+                                                handleResizeDragInline(
+                                                    anchor = edgeHit.note,
+                                                    pointerId = longPress.id,
+                                                    pxPerMs = pxPerMs,
+                                                    isSnapEnabled = isSnapEnabled,
+                                                    bpm = bpm,
+                                                    gridResolution = gridResolution,
+                                                    timeSignatureDenominator = timeSignatureDenominator,
+                                                    gridStepMs = gridStepMs,
+                                                    ownerOffset = ownerOffset,
+                                                    scrollX = { hScrollState.value },
+                                                    onPreview = { delta ->
+                                                        dragPreview = DragPreview(
+                                                            noteId = edgeHit.note.id,
+                                                            isResize = true,
+                                                            deltaDurationMs = delta
                                                         )
-                                                    } else tappedAbsMs
-
-                                                    val containingClip = clips.firstOrNull { c ->
-                                                        snappedAbsMs >= c.offsetMs &&
-                                                            snappedAbsMs < c.offsetMs + c.effectiveLengthMs
-                                                    }
-                                                    if (containingClip != null) {
-                                                        val clipRelativeMs =
-                                                            (snappedAbsMs - containingClip.offsetMs).coerceAtLeast(0L)
-                                                        val noteDuration = stickyDuration
-                                                            ?: if (gridStepMs > 0) gridStepMs.toLong() else msPerBeat.toLong()
-                                                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                                    },
+                                                    onCommit = { delta ->
+                                                        dragPreview = null
+                                                        val newDuration =
+                                                            (edgeHit.note.durationMs + delta).coerceAtLeast(50L)
                                                         onAction(
-                                                            StudioAction.InlinePlaceNote(
-                                                                trackId, containingClip.clipId,
-                                                                tappedPitch.coerceIn(0, TOTAL_PITCHES - 1),
-                                                                clipRelativeMs,
-                                                                noteDuration.coerceAtLeast(50)
+                                                            StudioAction.InlineResizeNote(
+                                                                trackId, edgeHit.note.id, newDuration
                                                             )
                                                         )
-                                                    } else {
-                                                        gapFlickerRange = findEnclosingGap(
-                                                            snappedAbsMs, clips, totalMs
-                                                        )
-                                                        scope.launch {
-                                                            gapFlickerAlpha.snapTo(1f)
-                                                            gapFlickerAlpha.animateTo(0f, tween(160))
-                                                        }
+                                                        stickyDuration = newDuration
+                                                    },
+                                                    onCancel = { dragPreview = null }
+                                                )
+                                            } else {
+                                                handleNoteTap(
+                                                    note = edgeHit.note,
+                                                    downId = down.id,
+                                                    downTime = downTime,
+                                                    lastTapNoteId = lastTapNoteId,
+                                                    lastTapTimeMs = lastTapTimeMs,
+                                                    onSelect = { selectedNoteId = it },
+                                                    onDoubleTapDelete = {
+                                                        view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                                        onAction(StudioAction.InlineDeleteNote(trackId, it))
+                                                    },
+                                                    onUpdateLastTap = { id, ms ->
+                                                        lastTapNoteId = id
+                                                        lastTapTimeMs = ms
                                                     }
-                                                }
-                                                lastTapNoteId = hit?.note?.id
-                                                lastTapTimeMs = downTime
+                                                )
                                             }
-                                            break
                                         }
-
-                                        val delta = change.position - lastPos
-                                        if (!moved && (abs(delta.x) > touchSlop || abs(delta.y) > touchSlop)) {
-                                            moved = true
-                                            if (hit != null) {
+                                        bodyHit != null -> {
+                                            val longPress = awaitLongPressOrCancellation(down.id)
+                                            if (longPress != null) {
+                                                longPress.consume()
                                                 view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                                // Immediate visual latch — see the matching
+                                                // comment in the edge branch above.
+                                                dragPreview = DragPreview(noteId = bodyHit.note.id)
+                                                val ownerOffset = offsetByClipIdState.value[bodyHit.note.clipId] ?: 0L
+                                                handleMoveDragInline(
+                                                    anchor = bodyHit.note,
+                                                    pointerId = longPress.id,
+                                                    pxPerMs = pxPerMs,
+                                                    rowHeightPx = rowHeightPx,
+                                                    isSnapEnabled = isSnapEnabled,
+                                                    bpm = bpm,
+                                                    gridResolution = gridResolution,
+                                                    timeSignatureDenominator = timeSignatureDenominator,
+                                                    gridStepMs = gridStepMs,
+                                                    ownerOffset = ownerOffset,
+                                                    scrollX = { hScrollState.value },
+                                                    scrollY = { vScrollState.value },
+                                                    onPreview = { dMs, dPitch ->
+                                                        dragPreview = DragPreview(
+                                                            noteId = bodyHit.note.id,
+                                                            deltaMs = dMs,
+                                                            deltaPitch = dPitch
+                                                        )
+                                                    },
+                                                    onCommit = { dMs, dPitch ->
+                                                        dragPreview = null
+                                                        val newRawStart =
+                                                            (bodyHit.note.startMs + dMs).coerceAtLeast(0L)
+                                                        val newPitch =
+                                                            (bodyHit.note.pitch + dPitch).coerceIn(0, TOTAL_PITCHES - 1)
+                                                        onAction(
+                                                            StudioAction.InlineMoveNote(
+                                                                trackId, bodyHit.note.id, newRawStart, newPitch
+                                                            )
+                                                        )
+                                                    },
+                                                    onCancel = { dragPreview = null }
+                                                )
                                             } else {
-                                                val totalDx = change.position.x - downPos.x
-                                                val totalDy = change.position.y - downPos.y
-                                                emptyDragVertical = abs(totalDy) > abs(totalDx)
+                                                handleNoteTap(
+                                                    note = bodyHit.note,
+                                                    downId = down.id,
+                                                    downTime = downTime,
+                                                    lastTapNoteId = lastTapNoteId,
+                                                    lastTapTimeMs = lastTapTimeMs,
+                                                    onSelect = { selectedNoteId = it },
+                                                    onDoubleTapDelete = {
+                                                        view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                                        onAction(StudioAction.InlineDeleteNote(trackId, it))
+                                                    },
+                                                    onUpdateLastTap = { id, ms ->
+                                                        lastTapNoteId = id
+                                                        lastTapTimeMs = ms
+                                                    }
+                                                )
                                             }
                                         }
-
-                                        // Block parent vertical scroll on empty-area
-                                        // vertical drags. Note-hit drags already consume
-                                        // below; horizontal empty drags fall through to
-                                        // the wrapping horizontalScroll.
-                                        if (moved && hit == null && emptyDragVertical) {
-                                            change.consume()
-                                        }
-
-                                        if (moved && hit != null) {
-                                            change.consume()
-                                            lastPos = change.position
-
-                                            if (hitEdge) {
-                                                val deltaXpx = change.position.x - downPos.x
-                                                val deltaMs = (deltaXpx / pxPerMs).toLong()
-                                                val newDuration = (initialDurationMs + deltaMs).coerceAtLeast(50L)
-                                                val snappedDuration = if (isSnapEnabled && gridStepMs > 0) {
-                                                    val ownerOffset = offsetByClipId[hit.note.clipId] ?: 0L
-                                                    val newAbsEnd = ownerOffset + initialRawStartMs + newDuration
-                                                    val snappedEndAbs = MusicalTimeConverter.snapToGrid(
-                                                        newAbsEnd, bpm, gridResolution, timeSignatureDenominator
+                                        else -> {
+                                            // Empty area: long-press is unused; on
+                                            // cancellation, if the finger lifted
+                                            // without moving past slop, treat as a
+                                            // tap to place. Otherwise the parent
+                                            // horizontalScroll has already claimed
+                                            // the gesture.
+                                            val longPress = awaitLongPressOrCancellation(down.id)
+                                            if (longPress == null) {
+                                                val fingerLifted = currentEvent.changes
+                                                    .none { it.id == down.id && it.pressed }
+                                                if (fingerLifted) {
+                                                    handleEmptyTap(
+                                                        downPos = downPos,
+                                                        clips = clipsState.value,
+                                                        pxPerMs = pxPerMs,
+                                                        rowHeightPx = rowHeightPx,
+                                                        bpm = bpm,
+                                                        isSnapEnabled = isSnapEnabled,
+                                                        gridResolution = gridResolution,
+                                                        timeSignatureDenominator = timeSignatureDenominator,
+                                                        gridStepMs = gridStepMs,
+                                                        msPerBeat = msPerBeat,
+                                                        stickyDuration = stickyDuration,
+                                                        totalMs = totalMs,
+                                                        onPlace = { clipId, pitch, startMs, durationMs ->
+                                                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                                            onAction(
+                                                                StudioAction.InlinePlaceNote(
+                                                                    trackId, clipId, pitch, startMs, durationMs
+                                                                )
+                                                            )
+                                                        },
+                                                        onGapTap = { range ->
+                                                            gapFlickerRange = range
+                                                            scope.launch {
+                                                                gapFlickerAlpha.snapTo(1f)
+                                                                gapFlickerAlpha.animateTo(0f, tween(160))
+                                                            }
+                                                        }
                                                     )
-                                                    (snappedEndAbs - (ownerOffset + initialRawStartMs))
-                                                        .coerceAtLeast(gridStepMs.toLong().coerceAtLeast(50L))
-                                                } else newDuration
-                                                onAction(
-                                                    StudioAction.InlineResizeNote(
-                                                        trackId, hit.note.id, snappedDuration
-                                                    )
-                                                )
-                                                stickyDuration = snappedDuration
-                                            } else {
-                                                val deltaXpx = change.position.x - downPos.x
-                                                val deltaYpx = change.position.y - downPos.y
-                                                val deltaMs = (deltaXpx / pxPerMs).toLong()
-                                                val deltaRows = (deltaYpx / rowHeightPx).toInt()
-
-                                                val newRawStart = (initialRawStartMs + deltaMs).coerceAtLeast(0L)
-                                                val newPitch = (initialPitch - deltaRows).coerceIn(0, TOTAL_PITCHES - 1)
-
-                                                val ownerOffset = offsetByClipId[hit.note.clipId] ?: 0L
-                                                val snappedRaw = if (isSnapEnabled && gridStepMs > 0) {
-                                                    val absStart = ownerOffset + newRawStart
-                                                    val snappedAbs = MusicalTimeConverter.snapToGrid(
-                                                        absStart, bpm, gridResolution, timeSignatureDenominator
-                                                    )
-                                                    (snappedAbs - ownerOffset).coerceAtLeast(0L)
-                                                } else newRawStart
-
-                                                onAction(
-                                                    StudioAction.InlineMoveNote(
-                                                        trackId, hit.note.id, snappedRaw, newPitch
-                                                    )
-                                                )
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
                     ) {
-                        // 1) Grid: row stripes + beat/measure lines, full pitch range.
                         drawMiniRollGrid(
                             rowHeightPx = rowHeightPx,
                             totalMs = totalMs,
@@ -520,10 +534,8 @@ fun MiniPianoRoll(
                             blackKeyBgColor = surfaceColor
                         )
 
-                        // 2) Gap regions: darken non-clip areas at rest.
                         drawGapRegions(clips, totalMs, pxPerMs)
 
-                        // 3) Clip window rectangles + boundary lines.
                         drawClipWindows(
                             clips = clips,
                             selectedClipId = selectedClipId,
@@ -532,8 +544,6 @@ fun MiniPianoRoll(
                             boundaryColor = amberBoundary
                         )
 
-                        // 4) Notes — render at canvas-y based on pitch directly,
-                        // no octave-window filtering.
                         val bevelW = 3f
                         val cr = CornerRadius(3f, 3f)
                         for (clip in clips) {
@@ -544,17 +554,30 @@ fun MiniPianoRoll(
                             for (note in clip.notes) {
                                 if (note.startMs >= clip.effectiveLengthMs) continue
 
-                                val rowIdx = (TOTAL_PITCHES - 1) - note.pitch
+                                val preview = dragPreview
+                                val isPreview = preview != null && preview.noteId == note.id
+                                val effectiveStartMs = if (isPreview && !preview!!.isResize) {
+                                    (note.startMs + preview.deltaMs).coerceAtLeast(0L)
+                                } else note.startMs
+                                val effectivePitch = if (isPreview && !preview!!.isResize) {
+                                    (note.pitch + preview.deltaPitch).coerceIn(0, TOTAL_PITCHES - 1)
+                                } else note.pitch
+                                val effectiveDurationMs = if (isPreview && preview!!.isResize) {
+                                    (note.durationMs + preview.deltaDurationMs).coerceAtLeast(50L)
+                                } else note.durationMs
+
+                                val rowIdx = (TOTAL_PITCHES - 1) - effectivePitch
                                 if (rowIdx < 0 || rowIdx >= TOTAL_PITCHES) continue
 
-                                val absStartMs = clip.offsetMs + note.startMs
+                                val absStartMs = clip.offsetMs + effectiveStartMs
                                 val x = absStartMs * pxPerMs
-                                val rawW = (note.durationMs * pxPerMs).coerceAtLeast(6f)
+                                val rawW = (effectiveDurationMs * pxPerMs).coerceAtLeast(6f)
                                 val w = (minOf(x + rawW, clipEndPx) - x).coerceAtLeast(1f)
                                 val ny = rowIdx * rowHeightPx + 1f
                                 val h = rowHeightPx - 2f
 
-                                val isSelectedNote = note.id == selectedNoteId && isSelectedClip
+                                val isSelectedNote =
+                                    (note.id == selectedNoteId && isSelectedClip) || isPreview
                                 val fill = trackColor.copy(alpha = noteAlpha)
 
                                 if (isSelectedNote) {
@@ -574,7 +597,7 @@ fun MiniPianoRoll(
 
                                 if (isPlaying) {
                                     val noteEndCappedMs = minOf(
-                                        note.startMs + note.durationMs,
+                                        effectiveStartMs + effectiveDurationMs,
                                         clip.effectiveLengthMs
                                     )
                                     val absEndMs = clip.offsetMs + noteEndCappedMs
@@ -590,7 +613,6 @@ fun MiniPianoRoll(
                             }
                         }
 
-                        // 5) Gap-reject flicker.
                         val flickerAlpha = gapFlickerAlpha.value
                         val flickerRange = gapFlickerRange
                         if (flickerAlpha > 0f && flickerRange != null) {
@@ -602,7 +624,6 @@ fun MiniPianoRoll(
                             )
                         }
 
-                        // 6) Playhead sweep with gradient trail.
                         if (isPlaying) {
                             val playheadX = globalPositionMs * pxPerMs
                             if (playheadX in 0f..size.width) {
@@ -635,6 +656,185 @@ fun MiniPianoRoll(
                 }
             }
         }
+    }
+}
+
+/**
+ * Resize-drag loop. Called after long-press is confirmed. Tracks
+ * absolute X (canvas-x + scroll offset) so the drag delta stays correct
+ * even if the canvas pans during the drag.
+ */
+private suspend fun AwaitPointerEventScope.handleResizeDragInline(
+    anchor: MidiNoteEntity,
+    pointerId: PointerId,
+    pxPerMs: Float,
+    isSnapEnabled: Boolean,
+    bpm: Double,
+    gridResolution: Int,
+    timeSignatureDenominator: Int,
+    gridStepMs: Double,
+    ownerOffset: Long,
+    scrollX: () -> Int,
+    onPreview: (deltaDurationMs: Long) -> Unit,
+    onCommit: (deltaDurationMs: Long) -> Unit,
+    onCancel: () -> Unit
+) {
+    var startAbsX: Float? = null
+    var lastDelta = 0L
+    var completed = false
+
+    while (true) {
+        val event = awaitPointerEvent()
+        val change = event.changes.firstOrNull { it.id == pointerId } ?: break
+        if (startAbsX == null) startAbsX = change.position.x + scrollX()
+        if (!change.pressed) {
+            completed = true
+            change.consume()
+            break
+        }
+        change.consume()
+        val totalDx = change.position.x + scrollX() - startAbsX
+        val rawDelta = (totalDx / pxPerMs).toLong()
+        val snappedDelta = if (isSnapEnabled && gridStepMs > 0) {
+            val anchorEndAbs = ownerOffset + anchor.startMs + anchor.durationMs
+            val newEndAbs = anchorEndAbs + rawDelta
+            val snappedEndAbs = MusicalTimeConverter.snapToGrid(
+                newEndAbs, bpm, gridResolution, timeSignatureDenominator
+            )
+            snappedEndAbs - anchorEndAbs
+        } else rawDelta
+        lastDelta = snappedDelta
+        onPreview(snappedDelta)
+    }
+
+    if (completed) onCommit(lastDelta) else onCancel()
+}
+
+/**
+ * Move-drag loop. Like resize but tracks both axes. The drag is gated on
+ * the source clip's offset (the note's `clipId` always points to the
+ * source row under the linked-clip model), so dragging an instance's
+ * visual still produces the correct delta when applied to the shared
+ * underlying note.
+ */
+private suspend fun AwaitPointerEventScope.handleMoveDragInline(
+    anchor: MidiNoteEntity,
+    pointerId: PointerId,
+    pxPerMs: Float,
+    rowHeightPx: Float,
+    isSnapEnabled: Boolean,
+    bpm: Double,
+    gridResolution: Int,
+    timeSignatureDenominator: Int,
+    gridStepMs: Double,
+    ownerOffset: Long,
+    scrollX: () -> Int,
+    scrollY: () -> Int,
+    onPreview: (deltaMs: Long, deltaPitch: Int) -> Unit,
+    onCommit: (deltaMs: Long, deltaPitch: Int) -> Unit,
+    onCancel: () -> Unit
+) {
+    var startAbsX: Float? = null
+    var startAbsY: Float? = null
+    var lastDeltaMs = 0L
+    var lastDeltaPitch = 0
+    var completed = false
+
+    while (true) {
+        val event = awaitPointerEvent()
+        val change = event.changes.firstOrNull { it.id == pointerId } ?: break
+        if (startAbsX == null) {
+            startAbsX = change.position.x + scrollX()
+            startAbsY = change.position.y + scrollY()
+        }
+        if (!change.pressed) {
+            completed = true
+            change.consume()
+            break
+        }
+        change.consume()
+        val totalDx = change.position.x + scrollX() - startAbsX
+        val totalDy = change.position.y + scrollY() - startAbsY!!
+
+        val rawDeltaMs = (totalDx / pxPerMs).toLong()
+        val snappedDeltaMs = if (isSnapEnabled && gridStepMs > 0) {
+            val anchorAbs = ownerOffset + anchor.startMs
+            val snappedStartAbs = MusicalTimeConverter.snapToGrid(
+                anchorAbs + rawDeltaMs, bpm, gridResolution, timeSignatureDenominator
+            )
+            snappedStartAbs - anchorAbs
+        } else rawDeltaMs
+
+        val deltaPitch = -(totalDy / rowHeightPx).toInt()
+        val clampedNewPitch = (anchor.pitch + deltaPitch).coerceIn(0, TOTAL_PITCHES - 1)
+        val clampedDeltaPitch = clampedNewPitch - anchor.pitch
+
+        lastDeltaMs = snappedDeltaMs
+        lastDeltaPitch = clampedDeltaPitch
+        onPreview(snappedDeltaMs, clampedDeltaPitch)
+    }
+
+    if (completed) onCommit(lastDeltaMs, lastDeltaPitch) else onCancel()
+}
+
+private fun handleNoteTap(
+    note: MidiNoteEntity,
+    downId: PointerId,
+    downTime: Long,
+    lastTapNoteId: Long?,
+    lastTapTimeMs: Long,
+    onSelect: (Long?) -> Unit,
+    onDoubleTapDelete: (Long) -> Unit,
+    onUpdateLastTap: (Long?, Long) -> Unit
+) {
+    if (lastTapNoteId == note.id && downTime - lastTapTimeMs < DOUBLE_TAP_TIMEOUT_MS) {
+        onDoubleTapDelete(note.id)
+        onUpdateLastTap(null, 0L)
+    } else {
+        onSelect(note.id)
+        onUpdateLastTap(note.id, downTime)
+    }
+}
+
+private fun handleEmptyTap(
+    downPos: Offset,
+    clips: List<MidiClipUiState>,
+    pxPerMs: Float,
+    rowHeightPx: Float,
+    bpm: Double,
+    isSnapEnabled: Boolean,
+    gridResolution: Int,
+    timeSignatureDenominator: Int,
+    gridStepMs: Double,
+    msPerBeat: Double,
+    stickyDuration: Long?,
+    totalMs: Long,
+    onPlace: (clipId: Long, pitch: Int, startMs: Long, durationMs: Long) -> Unit,
+    onGapTap: (Pair<Long, Long>) -> Unit
+) {
+    val tappedAbsMs = (downPos.x / pxPerMs).toLong()
+    val tappedPitch = (TOTAL_PITCHES - 1) - (downPos.y / rowHeightPx).toInt()
+    val snappedAbsMs = if (isSnapEnabled && gridStepMs > 0) {
+        MusicalTimeConverter.snapToGrid(
+            tappedAbsMs, bpm, gridResolution, timeSignatureDenominator
+        )
+    } else tappedAbsMs
+
+    val containingClip = clips.firstOrNull { c ->
+        snappedAbsMs >= c.offsetMs && snappedAbsMs < c.offsetMs + c.effectiveLengthMs
+    }
+    if (containingClip != null) {
+        val clipRelativeMs = (snappedAbsMs - containingClip.offsetMs).coerceAtLeast(0L)
+        val noteDuration = stickyDuration
+            ?: if (gridStepMs > 0) gridStepMs.toLong() else msPerBeat.toLong()
+        onPlace(
+            containingClip.clipId,
+            tappedPitch.coerceIn(0, TOTAL_PITCHES - 1),
+            clipRelativeMs,
+            noteDuration.coerceAtLeast(50)
+        )
+    } else {
+        onGapTap(findEnclosingGap(snappedAbsMs, clips, totalMs))
     }
 }
 
@@ -750,33 +950,56 @@ private fun DrawScope.drawMiniRollGrid(
 }
 
 /**
- * Hit-test notes in absolute timeline + canvas-y coordinates. Pitch is
- * derived directly from canvas y (`pitch = (TOTAL_PITCHES - 1) - rowIdx`)
- * so the hit-test is independent of which 2-octave slice is currently
- * visible.
+ * Right-edge hit test in absolute timeline coords. Returns a hit if the
+ * tap is within [edgeZonePx] of a note's right edge (extending past the
+ * end of the note for a more reachable resize handle on short notes).
+ * Edge zone is clamped to the note's own start so a tiny note doesn't
+ * have its body swallowed by the edge zone.
  */
-private fun hitTestAbsolute(
-    x: Float,
-    y: Float,
+private fun findEdgeHitAbs(
+    position: Offset,
+    clips: List<MidiClipUiState>,
+    pxPerMs: Float,
+    rowHeightPx: Float,
+    edgeZonePx: Float
+): NoteHit? {
+    val pitch = (TOTAL_PITCHES - 1) - (position.y / rowHeightPx).toInt()
+    for (clip in clips) {
+        for (note in clip.notes) {
+            if (note.pitch != pitch) continue
+            if (note.startMs >= clip.effectiveLengthMs) continue
+            val absStart = clip.offsetMs + note.startMs
+            val startPx = absStart * pxPerMs
+            val endPx = (absStart + note.durationMs) * pxPerMs
+            val edgeStart = (endPx - edgeZonePx).coerceAtLeast(startPx)
+            if (position.x in edgeStart..(endPx + edgeZonePx)) {
+                return NoteHit(note, clip.offsetMs)
+            }
+        }
+    }
+    return null
+}
+
+/**
+ * Body hit test in absolute timeline coords. Strict bounds — does NOT
+ * extend past the note. Edge hits go through [findEdgeHitAbs] first so
+ * the edge zone wins in the overlap region.
+ */
+private fun findBodyHitAbs(
+    position: Offset,
     clips: List<MidiClipUiState>,
     pxPerMs: Float,
     rowHeightPx: Float
 ): NoteHit? {
+    val pitch = (TOTAL_PITCHES - 1) - (position.y / rowHeightPx).toInt()
+    val tapMs = (position.x / pxPerMs).toLong()
     for (clip in clips) {
         for (note in clip.notes) {
+            if (note.pitch != pitch) continue
             if (note.startMs >= clip.effectiveLengthMs) continue
-
-            val rowIdx = (TOTAL_PITCHES - 1) - note.pitch
-            if (rowIdx < 0 || rowIdx >= TOTAL_PITCHES) continue
-
             val absStart = clip.offsetMs + note.startMs
-            val noteX = absStart * pxPerMs
-            val noteY = rowIdx * rowHeightPx
-            val noteW = (note.durationMs * pxPerMs).coerceAtLeast(12f)
-
-            if (x >= noteX && x <= noteX + noteW &&
-                y >= noteY && y <= noteY + rowHeightPx
-            ) {
+            val absEnd = absStart + note.durationMs
+            if (tapMs in absStart..absEnd) {
                 return NoteHit(note, clip.offsetMs)
             }
         }
@@ -804,18 +1027,4 @@ private fun findEnclosingGap(
         gapStart = maxOf(gapStart, clip.offsetMs + clip.effectiveLengthMs)
     }
     return gapStart to totalMs
-}
-
-private fun isNearRightEdgeAbs(
-    x: Float,
-    hitClipOffsetMs: Long,
-    note: MidiNoteEntity,
-    pxPerMs: Float
-): Boolean {
-    val absStart = hitClipOffsetMs + note.startMs
-    val absEnd = absStart + note.durationMs
-    val noteStartPx = absStart * pxPerMs
-    val noteEndPx = absEnd * pxPerMs
-    val midpoint = (noteStartPx + noteEndPx) / 2f
-    return x >= midpoint && x <= noteEndPx + 12f
 }
