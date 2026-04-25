@@ -536,6 +536,13 @@ class StudioViewModel @Inject constructor(
         if (currentIdeaId == ideaId) return
         currentIdeaId = ideaId
 
+        // Clear any loop region carried over from the previous idea. The
+        // Kotlin state gets reset in the `_state.update` below; the native
+        // engine needs an explicit clear or it would keep looping playback
+        // inside the new idea's timeline (the new state shows no loop, but
+        // the engine still honors the old one).
+        audioEngine.clearLoopRegion()
+
         viewModelScope.launch {
             try {
                 val idea = ideaRepo.getIdeaById(ideaId)
@@ -557,7 +564,9 @@ class StudioViewModel @Inject constructor(
                         bpm = idea.bpm,
                         timeSignatureNumerator = idea.timeSignatureNumerator,
                         timeSignatureDenominator = idea.timeSignatureDenominator,
-                        gridResolution = idea.gridResolution
+                        gridResolution = idea.gridResolution,
+                        loopStartMs = null,
+                        loopEndMs = null
                     )
                 }
 
