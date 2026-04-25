@@ -26,14 +26,19 @@ void MidiSequencer::updateTracks(const std::vector<MidiTrackData>& tracks) {
 
     inactive->tracks = tracks;
     inactive->nextEventIndex.resize(tracks.size(), 0);
-    // Reset cursors
+    // Reset cursors -- the render thread will re-align them against the
+    // current render frame on its next tick() via the generation check.
     for (size_t i = 0; i < tracks.size(); ++i) {
         inactive->nextEventIndex[i] = 0;
     }
+    // Bump generation so the render thread notices the swap and calls
+    // resetToPosition(renderPos) before iterating events.
+    inactive->generation = ++generationCounter_;
 
     // Atomic swap
     active_.store(inactive, std::memory_order_release);
-    LOGD("MidiSequencer: updated %zu tracks", tracks.size());
+    LOGD("MidiSequencer: updated %zu tracks (gen=%llu)",
+         tracks.size(), (unsigned long long)inactive->generation);
 }
 
 const std::vector<NoteEvent>& MidiSequencer::tick(int64_t renderPos, int32_t chunkFrames) {
@@ -55,6 +60,33 @@ const std::vector<NoteEvent>& MidiSequencer::tick(int64_t renderPos, int32_t chu
     }
 
     Snapshot* snap = active_.load(std::memory_order_acquire);
+
+    // Detect a snapshot swap (a mid-playback edit) and realign per-track
+    // cursors to the current render frame. Without this the new
+    // snapshot's cursor=0 would point at events long behind the playhead
+    // and the framePos >= renderPos guard below would silently consume
+    // them all without firing anything.
+    if (snap->generation != lastSeenGeneration_) {
+        for (size_t t = 0; t < snap->tracks.size(); ++t) {
+            const auto& events = snap->tracks[t].events;
+            if (events.empty()) {
+                snap->nextEventIndex[t] = 0;
+                continue;
+            }
+            size_t lo = 0, hi = events.size();
+            while (lo < hi) {
+                size_t mid = lo + (hi - lo) / 2;
+                if (events[mid].framePos < renderPos) {
+                    lo = mid + 1;
+                } else {
+                    hi = mid;
+                }
+            }
+            snap->nextEventIndex[t] = lo;
+        }
+        lastSeenGeneration_ = snap->generation;
+    }
+
     int64_t chunkEnd = renderPos + chunkFrames;
 
     for (size_t t = 0; t < snap->tracks.size(); ++t) {

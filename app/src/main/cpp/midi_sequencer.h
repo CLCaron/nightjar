@@ -95,15 +95,34 @@ public:
 private:
     /**
      * Snapshot of all MIDI tracks. Double-buffered for lock-free reads.
+     *
+     * `generation` is bumped by every updateTracks() call so the render
+     * thread can detect a swap and re-align its per-track cursors to
+     * the current render frame. Without this, a mid-playback edit would
+     * land cursors at index 0 while renderPos has advanced, and the
+     * tick() guard at framePos >= renderPos would silently consume
+     * every event before the playhead -- new content placed in the
+     * already-played region of the timeline never gets fired on the
+     * next loop pass.
      */
     struct Snapshot {
         std::vector<MidiTrackData> tracks;
         std::vector<size_t> nextEventIndex;  // per-track cursor
+        uint64_t generation = 0;
     };
 
     Snapshot snapshotA_, snapshotB_;
     std::atomic<Snapshot*> active_{&snapshotA_};
     std::mutex editMutex_;
+    /** Monotonic counter incremented by updateTracks(). The next-issued
+     *  snapshot copies this into its `generation` before the atomic
+     *  swap. Render thread reads `active->generation` and compares to
+     *  [lastSeenGeneration_]. */
+    uint64_t generationCounter_ = 0;
+    /** Render-thread-local: the generation last observed during tick().
+     *  On a swap (mismatch), the render thread re-aligns cursors via
+     *  resetToPosition before iterating events. */
+    uint64_t lastSeenGeneration_ = 0;
 
     std::vector<NoteEvent> pendingEvents_;
 
