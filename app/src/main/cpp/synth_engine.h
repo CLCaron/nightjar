@@ -105,6 +105,18 @@ public:
     bool isRunning() const { return running_.load(std::memory_order_acquire); }
     bool isSoundFontLoaded() const { return soundFontLoaded_.load(std::memory_order_acquire); }
 
+private:
+    /** Re-issue the per-channel program changes for every active MIDI
+     *  track from the render thread. Called on flush, play-after-pause,
+     *  and loop-wrap so the first noteOn at the new position lands on
+     *  the correct preset. The original updateMidiTracks() call sends
+     *  program changes from the UI thread, which races with the render
+     *  thread firing scheduled noteOns -- without this re-arm, the
+     *  first pass of any clip after a transport transition can sound
+     *  as Acoustic Grand. */
+    void reissueProgramChanges();
+public:
+
     // ── Step sequencer control ──────────────────────────────────────────
 
     /** Replace the drum pattern (legacy single-pattern). Called from UI thread via JNI. */

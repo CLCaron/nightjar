@@ -3,6 +3,7 @@
 #include "step_sequencer.h"  // for NoteEvent
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <vector>
 
@@ -80,6 +81,16 @@ public:
      * Used by AudioEngine to determine total timeline length.
      */
     int64_t getMaxEndFrame() const;
+
+    /**
+     * Snapshot the current per-track (channel, program) assignments.
+     * Render-thread-callable lock-free read of the active snapshot. Used
+     * by SynthEngine to re-issue program changes on flush / play /
+     * loop-wrap so the first noteOn after a transport transition lands
+     * at the correct preset.
+     */
+    void forEachProgramAssignment(
+        const std::function<void(int channel, int program)>& fn) const;
 
 private:
     /**

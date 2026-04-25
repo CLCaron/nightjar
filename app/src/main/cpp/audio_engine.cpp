@@ -163,6 +163,16 @@ void AudioEngine::play() {
 
     transport_->posFrames.store(startPos, std::memory_order_relaxed);
     transport_->pendingStartPos.store(startPos, std::memory_order_release);
+    // Defensive: always request a flush before transitioning to playing.
+    // The flush branch in the synth render thread re-aligns the cursor
+    // against the start position, all-sounds-off any leftover voices,
+    // and re-issues per-channel program changes -- the latter closes a
+    // race where the first scheduled noteOn after start could land
+    // before FluidSynth has applied the program from updateMidiTracks,
+    // making the first pass sound as Acoustic Grand regardless of the
+    // selected instrument. Also closes the suspected pause->seek->play
+    // silence race where the wasPlaying transition was missed.
+    if (synthEngine_) synthEngine_->requestFlush();
     transport_->playing.store(true, std::memory_order_release);
     LOGD("AudioEngine: play (pos=%lldms, countIn=%lldms)",
          (long long)framesToMs(startPos), (long long)framesToMs(countIn));

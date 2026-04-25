@@ -140,6 +140,13 @@ void SynthEngine::programChange(int channel, int program) {
     }
 }
 
+void SynthEngine::reissueProgramChanges() {
+    if (!synth_) return;
+    midiSequencer_.forEachProgramAssignment([this](int channel, int program) {
+        fluid_synth_program_change(FS_SYNTH, channel, program);
+    });
+}
+
 void SynthEngine::setVolume(float volume) {
     volume_.store(volume, std::memory_order_relaxed);
 }
@@ -307,7 +314,7 @@ void SynthEngine::renderThreadFunc() {
     float renderBuf[kChunkSamples];
 
     while (running_.load(std::memory_order_acquire)) {
-        // Handle flush (triggered by seek/loop)
+        // Handle flush (triggered by seek/loop/play)
         if (flushRequested_.load(std::memory_order_acquire)) {
             ringBuffer_.reset();
             if (synth_) {
@@ -319,6 +326,12 @@ void SynthEngine::renderThreadFunc() {
             metronome_.reset();
             renderPos_ = transport_.posFrames.load(std::memory_order_relaxed);
             midiSequencer_.resetToPosition(renderPos_);
+            // Re-arm per-channel programs from the render thread so the
+            // first noteOn after the flush lands on the correct preset.
+            // The all-sounds-off above clears voices but the channel's
+            // preset assignment can drift if updateMidiTracks raced with
+            // the previous run -- this guarantees a clean baseline.
+            reissueProgramChanges();
             flushRequested_.store(false, std::memory_order_release);
         }
 
@@ -430,6 +443,10 @@ void SynthEngine::renderThreadFunc() {
             sequencer_.reset();
             midiSequencer_.resetToPosition(loopStart);
             metronome_.reset();
+            // Re-arm programs at the loop boundary so the first noteOn
+            // of the next iteration lands on the correct preset, even
+            // if a stray program-change drifted the channel state.
+            reissueProgramChanges();
 
             // Tick sequencers for the overshoot frames so events at
             // loopStart are not skipped on loop wrap

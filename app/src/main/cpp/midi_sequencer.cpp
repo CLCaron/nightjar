@@ -121,6 +121,15 @@ void MidiSequencer::resetToPosition(int64_t posFrames) {
     }
 }
 
+void MidiSequencer::forEachProgramAssignment(
+        const std::function<void(int, int)>& fn) const {
+    const Snapshot* snap = active_.load(std::memory_order_acquire);
+    for (const auto& track : snap->tracks) {
+        if (track.muted) continue;
+        fn(track.channel, track.program);
+    }
+}
+
 int64_t MidiSequencer::getMaxEndFrame() const {
     const Snapshot* snap = active_.load(std::memory_order_acquire);
     int64_t maxFrame = 0;
