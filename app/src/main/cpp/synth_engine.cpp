@@ -338,45 +338,50 @@ void SynthEngine::renderThreadFunc() {
         }
         wasPlaying_ = playing;
 
-        // Don't render while paused -- prevents stale audio accumulating
-        if (!playing) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
-            continue;
-        }
-
-        // If the ring buffer is nearly full, sleep to avoid wasted CPU
+        // Buffer-full backpressure runs in both playing and paused states.
+        // The render thread keeps cycling when paused so direct synth calls
+        // (preview notes via synthNoteOn) produce audible output without
+        // requiring transport.playing -- otherwise FluidSynth voice changes
+        // would never reach the audio ring buffer.
         size_t buffered = ringBuffer_.availableToRead();
         if (buffered + kChunkSamples > kSynthRingBufferCapacity) {
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
             continue;
         }
 
-        // Collect timed events from both sequencers
+        // Collect timed events from sequencers ONLY while playing. When
+        // paused we still render audio (so previewed voices are heard) but
+        // don't advance the timeline or fire scheduled events.
         mergedEvents_.clear();
 
-        if (sequencerEnabled_.load(std::memory_order_relaxed)) {
-            double bpm = transport_.bpm.load(std::memory_order_relaxed);
-            const auto& events = sequencer_.tick(
-                renderPos_, kSynthRenderChunkFrames, bpm);
-            mergedEvents_.insert(mergedEvents_.end(), events.begin(), events.end());
-        }
+        if (playing) {
+            if (sequencerEnabled_.load(std::memory_order_relaxed)) {
+                double bpm = transport_.bpm.load(std::memory_order_relaxed);
+                const auto& events = sequencer_.tick(
+                    renderPos_, kSynthRenderChunkFrames, bpm);
+                mergedEvents_.insert(mergedEvents_.end(), events.begin(), events.end());
+            }
 
-        if (midiSequencerEnabled_.load(std::memory_order_relaxed)) {
-            const auto& midiEvents = midiSequencer_.tick(
-                renderPos_, kSynthRenderChunkFrames);
-            mergedEvents_.insert(mergedEvents_.end(), midiEvents.begin(), midiEvents.end());
-        }
+            if (midiSequencerEnabled_.load(std::memory_order_relaxed)) {
+                const auto& midiEvents = midiSequencer_.tick(
+                    renderPos_, kSynthRenderChunkFrames);
+                mergedEvents_.insert(mergedEvents_.end(), midiEvents.begin(), midiEvents.end());
+            }
 
-        // Metronome tick (uses its own enabled_ atomic)
-        if (metronome_.isEnabled()) {
-            double bpm = transport_.bpm.load(std::memory_order_relaxed);
-            const auto& metEvents = metronome_.tick(
-                renderPos_, kSynthRenderChunkFrames, bpm);
-            mergedEvents_.insert(mergedEvents_.end(), metEvents.begin(), metEvents.end());
+            // Metronome tick (uses its own enabled_ atomic)
+            if (metronome_.isEnabled()) {
+                double bpm = transport_.bpm.load(std::memory_order_relaxed);
+                const auto& metEvents = metronome_.tick(
+                    renderPos_, kSynthRenderChunkFrames, bpm);
+                mergedEvents_.insert(mergedEvents_.end(), metEvents.begin(), metEvents.end());
+            }
         }
 
         // Sub-buffer scheduling: split FluidSynth render at event boundaries
-        // so noteOn/noteOff land at the exact sample position
+        // so noteOn/noteOff land at the exact sample position. With an empty
+        // mergedEvents_ vector (paused with no preview voices) the synth
+        // renders silence over the full chunk; with active preview voices
+        // it renders their decay tail.
         if (!renderSubBuffer(renderBuf, kSynthRenderChunkFrames, mergedEvents_)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
             continue;
@@ -384,7 +389,13 @@ void SynthEngine::renderThreadFunc() {
 
         ringBuffer_.write(renderBuf, kChunkSamples);
 
-        // Advance render position (playing is guaranteed true here)
+        // Timeline advance + loop detection are playback-only: when paused
+        // the render position stays put so a subsequent play() resumes
+        // exactly where the user left off.
+        if (!playing) {
+            continue;
+        }
+
         renderPos_ += kSynthRenderChunkFrames;
 
         // Loop detection: wrap render position at loop boundary so the ring
