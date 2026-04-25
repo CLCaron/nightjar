@@ -373,6 +373,12 @@ fun MiniPianoRoll(
                                     var moved = false
                                     var lastPos = downPos
                                     val touchSlop = viewConfiguration.touchSlop
+                                    // For empty-area drags (no note hit), once the gesture
+                                    // crosses the slop we lock its dominant axis. Vertical
+                                    // drags get consumed so the parent Studio's vertical
+                                    // scroll can't steal them; horizontal drags pass
+                                    // through so the wrapping horizontalScroll still works.
+                                    var emptyDragVertical = false
 
                                     while (true) {
                                         val event = awaitPointerEvent()
@@ -434,7 +440,19 @@ fun MiniPianoRoll(
                                             moved = true
                                             if (hit != null) {
                                                 view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                            } else {
+                                                val totalDx = change.position.x - downPos.x
+                                                val totalDy = change.position.y - downPos.y
+                                                emptyDragVertical = abs(totalDy) > abs(totalDx)
                                             }
+                                        }
+
+                                        // Block parent vertical scroll on empty-area
+                                        // vertical drags. Note-hit drags already consume
+                                        // below; horizontal empty drags fall through to
+                                        // the wrapping horizontalScroll.
+                                        if (moved && hit == null && emptyDragVertical) {
+                                            change.consume()
                                         }
 
                                         if (moved && hit != null) {
