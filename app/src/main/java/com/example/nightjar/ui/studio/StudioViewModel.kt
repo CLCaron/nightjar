@@ -423,13 +423,11 @@ class StudioViewModel @Inject constructor(
             is StudioAction.OpenDrumEditor -> openDrumEditor(action.trackId, action.clipId)
             is StudioAction.OpenPianoRoll -> openPianoRoll(action.trackId, action.clipId)
             is StudioAction.ShowInstrumentPicker -> {
-                _state.update { it.copy(showInstrumentPickerForTrackId = action.trackId) }
-            }
-            StudioAction.DismissInstrumentPicker -> {
-                _state.update { it.copy(showInstrumentPickerForTrackId = null) }
+                viewModelScope.launch {
+                    _effects.emit(StudioEffect.NavigateToInstrumentPicker(action.trackId))
+                }
             }
             is StudioAction.SetMidiInstrument -> setMidiInstrument(action.trackId, action.program)
-            is StudioAction.PreviewInstrument -> previewInstrument(action.program)
 
             // MIDI clips
             is StudioAction.DuplicateMidiClip -> duplicateMidiClip(action.trackId, action.clipId, action.linked)
@@ -2521,8 +2519,7 @@ class StudioViewModel @Inject constructor(
                         midiTracks = st.midiTracks + (trackId to existing.copy(
                             midiProgram = program,
                             instrumentName = gmInstrumentName(program)
-                        )),
-                        showInstrumentPickerForTrackId = null
+                        ))
                     )
                 }
                 // Reload tracks from DB to update track entity midiProgram
@@ -2531,21 +2528,6 @@ class StudioViewModel @Inject constructor(
             } catch (e: Exception) {
                 _effects.emit(StudioEffect.ShowError("Failed to change instrument"))
             }
-        }
-    }
-
-    /** Preview an instrument by playing a short note on the preview channel. */
-    private fun previewInstrument(program: Int) {
-        previewNoteOffJob?.cancel()
-        audioEngine.previewNote(
-            channel = previewChannel,
-            pitch = 60,
-            velocity = 80,
-            program = program
-        )
-        previewNoteOffJob = viewModelScope.launch {
-            delay(300L)
-            audioEngine.synthNoteOff(previewChannel, 60)
         }
     }
 

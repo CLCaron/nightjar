@@ -17,6 +17,8 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.*
 import androidx.navigation.navArgument
 import com.example.nightjar.ui.studio.DrumEditorScreen
+import com.example.nightjar.ui.studio.InstrumentPickerKeys
+import com.example.nightjar.ui.studio.InstrumentPickerScreen
 import com.example.nightjar.ui.studio.PianoRollScreen
 import com.example.nightjar.ui.studio.StudioScreen
 import com.example.nightjar.ui.record.RecordScreen
@@ -81,6 +83,7 @@ private object Routes {
     const val STUDIO = "studio"
     const val PIANO_ROLL = "piano_roll"
     const val DRUM_EDITOR = "drum_editor"
+    const val INSTRUMENT_PICKER = "instrument_picker"
     const val SETTINGS = "settings"
 }
 
@@ -128,6 +131,13 @@ fun NightjarApp(onThemeChanged: (String) -> Unit) {
             arguments = listOf(navArgument("ideaId") { type = NavType.LongType })
         ) { entry ->
             val ideaId = entry.arguments?.getLong("ideaId") ?: -1L
+            val savedStateHandle = entry.savedStateHandle
+            val pendingTrackId by savedStateHandle
+                .getStateFlow<Long?>(InstrumentPickerKeys.TRACK_ID, null)
+                .collectAsState()
+            val pendingProgram by savedStateHandle
+                .getStateFlow<Int?>(InstrumentPickerKeys.PROGRAM, null)
+                .collectAsState()
             StudioScreen(
                 ideaId = ideaId,
                 onBack = { navController.popBackStack() },
@@ -136,6 +146,15 @@ fun NightjarApp(onThemeChanged: (String) -> Unit) {
                 },
                 onOpenDrumEditor = { trackId, clipId ->
                     navController.navigate("${Routes.DRUM_EDITOR}/$trackId/$ideaId/$clipId")
+                },
+                onOpenInstrumentPicker = { trackId ->
+                    navController.navigate("${Routes.INSTRUMENT_PICKER}/$trackId/$ideaId")
+                },
+                pendingInstrumentSelectionTrackId = pendingTrackId,
+                pendingInstrumentSelectionProgram = pendingProgram,
+                onPendingInstrumentSelectionConsumed = {
+                    savedStateHandle[InstrumentPickerKeys.TRACK_ID] = null
+                    savedStateHandle[InstrumentPickerKeys.PROGRAM] = null
                 }
             )
         }
@@ -161,6 +180,22 @@ fun NightjarApp(onThemeChanged: (String) -> Unit) {
         ) {
             DrumEditorScreen(
                 onBack = { navController.popBackStack() }
+            )
+        }
+        composable(
+            route = "${Routes.INSTRUMENT_PICKER}/{trackId}/{ideaId}",
+            arguments = listOf(
+                navArgument("trackId") { type = NavType.LongType },
+                navArgument("ideaId") { type = NavType.LongType }
+            )
+        ) {
+            InstrumentPickerScreen(
+                onBack = { navController.popBackStack() },
+                onProgramSelected = { trackId, program ->
+                    val parent = navController.previousBackStackEntry?.savedStateHandle
+                    parent?.set(InstrumentPickerKeys.TRACK_ID, trackId)
+                    parent?.set(InstrumentPickerKeys.PROGRAM, program)
+                }
             )
         }
         composable(Routes.SETTINGS) {

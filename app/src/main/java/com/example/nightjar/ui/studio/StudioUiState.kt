@@ -188,7 +188,6 @@ data class StudioUiState(
     val midiTracks: Map<Long, MidiTrackUiState> = emptyMap(),
     val midiClipDragState: MidiClipDragState? = null,
     val expandedClipState: ExpandedClipState? = null,
-    val showInstrumentPickerForTrackId: Long? = null,
     val isMetronomeEnabled: Boolean = false,
     val metronomeVolume: Float = 0.7f,
     val countInBars: Int = 0,
@@ -280,7 +279,6 @@ data class StudioUiState(
                 midiTracks == other.midiTracks &&
                 midiClipDragState == other.midiClipDragState &&
                 expandedClipState == other.expandedClipState &&
-                showInstrumentPickerForTrackId == other.showInstrumentPickerForTrackId &&
                 isMetronomeEnabled == other.isMetronomeEnabled &&
                 metronomeVolume == other.metronomeVolume &&
                 countInBars == other.countInBars &&
@@ -351,7 +349,6 @@ data class StudioUiState(
         result = 31 * result + midiTracks.hashCode()
         result = 31 * result + (midiClipDragState?.hashCode() ?: 0)
         result = 31 * result + (expandedClipState?.hashCode() ?: 0)
-        result = 31 * result + (showInstrumentPickerForTrackId?.hashCode() ?: 0)
         result = 31 * result + isMetronomeEnabled.hashCode()
         result = 31 * result + metronomeVolume.hashCode()
         result = 31 * result + countInBars.hashCode()
@@ -497,9 +494,7 @@ sealed interface StudioAction {
     data class OpenDrumEditor(val trackId: Long, val clipId: Long? = null) : StudioAction
     data class OpenPianoRoll(val trackId: Long, val clipId: Long? = null) : StudioAction
     data class ShowInstrumentPicker(val trackId: Long) : StudioAction
-    data object DismissInstrumentPicker : StudioAction
     data class SetMidiInstrument(val trackId: Long, val program: Int) : StudioAction
-    data class PreviewInstrument(val program: Int) : StudioAction
 
     // MIDI clips
     data class DuplicateMidiClip(val trackId: Long, val clipId: Long, val linked: Boolean = false) : StudioAction
@@ -561,6 +556,7 @@ sealed interface StudioEffect {
     data object RequestMicPermission : StudioEffect
     data class NavigateToPianoRoll(val trackId: Long, val clipId: Long) : StudioEffect
     data class NavigateToDrumEditor(val trackId: Long, val clipId: Long = 0L) : StudioEffect
+    data class NavigateToInstrumentPicker(val trackId: Long) : StudioEffect
 }
 
 /** Available track types for the "Add Track" bottom sheet. */

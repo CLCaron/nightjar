@@ -105,7 +105,11 @@ fun StudioScreen(
     ideaId: Long,
     onBack: () -> Unit,
     onOpenPianoRoll: (trackId: Long, clipId: Long) -> Unit = { _, _ -> },
-    onOpenDrumEditor: (trackId: Long, clipId: Long) -> Unit = { _, _ -> }
+    onOpenDrumEditor: (trackId: Long, clipId: Long) -> Unit = { _, _ -> },
+    onOpenInstrumentPicker: (trackId: Long) -> Unit = {},
+    pendingInstrumentSelectionTrackId: Long? = null,
+    pendingInstrumentSelectionProgram: Int? = null,
+    onPendingInstrumentSelectionConsumed: () -> Unit = {}
 ) {
     val vm: StudioViewModel = hiltViewModel()
     val context = LocalContext.current
@@ -113,6 +117,17 @@ fun StudioScreen(
 
     LaunchedEffect(ideaId) {
         vm.onAction(StudioAction.Load(ideaId))
+    }
+
+    // When the instrument picker pops back with a fresh selection, commit it
+    // through the existing SetMidiInstrument path (DB write + engine resync).
+    LaunchedEffect(pendingInstrumentSelectionTrackId, pendingInstrumentSelectionProgram) {
+        val tid = pendingInstrumentSelectionTrackId
+        val program = pendingInstrumentSelectionProgram
+        if (tid != null && program != null) {
+            vm.onAction(StudioAction.SetMidiInstrument(tid, program))
+            onPendingInstrumentSelectionConsumed()
+        }
     }
 
     val state by vm.state.collectAsState()
@@ -276,6 +291,9 @@ fun StudioScreen(
                 }
                 is StudioEffect.NavigateToDrumEditor -> {
                     onOpenDrumEditor(effect.trackId, effect.clipId)
+                }
+                is StudioEffect.NavigateToInstrumentPicker -> {
+                    onOpenInstrumentPicker(effect.trackId)
                 }
             }
         }
@@ -504,21 +522,6 @@ fun StudioScreen(
                 }
             }
         }
-    }
-
-    if (state.showInstrumentPickerForTrackId != null) {
-        val trackId = state.showInstrumentPickerForTrackId!!
-        val currentProgram = state.midiTracks[trackId]?.midiProgram ?: 0
-        InstrumentPicker(
-            currentProgram = currentProgram,
-            onSelect = { program ->
-                vm.onAction(StudioAction.SetMidiInstrument(trackId, program))
-            },
-            onPreview = { program ->
-                vm.onAction(StudioAction.PreviewInstrument(program))
-            },
-            onDismiss = { vm.onAction(StudioAction.DismissInstrumentPicker) }
-        )
     }
 
     if (state.confirmingDeleteTrackId != null) {
