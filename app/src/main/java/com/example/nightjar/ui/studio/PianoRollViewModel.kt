@@ -30,6 +30,9 @@ data class PianoRollClipInfo(
     val endMs: Long
 )
 
+/** Sub-panel modes for the full-screen piano roll's tab bar. */
+enum class PianoRollTab { TOOLS, SCALE, EDIT, INSTR }
+
 /**
  * Per-note metadata used by move/resize operations.
  *
@@ -83,6 +86,8 @@ data class PianoRollState(
     val isChordMode: Boolean = false,
     val chordType: MusicalScaleHelper.ChordType = MusicalScaleHelper.ChordType.TRIAD,
     val diatonicChords: List<MusicalScaleHelper.ChordInfo> = emptyList(),
+    // Tab/sub-panel
+    val activeTab: PianoRollTab = PianoRollTab.TOOLS,
     val isLoading: Boolean = true
 )
 
@@ -109,6 +114,8 @@ sealed interface PianoRollAction {
     data class SetScaleType(val type: MusicalScaleHelper.ScaleType) : PianoRollAction
     data object ToggleChordMode : PianoRollAction
     data object CycleChordType : PianoRollAction
+    // Tab/sub-panel
+    data class SwitchTab(val tab: PianoRollTab) : PianoRollAction
 }
 
 /** One-shot effects from the piano roll. */
@@ -334,6 +341,8 @@ class PianoRollViewModel @Inject constructor(
             is PianoRollAction.SetScaleType -> setScaleType(action.type)
             PianoRollAction.ToggleChordMode -> toggleChordMode()
             PianoRollAction.CycleChordType -> cycleChordType()
+            // Tab/sub-panel
+            is PianoRollAction.SwitchTab -> _state.update { it.copy(activeTab = action.tab) }
         }
     }
 

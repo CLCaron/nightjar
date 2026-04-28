@@ -24,8 +24,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Tune
 import com.example.nightjar.ui.components.NjIcons
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -68,7 +72,9 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.example.nightjar.audio.MusicalTimeConverter
 import com.example.nightjar.data.db.entity.MidiNoteEntity
 import com.example.nightjar.ui.components.NjButton
+import com.example.nightjar.ui.theme.IbmPlexMono
 import com.example.nightjar.ui.theme.NjBg
+import com.example.nightjar.ui.theme.NjMuted
 import com.example.nightjar.ui.theme.NjMuted2
 import com.example.nightjar.ui.theme.NjOnBg
 import com.example.nightjar.ui.theme.NjAmber
@@ -309,10 +315,18 @@ fun PianoRollScreen(
         ScaleChordControls(state = state, onAction = viewModel::onAction)
 
         // Diatonic chord reference strip (visible when scale is enabled)
+        // PHASE 5 TODO: relocate this to sit just below the new top bar.
         ChordReferenceStrip(chords = state.diatonicChords)
 
-        // Piano keys + Grid
-        Row(modifier = Modifier.fillMaxSize()) {
+        // PHASE 7 TODO: replace with the real adaptive timeline ruler.
+        PianoRollTimelineRulerPlaceholder()
+
+        // Piano keys + Grid -- weight(1f) so the placeholders below sit at the bottom.
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+        ) {
             // Piano keys column (scrolls vertically with the grid)
             Box(
                 modifier = Modifier
@@ -569,6 +583,21 @@ fun PianoRollScreen(
                 }
             }
         }
+
+        // PHASE 6 TODO: replace with the real velocity strip (selected-only edit
+        // when EDIT > VELOC is latched).
+        PianoRollVelocityStripPlaceholder()
+
+        // Tab bar -- four MODE buttons. Phases 4-6 + 10 fill in their respective
+        // sub-panels.
+        PianoRollTabBar(
+            activeTab = state.activeTab,
+            onTabSelect = { viewModel.onAction(PianoRollAction.SwitchTab(it)) }
+        )
+
+        // PHASE 3 TODO: real two-row sub-panel scaffolding (controls top, grid
+        // chips bottom). For now: a single placeholder per active tab.
+        PianoRollSubPanelPlaceholder(activeTab = state.activeTab)
     }
 }
 
@@ -1385,6 +1414,173 @@ private suspend fun PointerInputScope.detectPinchZoom(
                 break
             }
             // Single finger, not pinching -- don't consume, let scroll handle it
+        }
+    }
+}
+
+// ── Phase 1 skeleton placeholders ───────────────────────────────────
+// These render the new layout shape so the screen reads as the redesign
+// in progress. Phases 2-10 progressively replace each with real behavior.
+
+/** PHASE 7 will replace this with the adaptive timeline ruler. */
+@Composable
+private fun PianoRollTimelineRulerPlaceholder() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(24.dp)
+            .background(NjPanelInset),
+        contentAlignment = Alignment.CenterEnd
+    ) {
+        Text(
+            text = "RULER",
+            fontFamily = IbmPlexMono,
+            fontSize = 9.sp,
+            color = NjMuted2.copy(alpha = 0.6f),
+            modifier = Modifier.padding(horizontal = 8.dp)
+        )
+    }
+}
+
+/** PHASE 6 will replace this with the real velocity strip. */
+@Composable
+private fun PianoRollVelocityStripPlaceholder() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(36.dp)
+            .background(NjSurface)
+    ) {
+        // VELOC label sits in the same 48dp column as the piano keys above.
+        Box(
+            modifier = Modifier
+                .width(KEYS_WIDTH_DP.dp)
+                .fillMaxHeight(),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "VELOC",
+                fontFamily = IbmPlexMono,
+                fontSize = 9.sp,
+                color = NjMuted2.copy(alpha = 0.7f),
+                letterSpacing = 0.5.sp
+            )
+        }
+        // Bar strip area -- in phase 6 this scrolls horizontally in lockstep
+        // with the grid via shared horizontalScrollState.
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .background(NjPanelInset)
+        )
+    }
+}
+
+/** Tab bar -- four MODE buttons. Functional in phase 1; sub-panels fill in
+ *  in phases 4-6 + 10. */
+@Composable
+private fun PianoRollTabBar(
+    activeTab: PianoRollTab,
+    onTabSelect: (PianoRollTab) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(NjSurface)
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        NjButton(
+            text = "",
+            icon = Icons.Filled.ContentCut,
+            caption = "TOOLS",
+            onClick = { onTabSelect(PianoRollTab.TOOLS) },
+            isActive = activeTab == PianoRollTab.TOOLS,
+            ledColor = NjAmber,
+            modifier = Modifier.weight(1f)
+        )
+        NjButton(
+            text = "",
+            icon = Icons.Filled.MusicNote,
+            caption = "SCALE",
+            onClick = { onTabSelect(PianoRollTab.SCALE) },
+            isActive = activeTab == PianoRollTab.SCALE,
+            ledColor = NjAmber,
+            modifier = Modifier.weight(1f)
+        )
+        NjButton(
+            text = "",
+            icon = Icons.Filled.Tune,
+            caption = "EDIT",
+            onClick = { onTabSelect(PianoRollTab.EDIT) },
+            isActive = activeTab == PianoRollTab.EDIT,
+            ledColor = NjAmber,
+            modifier = Modifier.weight(1f)
+        )
+        NjButton(
+            text = "",
+            icon = Icons.Filled.Edit,
+            caption = "INSTR",
+            onClick = { onTabSelect(PianoRollTab.INSTR) },
+            isActive = activeTab == PianoRollTab.INSTR,
+            ledColor = NjAmber,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+/** PHASE 3 will replace this with the real two-row sub-panel scaffolding
+ *  (active tab's controls on top, persistent grid chips on the bottom). */
+@Composable
+private fun PianoRollSubPanelPlaceholder(activeTab: PianoRollTab) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(NjBg)
+    ) {
+        // Top row: the active tab's controls placeholder.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .background(NjSurface)
+                .padding(horizontal = 12.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            Text(
+                text = "${activeTab.name} PANEL — placeholder",
+                fontFamily = IbmPlexMono,
+                fontSize = 10.sp,
+                color = NjMuted
+            )
+        }
+        // Bottom row: grid-resolution chips placeholder (phase 3 wires them up).
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(36.dp)
+                .background(NjPanelInset)
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            for (label in listOf("1/2", "1/4", "1/8", "1/16", "1/32")) {
+                Box(
+                    modifier = Modifier
+                        .height(24.dp)
+                        .background(NjSurface)
+                        .padding(horizontal = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = label,
+                        fontFamily = IbmPlexMono,
+                        fontSize = 10.sp,
+                        color = NjMuted2.copy(alpha = 0.6f)
+                    )
+                }
+            }
         }
     }
 }
