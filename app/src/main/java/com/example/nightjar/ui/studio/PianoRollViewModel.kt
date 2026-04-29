@@ -85,6 +85,8 @@ data class PianoRollState(
     val loopStartMs: Long? = null,
     val loopEndMs: Long? = null,
     val isLoopEnabled: Boolean = false,
+    // EDIT > VELOC latch: when true, the velocity strip becomes draggable for selected notes.
+    val isVelocityEditMode: Boolean = false,
     // Scale & chord
     val scaleRoot: Int = 0,
     val scaleType: MusicalScaleHelper.ScaleType = MusicalScaleHelper.ScaleType.MAJOR,
@@ -118,6 +120,10 @@ sealed interface PianoRollAction {
     data object Pause : PianoRollAction
     data class SeekTo(val positionMs: Long) : PianoRollAction
     data object Restart : PianoRollAction
+    // EDIT panel
+    data object QuantizeSelected : PianoRollAction
+    data object ToggleVelocityEditMode : PianoRollAction
+    data class SetNoteVelocities(val newVelocities: Map<Long, Float>) : PianoRollAction
     // Scale & chord
     data object ToggleScale : PianoRollAction
     data class SetScaleRoot(val root: Int) : PianoRollAction
@@ -350,6 +356,10 @@ class PianoRollViewModel @Inject constructor(
             PianoRollAction.Pause -> audioEngine.pause()
             is PianoRollAction.SeekTo -> audioEngine.seekTo(action.positionMs)
             PianoRollAction.Restart -> restart()
+            PianoRollAction.QuantizeSelected -> quantizeSelected()
+            PianoRollAction.ToggleVelocityEditMode ->
+                _state.update { it.copy(isVelocityEditMode = !it.isVelocityEditMode) }
+            is PianoRollAction.SetNoteVelocities -> setNoteVelocities(action.newVelocities)
             // Scale & chord
             PianoRollAction.ToggleScale -> toggleScale()
             is PianoRollAction.SetScaleRoot -> setScaleRoot(action.root)
@@ -770,6 +780,12 @@ class PianoRollViewModel @Inject constructor(
                     executeOperation(sub, reverse)
                 }
             }
+            is NoteOperation.VelocityBatch -> {
+                for (entry in op.entries) {
+                    val target = if (reverse) entry.oldVelocity else entry.newVelocity
+                    midiRepo.updateNoteVelocity(entry.noteId, target)
+                }
+            }
         }
     }
 
@@ -863,6 +879,95 @@ class PianoRollViewModel @Inject constructor(
     private fun setGridResolution(value: Int) {
         if (value <= 0) return
         _state.update { it.copy(gridResolution = value, stickyNoteDurationMs = null) }
+    }
+
+    /**
+     * Quantize selected notes (or all notes when no selection) to the active
+     * grid resolution. Each affected note's startMs snaps to the nearest grid
+     * line; duration is preserved. Pitch is untouched. Pushes a single
+     * MoveBatch undo entry so the user can revert in one step.
+     */
+    private fun quantizeSelected() {
+        viewModelScope.launch {
+            try {
+                val st = _state.value
+                val targetIds = if (st.selectedNoteIds.isNotEmpty()) {
+                    st.selectedNoteIds
+                } else {
+                    st.notes.map { it.id }.toSet()
+                }
+                if (targetIds.isEmpty()) return@launch
+
+                val entries = mutableListOf<NoteOperation.MoveBatch.MoveEntry>()
+                for (id in targetIds) {
+                    val note = st.notes.find { it.id == id } ?: continue
+                    val info = noteClipMap[id] ?: continue
+                    val snappedAbs = MusicalTimeConverter.snapToGrid(
+                        note.startMs, st.bpm, st.gridResolution, st.timeSignatureDenominator
+                    )
+                    val deltaMs = snappedAbs - note.startMs
+                    if (deltaMs == 0L) continue   // already on grid -- skip
+
+                    val oldClipRel = info.rawStartMs
+                    val newClipRel = (oldClipRel + deltaMs).coerceAtLeast(0L)
+
+                    midiRepo.updateNoteTiming(id, newClipRel, note.durationMs)
+                    entries.add(
+                        NoteOperation.MoveBatch.MoveEntry(
+                            noteId = id,
+                            oldStartMs = oldClipRel,
+                            newStartMs = newClipRel,
+                            oldPitch = note.pitch,
+                            newPitch = note.pitch
+                        )
+                    )
+                }
+
+                if (entries.isEmpty()) return@launch
+
+                undoManager.push(NoteOperation.MoveBatch(entries))
+                syncUndoRedoState()
+                midiRepo.recomputeTrackDuration(trackId)
+            } catch (e: Exception) {
+                Log.e(TAG, "Quantize failed", e)
+                _effects.emit(PianoRollEffect.ShowError("Quantize failed"))
+            }
+        }
+    }
+
+    /**
+     * Apply a batch of velocity changes -- one per noteId -- and record a
+     * single VelocityBatch undo entry. Called on velocity-strip drag release.
+     * Notes whose new velocity equals the old are skipped so empty-drag
+     * gestures don't pollute the undo stack.
+     */
+    private fun setNoteVelocities(newVelocities: Map<Long, Float>) {
+        if (newVelocities.isEmpty()) return
+        viewModelScope.launch {
+            try {
+                val st = _state.value
+                val entries = mutableListOf<NoteOperation.VelocityBatch.VelocityEntry>()
+                for ((id, newVel) in newVelocities) {
+                    val note = st.notes.find { it.id == id } ?: continue
+                    val clamped = newVel.coerceIn(0f, 1f)
+                    if (clamped == note.velocity) continue
+                    midiRepo.updateNoteVelocity(id, clamped)
+                    entries.add(
+                        NoteOperation.VelocityBatch.VelocityEntry(
+                            noteId = id,
+                            oldVelocity = note.velocity,
+                            newVelocity = clamped
+                        )
+                    )
+                }
+                if (entries.isEmpty()) return@launch
+                undoManager.push(NoteOperation.VelocityBatch(entries))
+                syncUndoRedoState()
+            } catch (e: Exception) {
+                Log.e(TAG, "Set velocities failed", e)
+                _effects.emit(PianoRollEffect.ShowError("Failed to set velocity"))
+            }
+        }
     }
 
     /**

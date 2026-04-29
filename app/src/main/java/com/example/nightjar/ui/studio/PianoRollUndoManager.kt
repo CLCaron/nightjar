@@ -51,6 +51,15 @@ sealed interface NoteOperation {
      * [un-Place, un-Resize].
      */
     data class Composite(val ops: List<NoteOperation>) : NoteOperation
+
+    /** One or more notes had their velocity changed (commit on drag release). */
+    data class VelocityBatch(val entries: List<VelocityEntry>) : NoteOperation {
+        data class VelocityEntry(
+            val noteId: Long,
+            val oldVelocity: Float,
+            val newVelocity: Float
+        )
+    }
 }
 
 /**

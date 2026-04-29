@@ -2,6 +2,7 @@ package com.example.nightjar.ui.studio
 
 import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -23,10 +24,13 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.CallSplit
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.filled.AllInclusive
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Tune
@@ -493,9 +497,21 @@ fun PianoRollScreen(
             }
         }
 
-        // PHASE 6 TODO: replace with the real velocity strip (selected-only edit
-        // when EDIT > VELOC is latched).
-        PianoRollVelocityStripPlaceholder()
+        // Velocity strip: read-only display by default; becomes draggable
+        // for selected notes when EDIT > VELOC is latched. Scrolls horizontally
+        // in lockstep with the grid.
+        PianoRollVelocityStrip(
+            notes = state.notes,
+            selectedNoteIds = state.selectedNoteIds,
+            isVelocityEditMode = state.isVelocityEditMode,
+            horizontalScrollState = horizontalScrollState,
+            pxPerMs = PX_PER_MS * horizontalZoom * density.density,
+            contentMs = contentMs,
+            trackColor = noteColor,
+            onCommitVelocities = { newVelocities ->
+                viewModel.onAction(PianoRollAction.SetNoteVelocities(newVelocities))
+            }
+        )
 
         // Tab bar -- four MODE buttons. Phases 4-6 + 10 fill in their respective
         // sub-panels.
@@ -1241,6 +1257,55 @@ private suspend fun PointerInputScope.detectPinchZoom(
     }
 }
 
+// ── EDIT panel (phase 6) ────────────────────────────────────────────
+
+/**
+ * EDIT sub-panel: QUANT, VELOC, SUSTAIN. Three captioned NjButtons.
+ *
+ * QUANT is a momentary action -- snap selected notes (or all notes if no
+ * selection) to the active grid. VELOC is a latching toggle that puts the
+ * velocity strip into edit mode. SUSTAIN is reserved (always dim) -- the
+ * slot exists so the layout doesn't shift when the feature lands.
+ */
+@Composable
+private fun EditPanelContent(
+    state: PianoRollState,
+    onAction: (PianoRollAction) -> Unit
+) {
+    val dimColor = NjMuted2.copy(alpha = 0.3f)
+    val hasContent = state.notes.isNotEmpty()
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        NjButton(
+            text = "",
+            icon = Icons.Filled.GridOn,
+            caption = "QUANT",
+            onClick = { onAction(PianoRollAction.QuantizeSelected) },
+            textColor = if (hasContent) NjOnBg else dimColor
+        )
+        NjButton(
+            text = "",
+            icon = Icons.Filled.BarChart,
+            caption = "VELOC",
+            onClick = { onAction(PianoRollAction.ToggleVelocityEditMode) },
+            isActive = state.isVelocityEditMode,
+            ledColor = NjAmber
+        )
+        NjButton(
+            text = "",
+            icon = Icons.Filled.AllInclusive,
+            caption = "SUSTAIN",
+            onClick = { /* reserved -- functional in a follow-up spec */ },
+            textColor = dimColor
+        )
+        Spacer(Modifier.weight(1f))
+    }
+}
+
 // ── SCALE panel (phase 5) ───────────────────────────────────────────
 
 /**
@@ -1541,38 +1606,152 @@ private fun PianoRollTimelineRulerPlaceholder() {
     }
 }
 
-/** PHASE 6 will replace this with the real velocity strip. */
+/**
+ * Velocity strip rendered below the piano roll grid.
+ *
+ * Read-only by default: bars render at each note's X position with height
+ * proportional to velocity (0..1). When [isVelocityEditMode] is latched, the
+ * bars for currently-selected notes become draggable -- drag a bar up/down
+ * to change velocity. Multi-selected notes track the same delta with
+ * independent clamping. Commits to the VM happen on release; live preview
+ * runs through local state during the drag.
+ *
+ * Scrolls horizontally in lockstep with the grid via the shared
+ * [horizontalScrollState]. The VELOC label occupies the same 48dp column
+ * the piano keys sit in above, keeping bars column-aligned with notes.
+ */
 @Composable
-private fun PianoRollVelocityStripPlaceholder() {
+private fun PianoRollVelocityStrip(
+    notes: List<MidiNoteEntity>,
+    selectedNoteIds: Set<Long>,
+    isVelocityEditMode: Boolean,
+    horizontalScrollState: ScrollState,
+    pxPerMs: Float,
+    contentMs: Long,
+    trackColor: Color,
+    onCommitVelocities: (Map<Long, Float>) -> Unit
+) {
+    val density = LocalDensity.current
+    val gridWidthDp = with(density) { (contentMs * pxPerMs).toDp() }
+
+    // Live preview during drag -- renders before the VM commits on release.
+    var previewVelocities by remember { mutableStateOf<Map<Long, Float>>(emptyMap()) }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(36.dp)
+            .height(40.dp)
             .background(NjSurface)
     ) {
-        // VELOC label sits in the same 48dp column as the piano keys above.
         Box(
             modifier = Modifier
                 .width(KEYS_WIDTH_DP.dp)
                 .fillMaxHeight(),
             contentAlignment = Alignment.Center
         ) {
+            val labelColor = if (isVelocityEditMode) {
+                NjAmber.copy(alpha = 0.85f)
+            } else {
+                NjMuted2.copy(alpha = 0.7f)
+            }
             Text(
                 text = "VELOC",
                 fontFamily = IbmPlexMono,
                 fontSize = 9.sp,
-                color = NjMuted2.copy(alpha = 0.7f),
+                color = labelColor,
                 letterSpacing = 0.5.sp
             )
         }
-        // Bar strip area -- in phase 6 this scrolls horizontally in lockstep
-        // with the grid via shared horizontalScrollState.
         Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight()
                 .background(NjPanelInset)
-        )
+                .horizontalScroll(horizontalScrollState)
+        ) {
+            Canvas(
+                modifier = Modifier
+                    .width(gridWidthDp)
+                    .fillMaxHeight()
+                    .pointerInput(notes, selectedNoteIds, isVelocityEditMode, pxPerMs) {
+                        if (!isVelocityEditMode) return@pointerInput
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            val tapMs = (down.position.x / pxPerMs).toLong()
+                            // Find a SELECTED note whose bar contains the touch.
+                            val anchor = notes.firstOrNull { n ->
+                                n.id in selectedNoteIds &&
+                                    tapMs >= n.startMs &&
+                                    tapMs <= n.startMs + n.durationMs
+                            } ?: return@awaitEachGesture
+                            down.consume()
+
+                            val startVelocities = selectedNoteIds.associateWith { id ->
+                                notes.find { it.id == id }?.velocity ?: 0.8f
+                            }
+                            val anchorStartVelocity = anchor.velocity
+                            val startY = down.position.y
+                            val stripHeight = size.height.coerceAtLeast(1).toFloat()
+                            var lastDelta = 0f
+                            var cursorMap: Map<Long, Float> = startVelocities
+
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull { it.id == down.id }
+                                    ?: break
+                                if (!change.pressed) {
+                                    change.consume()
+                                    break
+                                }
+                                change.consume()
+                                val deltaY = change.position.y - startY
+                                val rawDeltaVelocity = -deltaY / stripHeight
+                                if (rawDeltaVelocity != lastDelta) {
+                                    lastDelta = rawDeltaVelocity
+                                    cursorMap = startVelocities.mapValues { (_, v) ->
+                                        (v + rawDeltaVelocity).coerceIn(0f, 1f)
+                                    }
+                                    previewVelocities = cursorMap
+                                }
+                            }
+                            // Commit: only if the anchor's velocity actually changed.
+                            val anchorFinal = (anchorStartVelocity + lastDelta).coerceIn(0f, 1f)
+                            if (anchorFinal != anchorStartVelocity) {
+                                onCommitVelocities(cursorMap)
+                            }
+                            previewVelocities = emptyMap()
+                        }
+                    }
+            ) {
+                // Faint baseline so the strip reads as a continuous panel
+                // even when there are no notes.
+                drawLine(
+                    color = trackColor.copy(alpha = 0.15f),
+                    start = Offset(0f, size.height - 1f),
+                    end = Offset(size.width, size.height - 1f),
+                    strokeWidth = 1f
+                )
+
+                for (note in notes) {
+                    val barX = note.startMs * pxPerMs
+                    val barWidth = (note.durationMs * pxPerMs).coerceAtLeast(3f)
+                    val effectiveVelocity = previewVelocities[note.id] ?: note.velocity
+                    val barHeight = (effectiveVelocity * size.height).coerceAtLeast(2f)
+                    val barY = size.height - barHeight
+                    val isSelected = note.id in selectedNoteIds
+                    val color = when {
+                        isVelocityEditMode && !isSelected -> trackColor.copy(alpha = 0.25f)
+                        isSelected -> trackColor.copy(alpha = 0.95f)
+                        else -> trackColor.copy(alpha = 0.65f)
+                    }
+                    drawRect(
+                        color = color,
+                        topLeft = Offset(barX, barY),
+                        size = Size(barWidth, barHeight)
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -1660,12 +1839,8 @@ private fun PianoRollSubPanel(
             when (activeTab) {
                 PianoRollTab.TOOLS -> ToolsPanelContent(state, onAction)
                 PianoRollTab.SCALE -> ScalePanelContent(state, onAction)
-                else -> {
-                    val phaseLabel = when (activeTab) {
-                        PianoRollTab.EDIT -> "EDIT panel — phase 6"
-                        PianoRollTab.INSTR -> "INSTR — phase 10"
-                        else -> ""
-                    }
+                PianoRollTab.EDIT -> EditPanelContent(state, onAction)
+                PianoRollTab.INSTR -> {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1674,7 +1849,7 @@ private fun PianoRollSubPanel(
                         contentAlignment = Alignment.CenterStart
                     ) {
                         Text(
-                            text = phaseLabel,
+                            text = "INSTR — phase 10",
                             fontFamily = IbmPlexMono,
                             fontSize = 10.sp,
                             color = NjMuted
