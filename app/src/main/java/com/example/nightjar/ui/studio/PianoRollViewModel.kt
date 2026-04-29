@@ -124,6 +124,7 @@ sealed interface PianoRollAction {
     data class SetScaleType(val type: MusicalScaleHelper.ScaleType) : PianoRollAction
     data object ToggleChordMode : PianoRollAction
     data object CycleChordType : PianoRollAction
+    data class SetChordType(val type: MusicalScaleHelper.ChordType) : PianoRollAction
     // Tab/sub-panel
     data class SwitchTab(val tab: PianoRollTab) : PianoRollAction
 }
@@ -355,6 +356,7 @@ class PianoRollViewModel @Inject constructor(
             is PianoRollAction.SetScaleType -> setScaleType(action.type)
             PianoRollAction.ToggleChordMode -> toggleChordMode()
             PianoRollAction.CycleChordType -> cycleChordType()
+            is PianoRollAction.SetChordType -> setChordType(action.type)
             // Tab/sub-panel
             is PianoRollAction.SwitchTab -> _state.update { it.copy(activeTab = action.tab) }
         }
@@ -825,6 +827,16 @@ class PianoRollViewModel @Inject constructor(
                 MusicalScaleHelper.getDiatonicChords(it.scaleRoot, it.scaleType, newType)
             } else emptyList()
             it.copy(chordType = newType, diatonicChords = chords)
+        }
+    }
+
+    private fun setChordType(type: MusicalScaleHelper.ChordType) {
+        if (_state.value.chordType == type) return
+        _state.update {
+            val chords = if (it.isScaleEnabled) {
+                MusicalScaleHelper.getDiatonicChords(it.scaleRoot, it.scaleType, type)
+            } else emptyList()
+            it.copy(chordType = type, diatonicChords = chords)
         }
     }
 

@@ -2,9 +2,7 @@ package com.example.nightjar.ui.studio
 
 import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
@@ -33,9 +31,7 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Tune
 import com.example.nightjar.ui.components.NjIcons
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -72,6 +68,8 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.example.nightjar.audio.MusicalTimeConverter
 import com.example.nightjar.data.db.entity.MidiNoteEntity
 import com.example.nightjar.ui.components.NjButton
+import com.example.nightjar.ui.components.NjKnob
+import com.example.nightjar.ui.components.NjRecessedPanel
 import com.example.nightjar.ui.theme.IbmPlexMono
 import com.example.nightjar.ui.theme.NjBg
 import com.example.nightjar.ui.theme.NjMuted
@@ -88,11 +86,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.ui.Alignment
 import com.example.nightjar.audio.MusicalScaleHelper
 import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
 /** Height of each semitone row in dp. */
@@ -136,7 +133,6 @@ private data class GroupDragState(
 /** Timeout for double-tap-to-delete detection. */
 private const val DOUBLE_TAP_TIMEOUT_MS = 300L
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PianoRollScreen(
     onBack: () -> Unit,
@@ -227,11 +223,8 @@ fun PianoRollScreen(
             }
         )
 
-        // PHASE 5 TODO: move into the SCALE sub-panel; remove this row.
-        ScaleChordControls(state = state, onAction = viewModel::onAction)
-
-        // Diatonic chord reference strip (visible when scale is enabled)
-        // PHASE 5 TODO: relocate this to sit just below the new top bar.
+        // Diatonic chord reference strip (visible when scale is enabled).
+        // Sits just below the top bar so it's glance-able from any sub-panel.
         ChordReferenceStrip(chords = state.diatonicChords)
 
         // PHASE 7 TODO: replace with the real adaptive timeline ruler.
@@ -517,96 +510,6 @@ fun PianoRollScreen(
             activeTab = state.activeTab,
             state = state,
             onAction = viewModel::onAction
-        )
-    }
-}
-
-// ── Scale & chord controls ──────────────────────────────────────────
-
-@Composable
-private fun ScaleChordControls(
-    state: PianoRollState,
-    onAction: (PianoRollAction) -> Unit
-) {
-    var scaleDropdownExpanded by remember { mutableStateOf(false) }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(NjSurface)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // Scale on/off toggle
-        NjButton(
-            text = "Scale",
-            onClick = { onAction(PianoRollAction.ToggleScale) },
-            isActive = state.isScaleEnabled,
-            ledColor = NjAmber
-        )
-
-        // Root note (tap to cycle C → C# → D → ...)
-        NjButton(
-            text = MusicalScaleHelper.NOTE_NAMES[state.scaleRoot],
-            onClick = { onAction(PianoRollAction.SetScaleRoot((state.scaleRoot + 1) % 12)) },
-            textColor = NjAmber.copy(alpha = 0.8f)
-        )
-
-        // Scale type (tap to open dropdown)
-        Box {
-            NjButton(
-                text = state.scaleType.displayName,
-                onClick = { scaleDropdownExpanded = true },
-                textColor = NjAmber.copy(alpha = 0.8f)
-            )
-            DropdownMenu(
-                expanded = scaleDropdownExpanded,
-                onDismissRequest = { scaleDropdownExpanded = false },
-                modifier = Modifier.background(NjSurface)
-            ) {
-                for (group in MusicalScaleHelper.ScaleGroup.entries) {
-                    // Group header
-                    Text(
-                        text = group.displayName,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = NjMuted2
-                    )
-                    // Scales in this group
-                    for (scale in MusicalScaleHelper.ScaleType.entries.filter { it.group == group }) {
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    text = scale.displayName,
-                                    color = if (scale == state.scaleType) NjAmber else NjOnBg
-                                )
-                            },
-                            onClick = {
-                                onAction(PianoRollAction.SetScaleType(scale))
-                                scaleDropdownExpanded = false
-                            }
-                        )
-                    }
-                }
-            }
-        }
-
-        Spacer(Modifier.weight(1f))
-
-        // Chord on/off toggle
-        NjButton(
-            text = "Chord",
-            onClick = { onAction(PianoRollAction.ToggleChordMode) },
-            isActive = state.isChordMode,
-            ledColor = NjAmber
-        )
-
-        // Chord type (tap to cycle Triad → 7th → 9th)
-        NjButton(
-            text = state.chordType.displayName,
-            onClick = { onAction(PianoRollAction.CycleChordType) },
-            textColor = NjAmber.copy(alpha = 0.8f)
         )
     }
 }
@@ -1338,6 +1241,137 @@ private suspend fun PointerInputScope.detectPinchZoom(
     }
 }
 
+// ── SCALE panel (phase 5) ───────────────────────────────────────────
+
+/**
+ * SCALE sub-panel content: ROOT knob, SCALE knob, HILITE toggle, CHORDS
+ * toggle, and the chord-type knob with LCD readout. All five render at the
+ * same time, same footprint -- no controls appear or disappear (per the
+ * hardware aesthetic rule).
+ */
+@Composable
+private fun ScalePanelContent(
+    state: PianoRollState,
+    onAction: (PianoRollAction) -> Unit
+) {
+    val scaleTypes = remember { MusicalScaleHelper.ScaleType.entries }
+    val chordTypes = remember { MusicalScaleHelper.ChordType.entries }
+
+    val rootValue = state.scaleRoot.coerceIn(0, 11) / 11f
+    val scaleIndex = scaleTypes.indexOf(state.scaleType).coerceAtLeast(0)
+    val scaleValue = if (scaleTypes.size > 1) {
+        scaleIndex.toFloat() / (scaleTypes.size - 1)
+    } else 0f
+    val chordIndex = chordTypes.indexOf(state.chordType).coerceAtLeast(0)
+    val chordValue = if (chordTypes.size > 1) {
+        chordIndex.toFloat() / (chordTypes.size - 1)
+    } else 0f
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        KnobWithReadout(
+            label = "ROOT",
+            readout = MusicalScaleHelper.NOTE_NAMES[state.scaleRoot.coerceIn(0, 11)],
+            value = rootValue,
+            onValueChange = { v ->
+                val newRoot = (v * 11f).roundToInt().coerceIn(0, 11)
+                if (newRoot != state.scaleRoot) {
+                    onAction(PianoRollAction.SetScaleRoot(newRoot))
+                }
+            }
+        )
+        KnobWithReadout(
+            label = "SCALE",
+            readout = state.scaleType.name.take(4),
+            value = scaleValue,
+            onValueChange = { v ->
+                val maxIndex = scaleTypes.size - 1
+                val newIndex = (v * maxIndex).roundToInt().coerceIn(0, maxIndex)
+                val newType = scaleTypes[newIndex]
+                if (newType != state.scaleType) {
+                    onAction(PianoRollAction.SetScaleType(newType))
+                }
+            }
+        )
+        NjButton(
+            text = "HILITE",
+            onClick = { onAction(PianoRollAction.ToggleScale) },
+            isActive = state.isScaleEnabled,
+            ledColor = NjAmber
+        )
+        NjButton(
+            text = "CHORDS",
+            onClick = { onAction(PianoRollAction.ToggleChordMode) },
+            isActive = state.isChordMode,
+            ledColor = NjAmber
+        )
+        Spacer(Modifier.weight(1f))
+        KnobWithReadout(
+            label = "TYPE",
+            readout = state.chordType.displayName.uppercase(),
+            value = chordValue,
+            onValueChange = { v ->
+                val maxIndex = chordTypes.size - 1
+                val newIndex = (v * maxIndex).roundToInt().coerceIn(0, maxIndex)
+                val newType = chordTypes[newIndex]
+                if (newType != state.chordType) {
+                    onAction(PianoRollAction.SetChordType(newType))
+                }
+            }
+        )
+    }
+}
+
+/**
+ * Knob with an LCD readout above and a small caption below -- the standard
+ * SCALE-panel knob unit. Readout uses IBM Plex Mono in amber, like a
+ * Roland faceplate's value window. Caption is muted IBM Plex Mono.
+ */
+@Composable
+private fun KnobWithReadout(
+    label: String,
+    readout: String,
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        NjRecessedPanel(
+            modifier = Modifier.width(44.dp)
+        ) {
+            Text(
+                text = readout,
+                fontFamily = IbmPlexMono,
+                fontSize = 9.sp,
+                color = NjAmber.copy(alpha = 0.85f),
+                letterSpacing = 0.5.sp,
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                maxLines = 1
+            )
+        }
+        Spacer(Modifier.height(2.dp))
+        NjKnob(
+            value = value,
+            onValueChange = onValueChange,
+            knobSize = 36.dp
+        )
+        Spacer(Modifier.height(1.dp))
+        Text(
+            text = label,
+            fontFamily = IbmPlexMono,
+            fontSize = 9.sp,
+            color = NjMuted,
+            letterSpacing = 0.5.sp
+        )
+    }
+}
+
 // ── TOOLS panel (phase 4) ───────────────────────────────────────────
 
 /**
@@ -1625,9 +1659,9 @@ private fun PianoRollSubPanel(
         ) {
             when (activeTab) {
                 PianoRollTab.TOOLS -> ToolsPanelContent(state, onAction)
+                PianoRollTab.SCALE -> ScalePanelContent(state, onAction)
                 else -> {
                     val phaseLabel = when (activeTab) {
-                        PianoRollTab.SCALE -> "SCALE panel — phase 5"
                         PianoRollTab.EDIT -> "EDIT panel — phase 6"
                         PianoRollTab.INSTR -> "INSTR — phase 10"
                         else -> ""
