@@ -301,8 +301,17 @@ fun StudioScreen(
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP && currentIsRecording) {
-                vm.onAction(StudioAction.StopRecording)
+            when {
+                event == Lifecycle.Event.ON_STOP && currentIsRecording -> {
+                    vm.onAction(StudioAction.StopRecording)
+                }
+                event == Lifecycle.Event.ON_RESUME -> {
+                    // Sync loop region from the audio engine — picks up any
+                    // changes the user made on the full-screen Piano Roll
+                    // while we were paused.
+                    vm.refreshLoopFromEngine()
+                }
+                else -> {}
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)

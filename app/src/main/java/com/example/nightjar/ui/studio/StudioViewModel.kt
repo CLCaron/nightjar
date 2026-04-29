@@ -86,6 +86,29 @@ class StudioViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Pull the current loop region from the engine into our UI state. Called
+     * by the Studio screen on resume so that any change made on the full-screen
+     * Piano Roll (which writes through the same engine cache) shows up here
+     * without losing Studio's local "toggled off but region preserved" semantics
+     * during a single in-screen session.
+     */
+    fun refreshLoopFromEngine() {
+        if (currentIdeaId == null) return
+        val region = audioEngine.getCurrentLoopRegion()
+        val current = _state.value
+        val newStart = region?.first
+        val newEnd = region?.second
+        if (newStart == current.loopStartMs && newEnd == current.loopEndMs) return
+        _state.update {
+            it.copy(
+                loopStartMs = newStart,
+                loopEndMs = newEnd,
+                isLoopEnabled = region != null
+            )
+        }
+    }
+
     private var currentIdeaId: Long? = null
 
     companion object {
