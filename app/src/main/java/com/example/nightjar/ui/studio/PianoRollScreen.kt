@@ -1,6 +1,11 @@
 package com.example.nightjar.ui.studio
 
 import android.view.HapticFeedbackConstants
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
@@ -244,6 +249,37 @@ fun PianoRollScreen(
             }
         )
 
+        // INSTR mode swaps the chord-ref strip, ruler, grid, and velocity
+        // strip out for the embedded patch picker. AnimatedContent gives a
+        // ~280ms vertical slide so the picker reads as sliding into the
+        // tab's slot rather than instant-flipping. Tab bar and sub-panel
+        // chip row below stay pinned through the transition.
+        AnimatedContent(
+            targetState = state.activeTab == PianoRollTab.INSTR,
+            transitionSpec = {
+                if (targetState) {
+                    slideInVertically(animationSpec = tween(280)) { h -> h } togetherWith
+                        slideOutVertically(animationSpec = tween(280)) { h -> -h }
+                } else {
+                    slideInVertically(animationSpec = tween(280)) { h -> -h } togetherWith
+                        slideOutVertically(animationSpec = tween(280)) { h -> h }
+                }
+            },
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            label = "instr-tab-slide"
+        ) { isInstr ->
+            if (isInstr) {
+                InstrumentPickerEmbedded(
+                    selectedProgram = state.midiProgram,
+                    onSelectProgram = { program ->
+                        viewModel.onAction(PianoRollAction.SetMidiInstrument(program))
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                Column(modifier = Modifier.fillMaxSize()) {
         // Diatonic chord reference strip (visible when scale is enabled).
         // Sits just below the top bar so it's glance-able from any sub-panel.
         ChordReferenceStrip(chords = state.diatonicChords)
@@ -651,6 +687,9 @@ fun PianoRollScreen(
                 viewModel.onAction(PianoRollAction.SetNoteVelocities(newVelocities))
             }
         )
+                }  // end of inner Column
+            }      // end of else branch
+        }          // end of AnimatedContent
 
         // Tab bar -- four MODE buttons. Phases 4-6 + 10 fill in their respective
         // sub-panels.
@@ -2406,18 +2445,22 @@ private fun PianoRollSubPanel(
                 PianoRollTab.SCALE -> ScalePanelContent(state, onAction)
                 PianoRollTab.EDIT -> EditPanelContent(state, onAction)
                 PianoRollTab.INSTR -> {
+                    // Picker fills the main content area; the sub-panel's top
+                    // row collapses to a small LCD hint so the chips below
+                    // stay reachable.
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(56.dp)
-                            .padding(horizontal = 4.dp),
+                            .height(28.dp)
+                            .padding(horizontal = 12.dp),
                         contentAlignment = Alignment.CenterStart
                     ) {
                         Text(
-                            text = "INSTR — phase 10",
+                            text = "PICKER ACTIVE — TAP A PATCH ABOVE",
                             fontFamily = IbmPlexMono,
-                            fontSize = 10.sp,
-                            color = NjMuted
+                            fontSize = 9.sp,
+                            color = NjMuted,
+                            letterSpacing = 1.sp
                         )
                     }
                 }

@@ -145,6 +145,8 @@ sealed interface PianoRollAction {
     data class SetChordType(val type: MusicalScaleHelper.ChordType) : PianoRollAction
     // Tab/sub-panel
     data class SwitchTab(val tab: PianoRollTab) : PianoRollAction
+    // INSTR (embedded picker)
+    data class SetMidiInstrument(val program: Int) : PianoRollAction
 }
 
 /** One-shot effects from the piano roll. */
@@ -397,6 +399,31 @@ class PianoRollViewModel @Inject constructor(
             is PianoRollAction.SetChordType -> setChordType(action.type)
             // Tab/sub-panel
             is PianoRollAction.SwitchTab -> _state.update { it.copy(activeTab = action.tab) }
+            is PianoRollAction.SetMidiInstrument -> setMidiInstrument(action.program)
+        }
+    }
+
+    /**
+     * Update the track's MIDI program, write to DB, and resync the engine
+     * channel so the new patch takes effect immediately. Mirrors Studio's
+     * setMidiInstrument flow but scoped to this track only.
+     */
+    private fun setMidiInstrument(program: Int) {
+        viewModelScope.launch {
+            try {
+                val ch = _state.value.midiChannel
+                midiRepo.setInstrument(trackId, program)
+                audioEngine.synthProgramChange(ch, program)
+                _state.update {
+                    it.copy(
+                        midiProgram = program,
+                        instrumentName = gmInstrumentName(program)
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "SetMidiInstrument failed", e)
+                _effects.emit(PianoRollEffect.ShowError("Failed to change instrument"))
+            }
         }
     }
 
