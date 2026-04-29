@@ -135,8 +135,10 @@ private data class GroupDragState(
     val anchorNoteId: Long,       // the note the user touched
     val deltaMs: Long = 0L,       // time offset (move mode)
     val deltaPitch: Int = 0,      // pitch offset (move mode)
-    val deltaDurationMs: Long = 0L, // duration offset (resize mode)
-    val isResize: Boolean = false
+    val deltaDurationMs: Long = 0L, // duration offset (right-edge resize mode)
+    val deltaStartMs: Long = 0L,    // start offset (left-edge resize mode; end anchored)
+    val isResize: Boolean = false,
+    val isLeftEdgeResize: Boolean = false
 )
 
 /** Marquee selection rectangle in canvas-content coordinates. */
@@ -352,16 +354,35 @@ fun PianoRollScreen(
                                     val down = awaitFirstDown(requireUnconsumed = false)
                                     // DON'T consume down -- lets scroll handle swipes
 
-                                    // Check edge hit FIRST (extends past the note boundary)
-                                    val edgeNote = findNoteEdgeAt(
+                                    // Check both edges. For short notes both edge zones may
+                                    // overlap; tie-break by proximity to the touch X.
+                                    val rightEdgeNote = findNoteEdgeAt(
                                         down.position, state.notes, rowHeightPx, pxPerMs, edgeZonePx
                                     )
+                                    val leftEdgeNote = findNoteLeftEdgeAt(
+                                        down.position, state.notes, rowHeightPx, pxPerMs, edgeZonePx
+                                    )
+                                    val (edgeNote, isLeftEdge) = when {
+                                        rightEdgeNote != null && leftEdgeNote != null -> {
+                                            val rightX = (rightEdgeNote.startMs + rightEdgeNote.durationMs) * pxPerMs
+                                            val leftX = leftEdgeNote.startMs * pxPerMs
+                                            if (abs(down.position.x - leftX) <= abs(down.position.x - rightX)) {
+                                                leftEdgeNote to true
+                                            } else {
+                                                rightEdgeNote to false
+                                            }
+                                        }
+                                        rightEdgeNote != null -> rightEdgeNote to false
+                                        leftEdgeNote != null -> leftEdgeNote to true
+                                        else -> null to false
+                                    }
                                     // Then check body hit (strict bounds)
                                     val hitNote = edgeNote
                                         ?: findNoteAt(down.position, state.notes, rowHeightPx, pxPerMs)
 
                                     if (edgeNote != null) {
-                                        // ── RIGHT EDGE: hold to resize ──
+                                        // ── EDGE: hold to resize ──
+                                        // Right edge anchors the start; left edge anchors the end.
                                         val longPress = awaitLongPressOrCancellation(down.id)
                                         if (longPress != null) {
                                             longPress.consume()
@@ -371,20 +392,37 @@ fun PianoRollScreen(
                                             } else {
                                                 setOf(edgeNote.id)
                                             }
-                                            handleResizeDrag(
-                                                edgeNote, dragIds, longPress.id, pxPerMs, rowHeightPx,
-                                                state.isSnapEnabled, state.bpm,
-                                                state.gridResolution, state.timeSignatureDenominator,
-                                                scrollX = { horizontalScrollState.value },
-                                                onPreview = { dragState = it },
-                                                onCommit = { noteIds, deltaDurationMs ->
-                                                    dragState = null
-                                                    viewModel.onAction(
-                                                        PianoRollAction.ResizeNotes(noteIds, deltaDurationMs)
-                                                    )
-                                                },
-                                                onCancel = { dragState = null }
-                                            )
+                                            if (isLeftEdge) {
+                                                handleLeftEdgeResizeDrag(
+                                                    edgeNote, dragIds, longPress.id, pxPerMs,
+                                                    state.isSnapEnabled, state.bpm,
+                                                    state.gridResolution, state.timeSignatureDenominator,
+                                                    scrollX = { horizontalScrollState.value },
+                                                    onPreview = { dragState = it },
+                                                    onCommit = { noteIds, deltaStartMs ->
+                                                        dragState = null
+                                                        viewModel.onAction(
+                                                            PianoRollAction.ResizeNotesLeftEdge(noteIds, deltaStartMs)
+                                                        )
+                                                    },
+                                                    onCancel = { dragState = null }
+                                                )
+                                            } else {
+                                                handleResizeDrag(
+                                                    edgeNote, dragIds, longPress.id, pxPerMs, rowHeightPx,
+                                                    state.isSnapEnabled, state.bpm,
+                                                    state.gridResolution, state.timeSignatureDenominator,
+                                                    scrollX = { horizontalScrollState.value },
+                                                    onPreview = { dragState = it },
+                                                    onCommit = { noteIds, deltaDurationMs ->
+                                                        dragState = null
+                                                        viewModel.onAction(
+                                                            PianoRollAction.ResizeNotes(noteIds, deltaDurationMs)
+                                                        )
+                                                    },
+                                                    onCancel = { dragState = null }
+                                                )
+                                            }
                                         } else {
                                             // Tap on edge = double-tap or toggle selection
                                             val fingerLifted = currentEvent.changes
@@ -921,14 +959,25 @@ private fun DrawScope.drawGrid(
         val drawStartMs: Long
         val drawDurationMs: Long
         if (isDragging) {
-            if (dragState!!.isResize) {
-                drawPitch = note.pitch
-                drawStartMs = note.startMs
-                drawDurationMs = (note.durationMs + dragState.deltaDurationMs).coerceAtLeast(50L)
-            } else {
-                drawPitch = (note.pitch + dragState.deltaPitch).coerceIn(0, 127)
-                drawStartMs = (note.startMs + dragState.deltaMs).coerceAtLeast(0L)
-                drawDurationMs = note.durationMs
+            when {
+                dragState!!.isLeftEdgeResize -> {
+                    drawPitch = note.pitch
+                    val capped = dragState.deltaStartMs
+                        .coerceAtMost(note.durationMs - 50L)
+                        .coerceAtLeast(-note.startMs)
+                    drawStartMs = (note.startMs + capped).coerceAtLeast(0L)
+                    drawDurationMs = (note.durationMs - capped).coerceAtLeast(50L)
+                }
+                dragState.isResize -> {
+                    drawPitch = note.pitch
+                    drawStartMs = note.startMs
+                    drawDurationMs = (note.durationMs + dragState.deltaDurationMs).coerceAtLeast(50L)
+                }
+                else -> {
+                    drawPitch = (note.pitch + dragState.deltaPitch).coerceIn(0, 127)
+                    drawStartMs = (note.startMs + dragState.deltaMs).coerceAtLeast(0L)
+                    drawDurationMs = note.durationMs
+                }
             }
         } else {
             drawPitch = note.pitch
@@ -1052,6 +1101,31 @@ private fun findNoteEdgeAt(
     }
 }
 
+/**
+ * Find a note whose LEFT-edge resize zone contains the tap.
+ *
+ * The edge zone is the first [edgeZonePx] pixels inside the note body,
+ * clamped to the note's end so narrow notes stay grabbable. Symmetric
+ * to [findNoteEdgeAt] (right edge). For very short notes both edges
+ * overlap; the caller does the tie-break by proximity.
+ */
+private fun findNoteLeftEdgeAt(
+    position: Offset,
+    notes: List<MidiNoteEntity>,
+    rowHeightPx: Float,
+    pxPerMs: Float,
+    edgeZonePx: Float
+): MidiNoteEntity? {
+    val pitch = TOTAL_NOTES - 1 - (position.y / rowHeightPx).toInt()
+    return notes.find { note ->
+        if (note.pitch != pitch) return@find false
+        val startPx = note.startMs * pxPerMs
+        val endPx = (note.startMs + note.durationMs) * pxPerMs
+        val edgeEnd = (startPx + edgeZonePx).coerceAtMost(endPx)
+        position.x in startPx..edgeEnd
+    }
+}
+
 /** Find the note (if any) at a given canvas position (strict body hit). */
 private fun findNoteAt(
     position: Offset,
@@ -1142,6 +1216,86 @@ private suspend fun AwaitPointerEventScope.handleResizeDrag(
                 rawEndMs, bpm, gridResolution, timeSignatureDenominator
             )
             snappedEnd - (anchorNote.startMs + anchorNote.durationMs)
+        } else deltaMs
+        onCommit(dragNoteIds, finalDelta)
+    } else {
+        onCancel()
+    }
+}
+
+/**
+ * Handle resize drag on a note's LEFT edge (group-aware).
+ *
+ * Symmetric to [handleResizeDrag] but tracks deltaStart -- the start
+ * moves while the right edge stays anchored. Snap operates on the
+ * proposed new start. Same absolute-position pattern to stay invariant
+ * to scroll movement during the long-press latch.
+ */
+private suspend fun AwaitPointerEventScope.handleLeftEdgeResizeDrag(
+    anchorNote: MidiNoteEntity,
+    dragNoteIds: Set<Long>,
+    pointerId: PointerId,
+    pxPerMs: Float,
+    isSnapEnabled: Boolean,
+    bpm: Double,
+    gridResolution: Int,
+    timeSignatureDenominator: Int,
+    scrollX: () -> Int,
+    onPreview: (GroupDragState) -> Unit,
+    onCommit: (noteIds: Set<Long>, deltaStartMs: Long) -> Unit,
+    onCancel: () -> Unit
+) {
+    onPreview(
+        GroupDragState(
+            noteIds = dragNoteIds,
+            anchorNoteId = anchorNote.id,
+            isLeftEdgeResize = true
+        )
+    )
+
+    var startAbsX: Float? = null
+    var completed = false
+
+    while (true) {
+        val event = awaitPointerEvent()
+        val change = event.changes.firstOrNull { it.id == pointerId } ?: break
+        if (startAbsX == null) startAbsX = change.position.x + scrollX()
+        if (!change.pressed) {
+            completed = true
+            change.consume()
+            break
+        }
+        change.consume()
+        val accumulatedPx = change.position.x + scrollX() - startAbsX
+        val deltaMs = (accumulatedPx / pxPerMs).toLong()
+        val rawNewStart = anchorNote.startMs + deltaMs
+        val snappedDelta = if (isSnapEnabled) {
+            val snappedStart = MusicalTimeConverter.snapToGrid(
+                rawNewStart, bpm, gridResolution, timeSignatureDenominator
+            )
+            snappedStart - anchorNote.startMs
+        } else deltaMs
+        onPreview(
+            GroupDragState(
+                noteIds = dragNoteIds,
+                anchorNoteId = anchorNote.id,
+                deltaStartMs = snappedDelta,
+                isLeftEdgeResize = true
+            )
+        )
+    }
+
+    if (completed && startAbsX != null) {
+        val lastEvent = currentEvent.changes.firstOrNull { it.id == pointerId }
+        val finalAbsX = if (lastEvent != null) lastEvent.position.x + scrollX() else startAbsX
+        val accumulatedPx = finalAbsX - startAbsX
+        val deltaMs = (accumulatedPx / pxPerMs).toLong()
+        val rawNewStart = anchorNote.startMs + deltaMs
+        val finalDelta = if (isSnapEnabled) {
+            val snappedStart = MusicalTimeConverter.snapToGrid(
+                rawNewStart, bpm, gridResolution, timeSignatureDenominator
+            )
+            snappedStart - anchorNote.startMs
         } else deltaMs
         onCommit(dragNoteIds, finalDelta)
     } else {

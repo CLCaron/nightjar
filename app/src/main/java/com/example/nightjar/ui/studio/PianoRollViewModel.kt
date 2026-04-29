@@ -104,6 +104,8 @@ sealed interface PianoRollAction {
     data class PlaceNote(val pitch: Int, val startMs: Long, val durationMs: Long) : PianoRollAction
     data class MoveNotes(val noteIds: Set<Long>, val deltaMs: Long, val deltaPitch: Int) : PianoRollAction
     data class ResizeNotes(val noteIds: Set<Long>, val deltaDurationMs: Long) : PianoRollAction
+    /** Drag the LEFT edge: start moves by deltaStartMs, end stays anchored. */
+    data class ResizeNotesLeftEdge(val noteIds: Set<Long>, val deltaStartMs: Long) : PianoRollAction
     data class QuickDeleteNote(val noteId: Long) : PianoRollAction
     data class ToggleNoteSelection(val noteId: Long) : PianoRollAction
     data object ClearSelection : PianoRollAction
@@ -358,6 +360,8 @@ class PianoRollViewModel @Inject constructor(
             is PianoRollAction.PlaceNote -> placeNote(action.pitch, action.startMs, action.durationMs)
             is PianoRollAction.MoveNotes -> moveNotes(action.noteIds, action.deltaMs, action.deltaPitch)
             is PianoRollAction.ResizeNotes -> resizeNotes(action.noteIds, action.deltaDurationMs)
+            is PianoRollAction.ResizeNotesLeftEdge ->
+                resizeNotesLeftEdge(action.noteIds, action.deltaStartMs)
             is PianoRollAction.QuickDeleteNote -> quickDeleteNote(action.noteId)
             is PianoRollAction.ToggleNoteSelection -> toggleNoteSelection(action.noteId)
             PianoRollAction.ClearSelection -> _state.update { it.copy(selectedNoteIds = emptySet()) }
@@ -536,6 +540,75 @@ class PianoRollViewModel @Inject constructor(
 
                 midiRepo.recomputeTrackDuration(trackId)
             } catch (e: Exception) {
+                _effects.emit(PianoRollEffect.ShowError("Failed to resize notes"))
+            }
+        }
+    }
+
+    /**
+     * Resize from the LEFT edge: move startMs by deltaStartMs and shrink/grow
+     * durationMs by the same amount so the right edge stays anchored. Each
+     * note's delta is independently capped: minimum duration of 50ms and
+     * clip-relative start clamped at 0. Pushes one Composite undo entry
+     * (MoveBatch + ResizeBatch) so undo restores the original position and
+     * length together.
+     */
+    private fun resizeNotesLeftEdge(noteIds: Set<Long>, deltaStartMs: Long) {
+        if (noteIds.isEmpty()) return
+        viewModelScope.launch {
+            try {
+                val st = _state.value
+                val moveEntries = mutableListOf<NoteOperation.MoveBatch.MoveEntry>()
+                val resizeEntries = mutableListOf<NoteOperation.ResizeBatch.ResizeEntry>()
+
+                for (id in noteIds) {
+                    val note = st.notes.find { it.id == id } ?: continue
+                    val info = noteClipMap[id] ?: continue
+                    val oldClipRel = info.rawStartMs
+                    val oldDuration = note.durationMs
+                    // Cap so duration stays >= 50ms and clip-rel start stays >= 0.
+                    val capped = deltaStartMs
+                        .coerceAtMost(oldDuration - 50L)
+                        .coerceAtLeast(-oldClipRel)
+                    if (capped == 0L) continue
+                    val newClipRel = oldClipRel + capped
+                    val newDuration = oldDuration - capped
+
+                    midiRepo.updateNoteTiming(id, newClipRel, newDuration)
+
+                    moveEntries.add(
+                        NoteOperation.MoveBatch.MoveEntry(
+                            noteId = id,
+                            oldStartMs = oldClipRel,
+                            newStartMs = newClipRel,
+                            oldPitch = note.pitch,
+                            newPitch = note.pitch
+                        )
+                    )
+                    resizeEntries.add(
+                        NoteOperation.ResizeBatch.ResizeEntry(
+                            noteId = id,
+                            clipRelativeStartMs = newClipRel,
+                            oldDurationMs = oldDuration,
+                            newDurationMs = newDuration
+                        )
+                    )
+                }
+
+                if (moveEntries.isEmpty()) return@launch
+
+                undoManager.push(
+                    NoteOperation.Composite(
+                        ops = listOf(
+                            NoteOperation.MoveBatch(moveEntries),
+                            NoteOperation.ResizeBatch(resizeEntries)
+                        )
+                    )
+                )
+                syncUndoRedoState()
+                midiRepo.recomputeTrackDuration(trackId)
+            } catch (e: Exception) {
+                Log.e(TAG, "Left-edge resize failed", e)
                 _effects.emit(PianoRollEffect.ShowError("Failed to resize notes"))
             }
         }
