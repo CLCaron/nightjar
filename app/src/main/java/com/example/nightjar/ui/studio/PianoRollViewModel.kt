@@ -124,6 +124,11 @@ sealed interface PianoRollAction {
     data object QuantizeSelected : PianoRollAction
     data object ToggleVelocityEditMode : PianoRollAction
     data class SetNoteVelocities(val newVelocities: Map<Long, Float>) : PianoRollAction
+    // Ruler / loop / selector
+    data class SetSelector(val ms: Long) : PianoRollAction
+    data class SetLoopRegion(val startMs: Long, val endMs: Long) : PianoRollAction
+    data object ClearLoopRegion : PianoRollAction
+    data object ToggleLoopEnabled : PianoRollAction
     // Scale & chord
     data object ToggleScale : PianoRollAction
     data class SetScaleRoot(val root: Int) : PianoRollAction
@@ -242,6 +247,11 @@ class PianoRollViewModel @Inject constructor(
                     idea?.scaleType ?: "MAJOR"
                 )
 
+                // Pull any active loop from the engine so a region set in
+                // Studio shows up here on entry. Studio and the piano roll
+                // share the engine's cached state.
+                val activeLoop = audioEngine.getCurrentLoopRegion()
+
                 _state.update {
                     it.copy(
                         trackId = trackId,
@@ -260,6 +270,9 @@ class PianoRollViewModel @Inject constructor(
                         gridResolution = idea?.gridResolution ?: 16,
                         scaleRoot = scaleRoot,
                         scaleType = scaleType,
+                        loopStartMs = activeLoop?.first,
+                        loopEndMs = activeLoop?.second,
+                        isLoopEnabled = activeLoop != null,
                         isLoading = false
                     )
                 }
@@ -360,6 +373,10 @@ class PianoRollViewModel @Inject constructor(
             PianoRollAction.ToggleVelocityEditMode ->
                 _state.update { it.copy(isVelocityEditMode = !it.isVelocityEditMode) }
             is PianoRollAction.SetNoteVelocities -> setNoteVelocities(action.newVelocities)
+            is PianoRollAction.SetSelector -> setSelector(action.ms)
+            is PianoRollAction.SetLoopRegion -> setLoopRegion(action.startMs, action.endMs)
+            PianoRollAction.ClearLoopRegion -> clearLoopRegion()
+            PianoRollAction.ToggleLoopEnabled -> toggleLoopEnabled()
             // Scale & chord
             PianoRollAction.ToggleScale -> toggleScale()
             is PianoRollAction.SetScaleRoot -> setScaleRoot(action.root)
@@ -967,6 +984,80 @@ class PianoRollViewModel @Inject constructor(
                 Log.e(TAG, "Set velocities failed", e)
                 _effects.emit(PianoRollEffect.ShowError("Failed to set velocity"))
             }
+        }
+    }
+
+    /**
+     * Set the selector position (the user's "where I want to start from"
+     * marker, mirrors Studio's cursor) and seek the playhead there. Snaps
+     * to the active grid resolution so a tap near a beat lands cleanly.
+     */
+    private fun setSelector(ms: Long) {
+        val st = _state.value
+        val snapped = MusicalTimeConverter.snapToGrid(
+            ms.coerceAtLeast(0L), st.bpm, st.gridResolution, st.timeSignatureDenominator
+        )
+        _state.update { it.copy(selectorMs = snapped) }
+        audioEngine.seekTo(snapped)
+    }
+
+    /**
+     * Set or replace the loop region. Snaps both endpoints to grid. Pushes
+     * the region to the audio engine, so playback wraps within it.
+     */
+    private fun setLoopRegion(startMs: Long, endMs: Long) {
+        val st = _state.value
+        val a = startMs.coerceAtLeast(0L)
+        val b = endMs.coerceAtLeast(0L)
+        val rawStart = minOf(a, b)
+        val rawEnd = maxOf(a, b)
+        val snappedStart = MusicalTimeConverter.snapToGrid(
+            rawStart, st.bpm, st.gridResolution, st.timeSignatureDenominator
+        )
+        val snappedEnd = MusicalTimeConverter.snapToGrid(
+            rawEnd, st.bpm, st.gridResolution, st.timeSignatureDenominator
+        )
+        // Treat zero-length drags as "clear": snapping can collapse a tiny
+        // span when both endpoints land in the same grid cell.
+        if (snappedEnd <= snappedStart) {
+            clearLoopRegion()
+            return
+        }
+        _state.update {
+            it.copy(
+                loopStartMs = snappedStart,
+                loopEndMs = snappedEnd,
+                isLoopEnabled = true
+            )
+        }
+        audioEngine.setLoopRegion(snappedStart, snappedEnd)
+    }
+
+    private fun clearLoopRegion() {
+        _state.update {
+            it.copy(loopStartMs = null, loopEndMs = null, isLoopEnabled = false)
+        }
+        audioEngine.clearLoopRegion()
+    }
+
+    /**
+     * Toggle the loop's engaged state. When the region exists but is
+     * disengaged, calling this re-engages it without the user having to
+     * redraw the bracket. When engaged, calling this disengages without
+     * losing the region (matches Studio's behavior).
+     */
+    private fun toggleLoopEnabled() {
+        val st = _state.value
+        when {
+            st.isLoopEnabled -> {
+                _state.update { it.copy(isLoopEnabled = false) }
+                audioEngine.clearLoopRegion()
+            }
+            !st.isLoopEnabled && st.loopStartMs != null && st.loopEndMs != null -> {
+                _state.update { it.copy(isLoopEnabled = true) }
+                audioEngine.setLoopRegion(st.loopStartMs, st.loopEndMs)
+            }
+            else -> Unit  // no region defined, nothing to toggle
         }
     }
 

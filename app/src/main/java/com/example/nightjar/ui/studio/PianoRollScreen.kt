@@ -6,7 +6,9 @@ import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
+import androidx.compose.foundation.gestures.horizontalDrag
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -76,6 +78,7 @@ import com.example.nightjar.ui.components.NjKnob
 import com.example.nightjar.ui.components.NjRecessedPanel
 import com.example.nightjar.ui.theme.IbmPlexMono
 import com.example.nightjar.ui.theme.NjBg
+import com.example.nightjar.ui.theme.NjCursorTeal
 import com.example.nightjar.ui.theme.NjMuted
 import com.example.nightjar.ui.theme.NjMuted2
 import com.example.nightjar.ui.theme.NjOnBg
@@ -231,8 +234,27 @@ fun PianoRollScreen(
         // Sits just below the top bar so it's glance-able from any sub-panel.
         ChordReferenceStrip(chords = state.diatonicChords)
 
-        // PHASE 7 TODO: replace with the real adaptive timeline ruler.
-        PianoRollTimelineRulerPlaceholder()
+        // Adaptive timeline ruler: bar/beat labels, selector + loop region,
+        // tap to set selector, drag to define/adjust loop. Scrolls with the grid.
+        PianoRollTimelineRuler(
+            contentMs = contentMs,
+            pxPerMs = PX_PER_MS * horizontalZoom * density.density,
+            bpm = state.bpm,
+            timeSigNum = state.timeSignatureNumerator,
+            timeSigDen = state.timeSignatureDenominator,
+            gridResolution = state.gridResolution,
+            selectorMs = state.selectorMs,
+            positionMs = state.positionMs,
+            isPlaying = state.isPlaying,
+            loopStartMs = state.loopStartMs,
+            loopEndMs = state.loopEndMs,
+            isLoopEnabled = state.isLoopEnabled,
+            horizontalScrollState = horizontalScrollState,
+            onSetSelector = { ms -> viewModel.onAction(PianoRollAction.SetSelector(ms)) },
+            onSetLoopRegion = { startMs, endMs ->
+                viewModel.onAction(PianoRollAction.SetLoopRegion(startMs, endMs))
+            }
+        )
 
         // Piano keys + Grid -- weight(1f) so the placeholders below sit at the bottom.
         Row(
@@ -490,7 +512,10 @@ fun PianoRollScreen(
                             isScaleEnabled = state.isScaleEnabled,
                             scaleRoot = state.scaleRoot,
                             scaleType = state.scaleType,
-                            scaleHighlightColor = pianoAmber
+                            scaleHighlightColor = pianoAmber,
+                            loopStartMs = state.loopStartMs,
+                            loopEndMs = state.loopEndMs,
+                            isLoopEnabled = state.isLoopEnabled
                         )
                     }
                 }
@@ -665,7 +690,10 @@ private fun DrawScope.drawGrid(
     isScaleEnabled: Boolean = false,
     scaleRoot: Int = 0,
     scaleType: MusicalScaleHelper.ScaleType = MusicalScaleHelper.ScaleType.MAJOR,
-    scaleHighlightColor: Color = Color.Transparent
+    scaleHighlightColor: Color = Color.Transparent,
+    loopStartMs: Long? = null,
+    loopEndMs: Long? = null,
+    isLoopEnabled: Boolean = false
 ) {
     val totalHeight = TOTAL_NOTES * rowHeightPx
     val beatMs = 60_000.0 / bpm
@@ -709,6 +737,19 @@ private fun DrawScope.drawGrid(
             start = Offset(0f, y),
             end = Offset(size.width, y),
             strokeWidth = if (isC) 1f else 0.5f
+        )
+    }
+
+    // Loop region: translucent amber fill across the full pitch range so the
+    // user can see at a glance where the loop wraps. Sits behind clip regions
+    // and notes; alpha is lower when the loop is set-but-disengaged.
+    if (loopStartMs != null && loopEndMs != null && loopEndMs > loopStartMs) {
+        val loopStartPx = loopStartMs * pxPerMs
+        val loopWidthPx = (loopEndMs - loopStartMs) * pxPerMs
+        drawRect(
+            color = amberColor.copy(alpha = if (isLoopEnabled) 0.08f else 0.04f),
+            topLeft = Offset(loopStartPx, 0f),
+            size = Size(loopWidthPx, totalHeight)
         )
     }
 
@@ -1586,23 +1627,294 @@ private fun formatTopBarSubtitle(state: PianoRollState): String {
 // These render the new layout shape so the screen reads as the redesign
 // in progress. Phases 2-10 progressively replace each with real behavior.
 
-/** PHASE 7 will replace this with the adaptive timeline ruler. */
+/**
+ * Adaptive timeline ruler for the full-screen piano roll.
+ *
+ * Mirrors Studio's TimeRuler: bar/beat/sub-beat ticks with measure number
+ * labels that adapt to zoom -- bar ticks always, beat ticks once each
+ * beat is wider than 4px, sub-beat ticks at the active grid resolution
+ * once those are visible too.
+ *
+ * Renders the selector (NjCursorTeal vertical line) and the loop region
+ * band (amber fill + endpoint borders + triangle handles) on top of the
+ * ticks. The grid playhead extends through the ruler so the user sees
+ * the playback position in musical time.
+ *
+ * Gestures: tap = SetSelector at tap position. Drag from far away = define
+ * a new loop region from down position to release position. Drag near an
+ * existing loop handle = adjust just that endpoint. The ruler scrolls
+ * horizontally in lockstep with the grid via [horizontalScrollState].
+ */
 @Composable
-private fun PianoRollTimelineRulerPlaceholder() {
-    Box(
+private fun PianoRollTimelineRuler(
+    contentMs: Long,
+    pxPerMs: Float,
+    bpm: Double,
+    timeSigNum: Int,
+    timeSigDen: Int,
+    gridResolution: Int,
+    selectorMs: Long,
+    positionMs: Long,
+    isPlaying: Boolean,
+    loopStartMs: Long?,
+    loopEndMs: Long?,
+    isLoopEnabled: Boolean,
+    horizontalScrollState: ScrollState,
+    onSetSelector: (Long) -> Unit,
+    onSetLoopRegion: (Long, Long) -> Unit
+) {
+    val density = LocalDensity.current
+    val gridWidthDp = with(density) { (contentMs * pxPerMs).toDp() }
+    val textMeasurer = rememberTextMeasurer()
+    val rulerHeight = 28.dp
+
+    // Hoist composable theme reads -- DrawScope is not composable.
+    val tickColor = NjMuted2.copy(alpha = 0.55f)
+    val subBeatColor = NjMuted2.copy(alpha = 0.25f)
+    val labelColor = NjOnBg.copy(alpha = 0.75f)
+    val selectorColor = NjCursorTeal
+    val loopColor = NjAmber
+    val playheadColor = NjAmber
+
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(24.dp)
-            .background(NjPanelInset),
-        contentAlignment = Alignment.CenterEnd
+            .height(rulerHeight)
+            .background(NjSurface)
     ) {
-        Text(
-            text = "RULER",
-            fontFamily = IbmPlexMono,
-            fontSize = 9.sp,
-            color = NjMuted2.copy(alpha = 0.6f),
-            modifier = Modifier.padding(horizontal = 8.dp)
-        )
+        // Empty 48dp column to match the keys column above the grid.
+        Box(modifier = Modifier.width(KEYS_WIDTH_DP.dp).fillMaxHeight())
+
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .background(NjPanelInset)
+                .horizontalScroll(horizontalScrollState)
+        ) {
+            Canvas(
+                modifier = Modifier
+                    .width(gridWidthDp)
+                    .fillMaxHeight()
+                    .pointerInput(loopStartMs, loopEndMs, pxPerMs) {
+                        val handleHitZonePx = 32.dp.toPx()
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            down.consume()
+                            val touchX = down.position.x
+
+                            val startPx = loopStartMs?.let { it * pxPerMs }
+                            val endPx = loopEndMs?.let { it * pxPerMs }
+                            val nearStart = startPx != null &&
+                                abs(touchX - startPx) <= handleHitZonePx
+                            val nearEnd = endPx != null &&
+                                abs(touchX - endPx) <= handleHitZonePx
+
+                            // Pick the closer handle when both are in range.
+                            val handleMode: Int = when {
+                                nearStart && nearEnd -> {
+                                    if (abs(touchX - startPx!!) <= abs(touchX - endPx!!)) 1 else 2
+                                }
+                                nearStart -> 1
+                                nearEnd -> 2
+                                else -> 0
+                            }
+
+                            // Wait for slop-crossing drag, or release for a tap.
+                            val firstDrag = awaitHorizontalTouchSlopOrCancellation(down.id) { c, _ ->
+                                c.consume()
+                            }
+                            if (firstDrag == null) {
+                                // Pure tap -- set selector at tap position.
+                                if (handleMode == 0) {
+                                    val tapMs = (touchX / pxPerMs).toLong().coerceAtLeast(0L)
+                                    onSetSelector(tapMs)
+                                }
+                                return@awaitEachGesture
+                            }
+
+                            when (handleMode) {
+                                1 -> {
+                                    // Drag the loop start handle.
+                                    horizontalDrag(firstDrag.id) { change ->
+                                        change.consume()
+                                        val ms = (change.position.x / pxPerMs)
+                                            .toLong().coerceAtLeast(0L)
+                                        val keepEnd = loopEndMs ?: return@horizontalDrag
+                                        onSetLoopRegion(ms, keepEnd)
+                                    }
+                                }
+                                2 -> {
+                                    // Drag the loop end handle.
+                                    horizontalDrag(firstDrag.id) { change ->
+                                        change.consume()
+                                        val ms = (change.position.x / pxPerMs)
+                                            .toLong().coerceAtLeast(0L)
+                                        val keepStart = loopStartMs ?: return@horizontalDrag
+                                        onSetLoopRegion(keepStart, ms)
+                                    }
+                                }
+                                else -> {
+                                    // Define a new loop region from down to finger position.
+                                    val anchorMs = (touchX / pxPerMs).toLong().coerceAtLeast(0L)
+                                    horizontalDrag(firstDrag.id) { change ->
+                                        change.consume()
+                                        val ms = (change.position.x / pxPerMs)
+                                            .toLong().coerceAtLeast(0L)
+                                        onSetLoopRegion(anchorMs, ms)
+                                    }
+                                }
+                            }
+                        }
+                    }
+            ) {
+                val rulerHeightPx = size.height
+                val tickAreaTop = rulerHeightPx * 0.45f
+                val beatTickTop = rulerHeightPx * 0.65f
+                val subBeatTickTop = rulerHeightPx * 0.78f
+
+                fun msToX(ms: Double): Float = (ms * pxPerMs).toFloat()
+
+                val beatMs = MusicalTimeConverter.msPerBeat(bpm, timeSigDen)
+                val measureMs = MusicalTimeConverter.msPerMeasure(bpm, timeSigNum, timeSigDen)
+                if (beatMs <= 0.0 || measureMs <= 0.0) return@Canvas
+
+                val beatPx = (beatMs * pxPerMs).toFloat()
+                val showBeatTicks = beatPx >= 4f
+                val gridStepMs = MusicalTimeConverter.msPerGridStep(bpm, gridResolution, timeSigDen)
+                val gridStepPx = if (gridStepMs > 0.0) (gridStepMs * pxPerMs).toFloat() else 0f
+                val showSubBeat = gridStepPx >= 4f && gridStepMs < beatMs
+
+                val labelStyle = TextStyle(color = labelColor, fontSize = 10.sp)
+
+                var ms = 0.0
+                var measureNumber = 1
+                while (ms <= contentMs) {
+                    val x = msToX(ms)
+                    if (x > size.width) break
+
+                    // Measure tick (full height of tick area)
+                    drawLine(
+                        color = tickColor,
+                        start = Offset(x, tickAreaTop),
+                        end = Offset(x, rulerHeightPx),
+                        strokeWidth = 1f
+                    )
+
+                    // Measure number label above the tick
+                    val label = measureNumber.toString()
+                    val measured = textMeasurer.measure(label, labelStyle)
+                    drawText(
+                        textLayoutResult = measured,
+                        topLeft = Offset(x + 3f, tickAreaTop - measured.size.height - 1f)
+                    )
+
+                    if (showBeatTicks) {
+                        for (beat in 1 until timeSigNum) {
+                            val beatX = msToX(ms + beat * beatMs)
+                            if (beatX > size.width) break
+                            drawLine(
+                                color = tickColor.copy(alpha = 0.7f),
+                                start = Offset(beatX, beatTickTop),
+                                end = Offset(beatX, rulerHeightPx),
+                                strokeWidth = 0.5f
+                            )
+                        }
+                        if (showSubBeat) {
+                            var stepMs = gridStepMs
+                            while (stepMs < measureMs - 0.5) {
+                                val frac = stepMs / beatMs
+                                val isBeat = frac - frac.toLong() < 0.01 || frac - frac.toLong() > 0.99
+                                if (!isBeat) {
+                                    val stepX = msToX(ms + stepMs)
+                                    if (stepX > size.width) break
+                                    drawLine(
+                                        color = subBeatColor,
+                                        start = Offset(stepX, subBeatTickTop),
+                                        end = Offset(stepX, rulerHeightPx),
+                                        strokeWidth = 0.5f
+                                    )
+                                }
+                                stepMs += gridStepMs
+                            }
+                        }
+                    }
+
+                    ms += measureMs
+                    measureNumber++
+                }
+
+                // Loop region: amber fill across the ruler height, endpoint
+                // bars at left/right, triangle handles flagging the bracket.
+                if (loopStartMs != null && loopEndMs != null && loopEndMs > loopStartMs) {
+                    val sX = (loopStartMs * pxPerMs).toFloat()
+                    val eX = (loopEndMs * pxPerMs).toFloat()
+                    val fillAlpha = if (isLoopEnabled) 0.18f else 0.08f
+                    val borderAlpha = if (isLoopEnabled) 0.7f else 0.35f
+                    drawRect(
+                        color = loopColor.copy(alpha = fillAlpha),
+                        topLeft = Offset(sX, 0f),
+                        size = Size(eX - sX, rulerHeightPx)
+                    )
+                    drawLine(
+                        color = loopColor.copy(alpha = borderAlpha),
+                        start = Offset(sX, 0f),
+                        end = Offset(sX, rulerHeightPx),
+                        strokeWidth = 2f
+                    )
+                    drawLine(
+                        color = loopColor.copy(alpha = borderAlpha),
+                        start = Offset(eX, 0f),
+                        end = Offset(eX, rulerHeightPx),
+                        strokeWidth = 2f
+                    )
+                    val triW = 10.dp.toPx()
+                    val triH = 8.dp.toPx()
+                    drawPath(
+                        path = androidx.compose.ui.graphics.Path().apply {
+                            moveTo(sX, 0f)
+                            lineTo(sX + triW, 0f)
+                            lineTo(sX, triH)
+                            close()
+                        },
+                        color = loopColor.copy(alpha = borderAlpha)
+                    )
+                    drawPath(
+                        path = androidx.compose.ui.graphics.Path().apply {
+                            moveTo(eX, 0f)
+                            lineTo(eX - triW, 0f)
+                            lineTo(eX, triH)
+                            close()
+                        },
+                        color = loopColor.copy(alpha = borderAlpha)
+                    )
+                }
+
+                // Selector line (cursor teal) -- always rendered, even at 0.
+                val selectorX = (selectorMs * pxPerMs).toFloat()
+                if (selectorX in 0f..size.width) {
+                    drawLine(
+                        color = selectorColor,
+                        start = Offset(selectorX, 0f),
+                        end = Offset(selectorX, rulerHeightPx),
+                        strokeWidth = 1.5f
+                    )
+                }
+
+                // Playhead line in the ruler (matches grid playhead).
+                if (isPlaying || positionMs > 0) {
+                    val playheadX = (positionMs * pxPerMs).toFloat()
+                    if (playheadX in 0f..size.width) {
+                        drawLine(
+                            color = playheadColor,
+                            start = Offset(playheadX, 0f),
+                            end = Offset(playheadX, rulerHeightPx),
+                            strokeWidth = 2f
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
