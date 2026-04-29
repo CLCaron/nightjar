@@ -36,8 +36,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
@@ -87,6 +85,7 @@ import com.example.nightjar.ui.theme.NjTrackColors
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.ui.Alignment
@@ -213,105 +212,20 @@ fun PianoRollScreen(
             .background(NjBg)
             .statusBarsPadding()
     ) {
-        // Toolbar
-        TopAppBar(
-            title = {
-                Column {
-                    Text(
-                        text = state.trackName.ifEmpty { "Piano Roll" },
-                        style = MaterialTheme.typography.titleSmall,
-                        color = NjOnBg
-                    )
-                    if (state.instrumentName.isNotEmpty()) {
-                        Text(
-                            text = state.instrumentName,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = NjMuted2
-                        )
-                    }
-                }
-            },
-            navigationIcon = {
-                IconButton(onClick = onBack) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = NjOnBg
-                    )
-                }
-            },
-            actions = {
-                NjButton(
-                    text = "",
-                    icon = Icons.AutoMirrored.Filled.Undo,
-                    onClick = { viewModel.onAction(PianoRollAction.Undo) },
-                    textColor = if (state.canUndo) NjOnBg else NjMuted2.copy(alpha = 0.3f)
-                )
-                Spacer(Modifier.width(2.dp))
-                NjButton(
-                    text = "",
-                    icon = Icons.AutoMirrored.Filled.Redo,
-                    onClick = { viewModel.onAction(PianoRollAction.Redo) },
-                    textColor = if (state.canRedo) NjOnBg else NjMuted2.copy(alpha = 0.3f)
-                )
-                Spacer(Modifier.width(2.dp))
-                NjButton(
-                    text = "",
-                    icon = Icons.Filled.Delete,
-                    onClick = { viewModel.onAction(PianoRollAction.DeleteSelected) },
-                    textColor = if (state.selectedNoteIds.isNotEmpty()) NjError else NjMuted2.copy(alpha = 0.3f)
-                )
-                Spacer(Modifier.width(8.dp))
-                @OptIn(ExperimentalFoundationApi::class)
-                Box(
-                    modifier = Modifier.combinedClickable(
-                        onClick = { viewModel.onAction(PianoRollAction.CycleGridResolution) },
-                        onLongClick = {
-                            horizontalZoom = 1f
-                            verticalZoom = 1f
-                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                        }
-                    )
-                ) {
-                    NjButton(
-                        text = "1/${state.gridResolution}",
-                        onClick = { viewModel.onAction(PianoRollAction.CycleGridResolution) },
-                        textColor = NjAmber.copy(alpha = 0.8f)
-                    )
-                }
-                Spacer(Modifier.width(4.dp))
-                NjButton(
-                    text = "Snap",
-                    onClick = { viewModel.onAction(PianoRollAction.ToggleSnap) },
-                    isActive = state.isSnapEnabled,
-                    ledColor = NjAmber
-                )
-                Spacer(Modifier.width(4.dp))
-                NjButton(
-                    text = "Restart",
-                    icon = Icons.Filled.SkipPrevious,
-                    onClick = { viewModel.onAction(PianoRollAction.SeekTo(0L)) },
-                    textColor = NjLedGreen.copy(alpha = 0.5f),
-                )
-                Spacer(Modifier.width(4.dp))
-                NjButton(
-                    text = "Play",
-                    icon = NjIcons.PlayPause,
-                    onClick = {
-                        if (state.isPlaying) viewModel.onAction(PianoRollAction.Pause)
-                        else viewModel.onAction(PianoRollAction.Play)
-                    },
-                    isActive = state.isPlaying,
-                    ledColor = NjLedGreen
-                )
-                Spacer(Modifier.width(8.dp))
-            },
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = NjSurface
-            )
+        // New captioned top bar: BACK, title (track + KEY/BPM/INSTRUMENT), RESTART, PLAY.
+        // Replaces the old TopAppBar. Undo/Redo/Delete migrate to TOOLS panel
+        // (phase 4); GridRes + Snap migrate to the bottom-row chips below.
+        PianoRollTopBar(
+            state = state,
+            onBack = onBack,
+            onRestart = { viewModel.onAction(PianoRollAction.Restart) },
+            onPlayPause = {
+                if (state.isPlaying) viewModel.onAction(PianoRollAction.Pause)
+                else viewModel.onAction(PianoRollAction.Play)
+            }
         )
 
-        // Scale & chord controls
+        // PHASE 5 TODO: move into the SCALE sub-panel; remove this row.
         ScaleChordControls(state = state, onAction = viewModel::onAction)
 
         // Diatonic chord reference strip (visible when scale is enabled)
@@ -595,9 +509,13 @@ fun PianoRollScreen(
             onTabSelect = { viewModel.onAction(PianoRollAction.SwitchTab(it)) }
         )
 
-        // PHASE 3 TODO: real two-row sub-panel scaffolding (controls top, grid
-        // chips bottom). For now: a single placeholder per active tab.
-        PianoRollSubPanelPlaceholder(activeTab = state.activeTab)
+        // Two-row sub-panel: per-tab content top, persistent grid chips + SNAP
+        // toggle on the bottom. Tab content placeholders fill in over phases 4-6 + 10.
+        PianoRollSubPanel(
+            activeTab = state.activeTab,
+            state = state,
+            onAction = viewModel::onAction
+        )
     }
 }
 
@@ -1418,6 +1336,85 @@ private suspend fun PointerInputScope.detectPinchZoom(
     }
 }
 
+// ── New top bar (phase 2) ───────────────────────────────────────────
+
+/**
+ * Captioned top bar for the full-screen piano roll.
+ *
+ * Layout: BACK on the left, two-line title in the middle (track name on top,
+ * KEY · BPM · INSTRUMENT below), RESTART + PLAY on the right. Mirrors a
+ * Roland/Korg faceplate -- every control is a labeled hardware button.
+ */
+@Composable
+private fun PianoRollTopBar(
+    state: PianoRollState,
+    onBack: () -> Unit,
+    onRestart: () -> Unit,
+    onPlayPause: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(NjSurface)
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        NjButton(
+            text = "",
+            icon = Icons.AutoMirrored.Filled.ArrowBack,
+            caption = "BACK",
+            onClick = onBack
+        )
+        Spacer(Modifier.width(8.dp))
+        Column(
+            modifier = Modifier.weight(1f)
+        ) {
+            Text(
+                text = state.trackName.ifEmpty { "Piano Roll" },
+                style = MaterialTheme.typography.titleSmall,
+                color = NjOnBg,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = formatTopBarSubtitle(state),
+                fontFamily = IbmPlexMono,
+                fontSize = 10.sp,
+                color = NjMuted2,
+                letterSpacing = 0.5.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        NjButton(
+            text = "",
+            icon = Icons.Filled.SkipPrevious,
+            caption = "RESTART",
+            onClick = onRestart
+        )
+        Spacer(Modifier.width(4.dp))
+        NjButton(
+            text = "",
+            icon = NjIcons.PlayPause,
+            caption = "PLAY",
+            onClick = onPlayPause,
+            isActive = state.isPlaying,
+            ledColor = NjLedGreen
+        )
+    }
+}
+
+private fun formatTopBarSubtitle(state: PianoRollState): String {
+    val key = MusicalScaleHelper.NOTE_NAMES[state.scaleRoot.coerceIn(0, 11)]
+    // 3-letter abbreviation of the scale type for the LCD readout aesthetic
+    // (e.g. MAJOR -> MAJ, DORIAN -> DOR). Matches the Roland/Korg compact form.
+    val scale = state.scaleType.name.take(3)
+    val bpm = state.bpm.toInt()
+    val instr = state.instrumentName.uppercase().ifEmpty { "—" }
+    return "$key $scale · $bpm BPM · $instr"
+}
+
 // ── Phase 1 skeleton placeholders ───────────────────────────────────
 // These render the new layout shape so the screen reads as the redesign
 // in progress. Phases 2-10 progressively replace each with real behavior.
@@ -1530,57 +1527,82 @@ private fun PianoRollTabBar(
     }
 }
 
-/** PHASE 3 will replace this with the real two-row sub-panel scaffolding
- *  (active tab's controls on top, persistent grid chips on the bottom). */
+/**
+ * Two-row sub-panel under the tab bar.
+ *
+ * Top row: per-tab controls (placeholders for TOOLS / SCALE / EDIT / INSTR
+ * until phases 4-6 + 10 fill them in).
+ *
+ * Bottom row: persistent grid resolution chips (1/2 1/4 1/8 1/16 1/32) on
+ * the left, a thin bevel separator, then the SNAP toggle on the right.
+ * Always visible regardless of active tab.
+ */
 @Composable
-private fun PianoRollSubPanelPlaceholder(activeTab: PianoRollTab) {
+private fun PianoRollSubPanel(
+    activeTab: PianoRollTab,
+    state: PianoRollState,
+    onAction: (PianoRollAction) -> Unit
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(NjBg)
     ) {
-        // Top row: the active tab's controls placeholder.
+        // ── Top row: tab content placeholder ──
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(48.dp)
+                .height(56.dp)
                 .background(NjSurface)
                 .padding(horizontal = 12.dp),
             contentAlignment = Alignment.CenterStart
         ) {
+            val phaseLabel = when (activeTab) {
+                PianoRollTab.TOOLS -> "TOOLS panel — phase 4"
+                PianoRollTab.SCALE -> "SCALE panel — phase 5"
+                PianoRollTab.EDIT -> "EDIT panel — phase 6"
+                PianoRollTab.INSTR -> "INSTR — phase 10"
+            }
             Text(
-                text = "${activeTab.name} PANEL — placeholder",
+                text = phaseLabel,
                 fontFamily = IbmPlexMono,
                 fontSize = 10.sp,
                 color = NjMuted
             )
         }
-        // Bottom row: grid-resolution chips placeholder (phase 3 wires them up).
+
+        // ── Bottom row: grid chips + SNAP toggle ──
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(36.dp)
                 .background(NjPanelInset)
-                .padding(horizontal = 8.dp, vertical = 4.dp),
+                .padding(horizontal = 8.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            for (label in listOf("1/2", "1/4", "1/8", "1/16", "1/32")) {
-                Box(
-                    modifier = Modifier
-                        .height(24.dp)
-                        .background(NjSurface)
-                        .padding(horizontal = 8.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = label,
-                        fontFamily = IbmPlexMono,
-                        fontSize = 10.sp,
-                        color = NjMuted2.copy(alpha = 0.6f)
-                    )
-                }
+            for (value in listOf(2, 4, 8, 16, 32)) {
+                NjButton(
+                    text = "1/$value",
+                    onClick = { onAction(PianoRollAction.SetGridResolution(value)) },
+                    isActive = state.gridResolution == value,
+                    ledColor = NjAmber
+                )
             }
+            Spacer(Modifier.weight(1f))
+            // Thin bevel separator -- groups chips visually distinct from SNAP.
+            Box(
+                modifier = Modifier
+                    .width(1.dp)
+                    .height(20.dp)
+                    .background(Color.White.copy(alpha = 0.08f))
+            )
+            Spacer(Modifier.width(6.dp))
+            NjButton(
+                text = "SNAP",
+                onClick = { onAction(PianoRollAction.ToggleSnap) },
+                isActive = state.isSnapEnabled,
+                ledColor = NjAmber
+            )
         }
     }
 }

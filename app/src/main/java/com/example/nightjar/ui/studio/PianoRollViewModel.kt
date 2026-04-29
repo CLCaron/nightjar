@@ -79,6 +79,12 @@ data class PianoRollState(
     val gridResolution: Int = 16,
     val isSnapEnabled: Boolean = true,
     val stickyNoteDurationMs: Long? = null,
+    // Selector (mirrors Studio's cursor): set by ruler tap, drives RESTART target.
+    val selectorMs: Long = 0L,
+    // Loop region (engine-level state, synced in phase 7). Drives RESTART when on.
+    val loopStartMs: Long? = null,
+    val loopEndMs: Long? = null,
+    val isLoopEnabled: Boolean = false,
     // Scale & chord
     val scaleRoot: Int = 0,
     val scaleType: MusicalScaleHelper.ScaleType = MusicalScaleHelper.ScaleType.MAJOR,
@@ -105,9 +111,11 @@ sealed interface PianoRollAction {
     data class PreviewPitch(val pitch: Int) : PianoRollAction
     data object ToggleSnap : PianoRollAction
     data object CycleGridResolution : PianoRollAction
+    data class SetGridResolution(val value: Int) : PianoRollAction
     data object Play : PianoRollAction
     data object Pause : PianoRollAction
     data class SeekTo(val positionMs: Long) : PianoRollAction
+    data object Restart : PianoRollAction
     // Scale & chord
     data object ToggleScale : PianoRollAction
     data class SetScaleRoot(val root: Int) : PianoRollAction
@@ -332,9 +340,11 @@ class PianoRollViewModel @Inject constructor(
             is PianoRollAction.PreviewPitch -> previewPitch(action.pitch)
             PianoRollAction.ToggleSnap -> _state.update { it.copy(isSnapEnabled = !it.isSnapEnabled) }
             PianoRollAction.CycleGridResolution -> cycleGridResolution()
+            is PianoRollAction.SetGridResolution -> setGridResolution(action.value)
             PianoRollAction.Play -> audioEngine.play()
             PianoRollAction.Pause -> audioEngine.pause()
             is PianoRollAction.SeekTo -> audioEngine.seekTo(action.positionMs)
+            PianoRollAction.Restart -> restart()
             // Scale & chord
             PianoRollAction.ToggleScale -> toggleScale()
             is PianoRollAction.SetScaleRoot -> setScaleRoot(action.root)
@@ -686,10 +696,31 @@ class PianoRollViewModel @Inject constructor(
     // ── Grid ─────────────────────────────────────────────────────────
 
     private fun cycleGridResolution() {
-        val presets = listOf(4, 8, 16, 32)
+        val presets = listOf(2, 4, 8, 16, 32)
         val current = _state.value.gridResolution
-        val nextIndex = (presets.indexOf(current) + 1) % presets.size
+        val nextIndex = (presets.indexOf(current).coerceAtLeast(0) + 1) % presets.size
         _state.update { it.copy(gridResolution = presets[nextIndex], stickyNoteDurationMs = null) }
+    }
+
+    private fun setGridResolution(value: Int) {
+        if (value <= 0) return
+        _state.update { it.copy(gridResolution = value, stickyNoteDurationMs = null) }
+    }
+
+    /**
+     * Restart playback to the natural restart point: loop start if loop is on,
+     * else the user-set selector position, else 0. Preserves playback state --
+     * does NOT pause. This mirrors Studio's planned restart-button behavior
+     * and replaces the legacy direct seekTo(0) wired to the old toolbar.
+     */
+    private fun restart() {
+        val st = _state.value
+        val target = when {
+            st.isLoopEnabled && st.loopStartMs != null -> st.loopStartMs
+            st.selectorMs > 0L -> st.selectorMs
+            else -> 0L
+        }
+        audioEngine.seekTo(target)
     }
 
     private fun previewPitch(pitch: Int) {
