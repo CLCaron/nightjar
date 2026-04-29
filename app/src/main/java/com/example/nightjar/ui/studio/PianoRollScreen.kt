@@ -626,6 +626,7 @@ fun PianoRollScreen(
                                                     (rect.y2 / rowHeightPx).toInt()).coerceIn(0, 127)
                                                 val pitchRange = minOf(topPitch, bottomPitch)..
                                                     maxOf(topPitch, bottomPitch)
+                                                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                                                 viewModel.onAction(
                                                     PianoRollAction.SelectNotesInRect(
                                                         startMs = startMs,
@@ -1959,6 +1960,7 @@ private fun PianoRollTimelineRuler(
     val gridWidthDp = with(density) { (contentMs * pxPerMs).toDp() }
     val textMeasurer = rememberTextMeasurer()
     val rulerHeight = 28.dp
+    val view = LocalView.current
 
     // Hoist composable theme reads -- DrawScope is not composable.
     val tickColor = NjMuted2.copy(alpha = 0.55f)
@@ -2019,11 +2021,16 @@ private fun PianoRollTimelineRuler(
                             if (firstDrag == null) {
                                 // Pure tap -- set selector at tap position.
                                 if (handleMode == 0) {
+                                    view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
                                     val tapMs = (touchX / pxPerMs).toLong().coerceAtLeast(0L)
                                     onSetSelector(tapMs)
                                 }
                                 return@awaitEachGesture
                             }
+
+                            // Drag began -- haptic latch matches the existing
+                            // long-press feel on note drags.
+                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
 
                             when (handleMode) {
                                 1 -> {
@@ -2237,6 +2244,7 @@ private fun PianoRollVelocityStrip(
 ) {
     val density = LocalDensity.current
     val gridWidthDp = with(density) { (contentMs * pxPerMs).toDp() }
+    val view = LocalView.current
 
     // Live preview during drag -- renders before the VM commits on release.
     var previewVelocities by remember { mutableStateOf<Map<Long, Float>>(emptyMap()) }
@@ -2289,6 +2297,7 @@ private fun PianoRollVelocityStrip(
                                     tapMs <= n.startMs + n.durationMs
                             } ?: return@awaitEachGesture
                             down.consume()
+                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
 
                             val startVelocities = selectedNoteIds.associateWith { id ->
                                 notes.find { it.id == id }?.velocity ?: 0.8f
