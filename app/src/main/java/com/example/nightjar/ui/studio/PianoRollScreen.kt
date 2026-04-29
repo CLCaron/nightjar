@@ -54,7 +54,9 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerId
@@ -137,6 +139,14 @@ private data class GroupDragState(
     val isResize: Boolean = false
 )
 
+/** Marquee selection rectangle in canvas-content coordinates. */
+private data class MarqueeRect(
+    val x1: Float,
+    val y1: Float,
+    val x2: Float,
+    val y2: Float
+)
+
 /** Timeout for double-tap-to-delete detection. */
 private const val DOUBLE_TAP_TIMEOUT_MS = 300L
 
@@ -198,6 +208,8 @@ fun PianoRollScreen(
 
     // Drag preview state (local to composable, not in ViewModel)
     var dragState by remember { mutableStateOf<GroupDragState?>(null) }
+    // Marquee selection rect during box-drag (local; only the result hits the VM)
+    var marqueeRect by remember { mutableStateOf<MarqueeRect?>(null) }
 
     // Double-tap detection state
     var lastTapNoteId by remember { mutableStateOf<Long?>(null) }
@@ -292,7 +304,7 @@ fun PianoRollScreen(
                         .fillMaxHeight()
                         .pointerInput(effectiveMaxHZoom) {
                             detectPinchZoom(
-                                canStart = { dragState == null },
+                                canStart = { dragState == null && marqueeRect == null },
                                 onPinchStart = { isPinching = true },
                                 onPinchZoom = { scaleX, scaleY, centroidX, centroidY ->
                                     val oldHZoom = horizontalZoom
@@ -448,7 +460,8 @@ fun PianoRollScreen(
                                             }
                                         }
                                     } else {
-                                        // ── EMPTY CELL: tap to clear selection or place note ──
+                                        // ── EMPTY CELL: tap = place note / clear selection;
+                                        //    long-press + drag = marquee box-select ──
                                         val longPress = awaitLongPressOrCancellation(down.id)
                                         if (longPress == null) {
                                             val fingerLifted = currentEvent.changes
@@ -485,6 +498,68 @@ fun PianoRollScreen(
                                                     )
                                                 }
                                             }
+                                        } else {
+                                            // Marquee start. Track absolute (canvas-content)
+                                            // coords so the rect stays put under the finger
+                                            // when scroll moves the canvas.
+                                            longPress.consume()
+                                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                            val anchorAbsX = down.position.x + horizontalScrollState.value
+                                            val anchorAbsY = down.position.y + verticalScrollState.value
+                                            var lastAbsX = anchorAbsX
+                                            var lastAbsY = anchorAbsY
+                                            marqueeRect = MarqueeRect(
+                                                x1 = anchorAbsX,
+                                                y1 = anchorAbsY,
+                                                x2 = anchorAbsX,
+                                                y2 = anchorAbsY
+                                            )
+                                            while (true) {
+                                                val event = awaitPointerEvent()
+                                                val change = event.changes.firstOrNull { it.id == down.id }
+                                                    ?: break
+                                                if (!change.pressed) {
+                                                    change.consume()
+                                                    break
+                                                }
+                                                change.consume()
+                                                lastAbsX = change.position.x + horizontalScrollState.value
+                                                lastAbsY = change.position.y + verticalScrollState.value
+                                                marqueeRect = MarqueeRect(
+                                                    x1 = minOf(anchorAbsX, lastAbsX),
+                                                    y1 = minOf(anchorAbsY, lastAbsY),
+                                                    x2 = maxOf(anchorAbsX, lastAbsX),
+                                                    y2 = maxOf(anchorAbsY, lastAbsY)
+                                                )
+                                            }
+                                            val rect = marqueeRect
+                                            marqueeRect = null
+                                            // Require minimum movement so a motionless long-press
+                                            // doesn't fire a 0-area selection that wipes the
+                                            // existing selection set.
+                                            val minMovePx = 8.dp.toPx()
+                                            val movedEnough = rect != null &&
+                                                ((rect.x2 - rect.x1) > minMovePx ||
+                                                 (rect.y2 - rect.y1) > minMovePx)
+                                            if (rect != null && movedEnough) {
+                                                val startMs = (rect.x1 / pxPerMs).toLong()
+                                                    .coerceAtLeast(0L)
+                                                val endMs = (rect.x2 / pxPerMs).toLong()
+                                                    .coerceAtLeast(startMs)
+                                                val topPitch = (TOTAL_NOTES - 1 -
+                                                    (rect.y1 / rowHeightPx).toInt()).coerceIn(0, 127)
+                                                val bottomPitch = (TOTAL_NOTES - 1 -
+                                                    (rect.y2 / rowHeightPx).toInt()).coerceIn(0, 127)
+                                                val pitchRange = minOf(topPitch, bottomPitch)..
+                                                    maxOf(topPitch, bottomPitch)
+                                                viewModel.onAction(
+                                                    PianoRollAction.SelectNotesInRect(
+                                                        startMs = startMs,
+                                                        endMs = endMs,
+                                                        pitchRange = pitchRange
+                                                    )
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -515,7 +590,8 @@ fun PianoRollScreen(
                             scaleHighlightColor = pianoAmber,
                             loopStartMs = state.loopStartMs,
                             loopEndMs = state.loopEndMs,
-                            isLoopEnabled = state.isLoopEnabled
+                            isLoopEnabled = state.isLoopEnabled,
+                            marqueeRect = marqueeRect
                         )
                     }
                 }
@@ -693,7 +769,8 @@ private fun DrawScope.drawGrid(
     scaleHighlightColor: Color = Color.Transparent,
     loopStartMs: Long? = null,
     loopEndMs: Long? = null,
-    isLoopEnabled: Boolean = false
+    isLoopEnabled: Boolean = false,
+    marqueeRect: MarqueeRect? = null
 ) {
     val totalHeight = TOTAL_NOTES * rowHeightPx
     val beatMs = 60_000.0 / bpm
@@ -911,6 +988,28 @@ private fun DrawScope.drawGrid(
                 size = Size(w, h),
                 cornerRadius = cornerRadius,
                 style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f)
+            )
+        }
+    }
+
+    // Marquee (box-select) -- dashed amber rectangle while the user drags.
+    if (marqueeRect != null) {
+        val w = marqueeRect.x2 - marqueeRect.x1
+        val h = marqueeRect.y2 - marqueeRect.y1
+        if (w > 0f && h > 0f) {
+            drawRect(
+                color = amberColor.copy(alpha = 0.10f),
+                topLeft = Offset(marqueeRect.x1, marqueeRect.y1),
+                size = Size(w, h)
+            )
+            drawRect(
+                color = amberColor,
+                topLeft = Offset(marqueeRect.x1, marqueeRect.y1),
+                size = Size(w, h),
+                style = Stroke(
+                    width = 1.5f,
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 4f))
+                )
             )
         }
     }

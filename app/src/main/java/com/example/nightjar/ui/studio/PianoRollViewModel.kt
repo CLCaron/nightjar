@@ -129,6 +129,11 @@ sealed interface PianoRollAction {
     data class SetLoopRegion(val startMs: Long, val endMs: Long) : PianoRollAction
     data object ClearLoopRegion : PianoRollAction
     data object ToggleLoopEnabled : PianoRollAction
+    data class SelectNotesInRect(
+        val startMs: Long,
+        val endMs: Long,
+        val pitchRange: IntRange
+    ) : PianoRollAction
     // Scale & chord
     data object ToggleScale : PianoRollAction
     data class SetScaleRoot(val root: Int) : PianoRollAction
@@ -377,6 +382,8 @@ class PianoRollViewModel @Inject constructor(
             is PianoRollAction.SetLoopRegion -> setLoopRegion(action.startMs, action.endMs)
             PianoRollAction.ClearLoopRegion -> clearLoopRegion()
             PianoRollAction.ToggleLoopEnabled -> toggleLoopEnabled()
+            is PianoRollAction.SelectNotesInRect ->
+                selectNotesInRect(action.startMs, action.endMs, action.pitchRange)
             // Scale & chord
             PianoRollAction.ToggleScale -> toggleScale()
             is PianoRollAction.SetScaleRoot -> setScaleRoot(action.root)
@@ -1046,6 +1053,25 @@ class PianoRollViewModel @Inject constructor(
      * redraw the bracket. When engaged, calling this disengages without
      * losing the region (matches Studio's behavior).
      */
+    /**
+     * Replace the current selection with all notes whose bounding rect
+     * intersects the given timeline span and pitch range. Marquee semantics:
+     * a fresh marquee resets selection to the matched set.
+     */
+    private fun selectNotesInRect(startMs: Long, endMs: Long, pitchRange: IntRange) {
+        val st = _state.value
+        val matched = st.notes.asSequence()
+            .filter { note ->
+                val noteEnd = note.startMs + note.durationMs
+                note.pitch in pitchRange &&
+                    noteEnd >= startMs &&
+                    note.startMs <= endMs
+            }
+            .map { it.id }
+            .toSet()
+        _state.update { it.copy(selectedNoteIds = matched) }
+    }
+
     private fun toggleLoopEnabled() {
         val st = _state.value
         when {
