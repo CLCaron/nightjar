@@ -106,6 +106,8 @@ sealed interface PianoRollAction {
     data class ToggleNoteSelection(val noteId: Long) : PianoRollAction
     data object ClearSelection : PianoRollAction
     data object DeleteSelected : PianoRollAction
+    data object SplitSelected : PianoRollAction
+    data object CopySelected : PianoRollAction
     data object Undo : PianoRollAction
     data object Redo : PianoRollAction
     data class PreviewPitch(val pitch: Int) : PianoRollAction
@@ -335,6 +337,8 @@ class PianoRollViewModel @Inject constructor(
             is PianoRollAction.ToggleNoteSelection -> toggleNoteSelection(action.noteId)
             PianoRollAction.ClearSelection -> _state.update { it.copy(selectedNoteIds = emptySet()) }
             PianoRollAction.DeleteSelected -> deleteSelected()
+            PianoRollAction.SplitSelected -> splitSelected()
+            PianoRollAction.CopySelected -> copySelected()
             PianoRollAction.Undo -> undo()
             PianoRollAction.Redo -> redo()
             is PianoRollAction.PreviewPitch -> previewPitch(action.pitch)
@@ -550,6 +554,140 @@ class PianoRollViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Split selected notes at the playhead, falling back to the note's midpoint
+     * when the playhead is outside it. Each selected note becomes two notes that
+     * sum to the original duration. Notes shorter than 100ms are left alone.
+     * Wrapped as a single undo entry via NoteOperation.Composite.
+     */
+    private fun splitSelected() {
+        viewModelScope.launch {
+            try {
+                val st = _state.value
+                if (st.selectedNoteIds.isEmpty()) return@launch
+
+                val resizeEntries = mutableListOf<NoteOperation.ResizeBatch.ResizeEntry>()
+                val newNoteEntities = mutableListOf<MidiNoteEntity>()
+
+                for (id in st.selectedNoteIds) {
+                    val note = st.notes.find { it.id == id } ?: continue
+                    val info = noteClipMap[id] ?: continue
+                    if (note.durationMs < 100L) continue   // too short to split meaningfully
+
+                    val noteStartAbs = note.startMs
+                    val noteEndAbs = noteStartAbs + note.durationMs
+                    val splitAbs = if (st.positionMs in (noteStartAbs + 50)..(noteEndAbs - 50)) {
+                        st.positionMs
+                    } else {
+                        noteStartAbs + note.durationMs / 2
+                    }
+                    val firstHalfDuration = splitAbs - noteStartAbs
+                    val secondHalfDuration = note.durationMs - firstHalfDuration
+                    if (firstHalfDuration < 50L || secondHalfDuration < 50L) continue
+
+                    val clipRelStart = info.rawStartMs
+                    val clipRelSplit = clipRelStart + firstHalfDuration
+
+                    // Truncate the original to the first half.
+                    midiRepo.updateNoteTiming(id, clipRelStart, firstHalfDuration)
+                    resizeEntries.add(
+                        NoteOperation.ResizeBatch.ResizeEntry(
+                            noteId = id,
+                            clipRelativeStartMs = clipRelStart,
+                            oldDurationMs = note.durationMs,
+                            newDurationMs = firstHalfDuration
+                        )
+                    )
+
+                    // Build the second half (same pitch, same clip).
+                    newNoteEntities.add(
+                        MidiNoteEntity(
+                            trackId = trackId,
+                            clipId = info.clipId,
+                            pitch = note.pitch,
+                            startMs = clipRelSplit,
+                            durationMs = secondHalfDuration
+                        )
+                    )
+                }
+
+                if (resizeEntries.isEmpty() && newNoteEntities.isEmpty()) return@launch
+
+                val newIds = if (newNoteEntities.isNotEmpty()) {
+                    midiRepo.insertNotes(newNoteEntities)
+                } else emptyList()
+                val newSnapshots = if (newIds.isNotEmpty()) midiRepo.getNotesByIds(newIds) else emptyList()
+
+                val composite = NoteOperation.Composite(
+                    ops = buildList {
+                        if (resizeEntries.isNotEmpty()) {
+                            add(NoteOperation.ResizeBatch(resizeEntries))
+                        }
+                        if (newIds.isNotEmpty()) {
+                            add(NoteOperation.Place(noteIds = newIds, snapshots = newSnapshots))
+                        }
+                    }
+                )
+                undoManager.push(composite)
+                syncUndoRedoState()
+
+                midiRepo.recomputeTrackDuration(trackId)
+                // Selection now includes both halves of every split note.
+                _state.update {
+                    it.copy(selectedNoteIds = it.selectedNoteIds + newIds.toSet())
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Split failed", e)
+                _effects.emit(PianoRollEffect.ShowError("Failed to split notes"))
+            }
+        }
+    }
+
+    /**
+     * Duplicate selected notes immediately to the right of the selection with
+     * no gap. Each new note keeps its pitch and duration but starts at
+     * (originalStart + selectionSpan). Single Place undo entry.
+     */
+    private fun copySelected() {
+        viewModelScope.launch {
+            try {
+                val st = _state.value
+                if (st.selectedNoteIds.isEmpty()) return@launch
+                val sourceNotes = st.notes.filter { it.id in st.selectedNoteIds }
+                if (sourceNotes.isEmpty()) return@launch
+
+                val minStartAbs = sourceNotes.minOf { it.startMs }
+                val maxEndAbs = sourceNotes.maxOf { it.startMs + it.durationMs }
+                val spanMs = (maxEndAbs - minStartAbs).coerceAtLeast(50L)
+
+                val newEntities = sourceNotes.map { src ->
+                    val newAbsStart = src.startMs + spanMs
+                    val targetClip = findClipForPosition(newAbsStart)
+                    val newClipRel = (newAbsStart - targetClip.offsetMs).coerceAtLeast(0L)
+                    MidiNoteEntity(
+                        trackId = trackId,
+                        clipId = targetClip.id,
+                        pitch = src.pitch,
+                        startMs = newClipRel,
+                        durationMs = src.durationMs
+                    )
+                }
+
+                val newIds = midiRepo.insertNotes(newEntities)
+                val newSnapshots = midiRepo.getNotesByIds(newIds)
+
+                undoManager.push(NoteOperation.Place(noteIds = newIds, snapshots = newSnapshots))
+                syncUndoRedoState()
+
+                midiRepo.recomputeTrackDuration(trackId)
+                _state.update { it.copy(selectedNoteIds = newIds.toSet()) }
+            } catch (e: Exception) {
+                Log.e(TAG, "Copy failed", e)
+                _effects.emit(PianoRollEffect.ShowError("Failed to copy notes"))
+            }
+        }
+    }
+
     private fun undo() {
         viewModelScope.launch {
             try {
@@ -620,6 +758,14 @@ class PianoRollViewModel @Inject constructor(
                 for (entry in op.entries) {
                     val targetDuration = if (reverse) entry.oldDurationMs else entry.newDurationMs
                     midiRepo.updateNoteTiming(entry.noteId, entry.clipRelativeStartMs, targetDuration)
+                }
+            }
+            is NoteOperation.Composite -> {
+                // Reverse: undo each sub-op in reverse order with reverse semantics.
+                // Forward: redo each sub-op in order with forward semantics.
+                val ordered = if (reverse) op.ops.reversed() else op.ops
+                for (sub in ordered) {
+                    executeOperation(sub, reverse)
                 }
             }
         }

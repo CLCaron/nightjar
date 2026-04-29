@@ -22,8 +22,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.CallSplit
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -1336,6 +1338,72 @@ private suspend fun PointerInputScope.detectPinchZoom(
     }
 }
 
+// ── TOOLS panel (phase 4) ───────────────────────────────────────────
+
+/**
+ * TOOLS sub-panel content: SPLIT, ERASE, COPY, UNDO, REDO. Five captioned
+ * NjButtons in a row, each weighted equally so they fill the sub-panel width.
+ *
+ * Disabled state: each button dims via `textColor` when its action would be
+ * a no-op. The button still receives the tap (and the haptic) but the VM
+ * handler bails early -- same pattern the old toolbar used for Undo/Redo.
+ */
+@Composable
+private fun ToolsPanelContent(
+    state: PianoRollState,
+    onAction: (PianoRollAction) -> Unit
+) {
+    val hasSelection = state.selectedNoteIds.isNotEmpty()
+    val dimColor = NjMuted2.copy(alpha = 0.3f)
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        NjButton(
+            text = "",
+            icon = Icons.AutoMirrored.Filled.CallSplit,
+            caption = "SPLIT",
+            onClick = { onAction(PianoRollAction.SplitSelected) },
+            textColor = if (hasSelection) NjOnBg else dimColor,
+            modifier = Modifier.weight(1f)
+        )
+        NjButton(
+            text = "",
+            icon = Icons.Filled.Delete,
+            caption = "ERASE",
+            onClick = { onAction(PianoRollAction.DeleteSelected) },
+            textColor = if (hasSelection) NjError else dimColor,
+            modifier = Modifier.weight(1f)
+        )
+        NjButton(
+            text = "",
+            icon = Icons.Filled.ContentCopy,
+            caption = "COPY",
+            onClick = { onAction(PianoRollAction.CopySelected) },
+            textColor = if (hasSelection) NjOnBg else dimColor,
+            modifier = Modifier.weight(1f)
+        )
+        NjButton(
+            text = "",
+            icon = Icons.AutoMirrored.Filled.Undo,
+            caption = "UNDO",
+            onClick = { onAction(PianoRollAction.Undo) },
+            textColor = if (state.canUndo) NjOnBg else dimColor,
+            modifier = Modifier.weight(1f)
+        )
+        NjButton(
+            text = "",
+            icon = Icons.AutoMirrored.Filled.Redo,
+            caption = "REDO",
+            onClick = { onAction(PianoRollAction.Redo) },
+            textColor = if (state.canRedo) NjOnBg else dimColor,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
 // ── New top bar (phase 2) ───────────────────────────────────────────
 
 /**
@@ -1548,27 +1616,38 @@ private fun PianoRollSubPanel(
             .fillMaxWidth()
             .background(NjBg)
     ) {
-        // ── Top row: tab content placeholder ──
+        // ── Top row: per-tab content ──
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(56.dp)
                 .background(NjSurface)
-                .padding(horizontal = 12.dp),
-            contentAlignment = Alignment.CenterStart
+                .padding(horizontal = 8.dp, vertical = 6.dp)
         ) {
-            val phaseLabel = when (activeTab) {
-                PianoRollTab.TOOLS -> "TOOLS panel — phase 4"
-                PianoRollTab.SCALE -> "SCALE panel — phase 5"
-                PianoRollTab.EDIT -> "EDIT panel — phase 6"
-                PianoRollTab.INSTR -> "INSTR — phase 10"
+            when (activeTab) {
+                PianoRollTab.TOOLS -> ToolsPanelContent(state, onAction)
+                else -> {
+                    val phaseLabel = when (activeTab) {
+                        PianoRollTab.SCALE -> "SCALE panel — phase 5"
+                        PianoRollTab.EDIT -> "EDIT panel — phase 6"
+                        PianoRollTab.INSTR -> "INSTR — phase 10"
+                        else -> ""
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp)
+                            .padding(horizontal = 4.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        Text(
+                            text = phaseLabel,
+                            fontFamily = IbmPlexMono,
+                            fontSize = 10.sp,
+                            color = NjMuted
+                        )
+                    }
+                }
             }
-            Text(
-                text = phaseLabel,
-                fontFamily = IbmPlexMono,
-                fontSize = 10.sp,
-                color = NjMuted
-            )
         }
 
         // ── Bottom row: grid chips + SNAP toggle ──
