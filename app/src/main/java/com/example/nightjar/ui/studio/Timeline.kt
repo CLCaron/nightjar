@@ -599,10 +599,8 @@ internal fun TimelineRulerRow(
                     RulerGestureLayer(
                         loopStartMs = loopStartMs,
                         loopEndMs = loopEndMs,
-                        cursorPositionMs = cursorPositionMs,
                         isRecording = isRecording,
                         msPerDp = msPerDp,
-                        totalDurationMs = totalDurationMs,
                         timelineWidth = timelineWidthDp,
                         onScrub = onScrub,
                         onScrubFinished = onScrubFinished,
@@ -2833,7 +2831,7 @@ private fun LoopOverlaySegment(
 }
 
 /** Drag mode for the ruler gesture layer. */
-private enum class RulerDragMode { SCRUB, DRAG_CURSOR, ADJUST_LOOP_START, ADJUST_LOOP_END }
+private enum class RulerDragMode { SCRUB, ADJUST_LOOP_START, ADJUST_LOOP_END }
 
 /**
  * Ruler-height gesture layer for scrub and loop-handle interactions.
@@ -2846,10 +2844,8 @@ private enum class RulerDragMode { SCRUB, DRAG_CURSOR, ADJUST_LOOP_START, ADJUST
 private fun RulerGestureLayer(
     loopStartMs: Long?,
     loopEndMs: Long?,
-    cursorPositionMs: Long,
     isRecording: Boolean,
     msPerDp: Float,
-    totalDurationMs: Long,
     timelineWidth: Dp,
     onScrub: (Long) -> Unit,
     onScrubFinished: (Long) -> Unit,
@@ -2858,8 +2854,6 @@ private fun RulerGestureLayer(
     val density = LocalDensity.current
     val currentStartMs by rememberUpdatedState(loopStartMs)
     val currentEndMs by rememberUpdatedState(loopEndMs)
-    val currentCursorMs by rememberUpdatedState(cursorPositionMs)
-    val currentTotalMs by rememberUpdatedState(totalDurationMs)
     val currentIsRecording by rememberUpdatedState(isRecording)
     val currentOnScrub by rememberUpdatedState(onScrub)
     val currentOnScrubFinished by rememberUpdatedState(onScrubFinished)
@@ -2871,7 +2865,6 @@ private fun RulerGestureLayer(
             .height(RULER_HEIGHT)
             .pointerInput(msPerDp) {
                 val handleHitZonePx = 32.dp.toPx()
-                val cursorHitZonePx = 16.dp.toPx()
 
                 fun pxToMs(px: Float): Long =
                     ((px / density.density) * msPerDp).toLong()
@@ -2896,10 +2889,11 @@ private fun RulerGestureLayer(
                     val nearEnd = hasRegion &&
                             abs(touchX - endPx) <= handleHitZonePx
 
-                    // Check cursor proximity
-                    val cursorPx = msToPx(currentCursorMs)
-                    val nearCursor = abs(touchX - cursorPx) <= cursorHitZonePx
-
+                    // Loop handles get a 32dp grab zone; everything else is
+                    // a scrub. We previously had a 16dp "near the cursor"
+                    // zone that swallowed taps without falling through to
+                    // scrub, which made tapping near the playhead silently
+                    // do nothing.
                     val dragMode = when {
                         nearStart && nearEnd -> {
                             if (abs(touchX - startPx) <= abs(touchX - endPx))
@@ -2907,7 +2901,6 @@ private fun RulerGestureLayer(
                         }
                         nearStart -> RulerDragMode.ADJUST_LOOP_START
                         nearEnd -> RulerDragMode.ADJUST_LOOP_END
-                        nearCursor -> RulerDragMode.DRAG_CURSOR
                         else -> RulerDragMode.SCRUB
                     }
 
@@ -2949,24 +2942,6 @@ private fun RulerGestureLayer(
                             if (!dragged) {
                                 // Pure tap -- set cursor position
                                 currentOnAction(StudioAction.SetCursorPosition(tapMs))
-                            }
-                        }
-
-                        RulerDragMode.DRAG_CURSOR -> {
-                            if (currentIsRecording) return@awaitEachGesture
-
-                            // Drag the cursor triangle
-                            val slop = awaitHorizontalTouchSlopOrCancellation(down.id) { change, _ ->
-                                change.consume()
-                            }
-                            if (slop != null) {
-                                horizontalDrag(slop.id) { change ->
-                                    change.consume()
-                                    val fingerMs = pxToMs(change.position.x)
-                                    currentOnAction(StudioAction.SetCursorPosition(fingerMs))
-                                }
-                            } else {
-                                // Tap on cursor -- no-op (already at cursor position)
                             }
                         }
 
