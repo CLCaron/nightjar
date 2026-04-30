@@ -2,6 +2,9 @@ package com.example.nightjar.ui.studio
 
 import android.view.HapticFeedbackConstants
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
@@ -132,6 +135,13 @@ private val EDGE_TOUCH_ZONE = 16.dp
 
 /** Fast long-press threshold in ms (matches Timeline). */
 private const val FAST_LONG_PRESS_MS = 200L
+
+/**
+ * Fixed envelope height for the per-tab content row in the sub-panel. Sized
+ * to the tallest tab (SCALE, two sub-rows). Other tabs center vertically
+ * within this height so switching tabs no longer makes the sub-panel jump.
+ */
+private val SUB_PANEL_CONTENT_HEIGHT = 124.dp
 
 private val NOTE_NAMES = arrayOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 private val BLACK_KEYS = setOf(1, 3, 6, 8, 10) // indices within octave
@@ -701,13 +711,24 @@ fun PianoRollScreen(
             onTabSelect = { viewModel.onAction(PianoRollAction.SwitchTab(it)) }
         )
 
-        // Two-row sub-panel: per-tab content top, persistent grid chips + SNAP
-        // toggle on the bottom. Tab content placeholders fill in over phases 4-6 + 10.
-        PianoRollSubPanel(
-            activeTab = state.activeTab,
-            state = state,
-            onAction = viewModel::onAction
-        )
+        // Sub-panel slides down off-screen when INSTR is active so the
+        // grid-resolution chips and per-tab controls don't clutter the
+        // patch picker (they're irrelevant there). The piano roll's
+        // weight(1f) main content area expands to fill the freed space
+        // automatically.
+        AnimatedVisibility(
+            visible = state.activeTab != PianoRollTab.INSTR,
+            enter = expandVertically(animationSpec = tween(280)) +
+                    slideInVertically(animationSpec = tween(280)) { h -> h },
+            exit = shrinkVertically(animationSpec = tween(280)) +
+                    slideOutVertically(animationSpec = tween(280)) { h -> h }
+        ) {
+            PianoRollSubPanel(
+                activeTab = state.activeTab,
+                state = state,
+                onAction = viewModel::onAction
+            )
+        }
     }
 }
 
@@ -2473,36 +2494,23 @@ private fun PianoRollSubPanel(
             .background(NjBg)
     ) {
         // ── Top row: per-tab content ──
+        // Fixed height so the sub-panel doesn't jump when switching tabs.
+        // Sized to fit the tallest layout (SCALE's two sub-rows). Shorter
+        // panels (TOOLS, EDIT) center vertically inside this envelope.
+        // INSTR never reaches this row -- the whole sub-panel slides away.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .height(SUB_PANEL_CONTENT_HEIGHT)
                 .background(NjSurface)
-                .padding(horizontal = 8.dp, vertical = 6.dp)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            contentAlignment = Alignment.CenterStart
         ) {
             when (activeTab) {
                 PianoRollTab.TOOLS -> ToolsPanelContent(state, onAction)
                 PianoRollTab.SCALE -> ScalePanelContent(state, onAction)
                 PianoRollTab.EDIT -> EditPanelContent(state, onAction)
-                PianoRollTab.INSTR -> {
-                    // Picker fills the main content area; the sub-panel's top
-                    // row collapses to a small LCD hint so the chips below
-                    // stay reachable.
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(28.dp)
-                            .padding(horizontal = 12.dp),
-                        contentAlignment = Alignment.CenterStart
-                    ) {
-                        Text(
-                            text = "PICKER ACTIVE — TAP A PATCH ABOVE",
-                            fontFamily = IbmPlexMono,
-                            fontSize = 9.sp,
-                            color = NjMuted,
-                            letterSpacing = 1.sp
-                        )
-                    }
-                }
+                PianoRollTab.INSTR -> Unit  // hidden -- sub-panel slides away
             }
         }
 
