@@ -53,6 +53,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
@@ -1970,6 +1971,16 @@ private fun PianoRollTimelineRuler(
     val loopColor = NjAmber
     val playheadColor = NjAmber
 
+    // Capture latest values without restarting the pointerInput coroutine on
+    // every change. Keying pointerInput on loopStartMs/loopEndMs would cancel
+    // the in-flight drag the moment we updated state, which made loop region
+    // drags die after a single snap step.
+    val currentLoopStart by rememberUpdatedState(loopStartMs)
+    val currentLoopEnd by rememberUpdatedState(loopEndMs)
+    val currentPxPerMs by rememberUpdatedState(pxPerMs)
+    val currentOnSetSelector by rememberUpdatedState(onSetSelector)
+    val currentOnSetLoopRegion by rememberUpdatedState(onSetLoopRegion)
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1990,15 +2001,16 @@ private fun PianoRollTimelineRuler(
                 modifier = Modifier
                     .width(gridWidthDp)
                     .fillMaxHeight()
-                    .pointerInput(loopStartMs, loopEndMs, pxPerMs) {
+                    .pointerInput(Unit) {
                         val handleHitZonePx = 32.dp.toPx()
                         awaitEachGesture {
                             val down = awaitFirstDown(requireUnconsumed = false)
                             down.consume()
                             val touchX = down.position.x
+                            val px = currentPxPerMs
 
-                            val startPx = loopStartMs?.let { it * pxPerMs }
-                            val endPx = loopEndMs?.let { it * pxPerMs }
+                            val startPx = currentLoopStart?.let { it * px }
+                            val endPx = currentLoopEnd?.let { it * px }
                             val nearStart = startPx != null &&
                                 abs(touchX - startPx) <= handleHitZonePx
                             val nearEnd = endPx != null &&
@@ -2022,8 +2034,8 @@ private fun PianoRollTimelineRuler(
                                 // Pure tap -- set selector at tap position.
                                 if (handleMode == 0) {
                                     view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
-                                    val tapMs = (touchX / pxPerMs).toLong().coerceAtLeast(0L)
-                                    onSetSelector(tapMs)
+                                    val tapMs = (touchX / px).toLong().coerceAtLeast(0L)
+                                    currentOnSetSelector(tapMs)
                                 }
                                 return@awaitEachGesture
                             }
@@ -2037,30 +2049,30 @@ private fun PianoRollTimelineRuler(
                                     // Drag the loop start handle.
                                     horizontalDrag(firstDrag.id) { change ->
                                         change.consume()
-                                        val ms = (change.position.x / pxPerMs)
+                                        val ms = (change.position.x / currentPxPerMs)
                                             .toLong().coerceAtLeast(0L)
-                                        val keepEnd = loopEndMs ?: return@horizontalDrag
-                                        onSetLoopRegion(ms, keepEnd)
+                                        val keepEnd = currentLoopEnd ?: return@horizontalDrag
+                                        currentOnSetLoopRegion(ms, keepEnd)
                                     }
                                 }
                                 2 -> {
                                     // Drag the loop end handle.
                                     horizontalDrag(firstDrag.id) { change ->
                                         change.consume()
-                                        val ms = (change.position.x / pxPerMs)
+                                        val ms = (change.position.x / currentPxPerMs)
                                             .toLong().coerceAtLeast(0L)
-                                        val keepStart = loopStartMs ?: return@horizontalDrag
-                                        onSetLoopRegion(keepStart, ms)
+                                        val keepStart = currentLoopStart ?: return@horizontalDrag
+                                        currentOnSetLoopRegion(keepStart, ms)
                                     }
                                 }
                                 else -> {
                                     // Define a new loop region from down to finger position.
-                                    val anchorMs = (touchX / pxPerMs).toLong().coerceAtLeast(0L)
+                                    val anchorMs = (touchX / px).toLong().coerceAtLeast(0L)
                                     horizontalDrag(firstDrag.id) { change ->
                                         change.consume()
-                                        val ms = (change.position.x / pxPerMs)
+                                        val ms = (change.position.x / currentPxPerMs)
                                             .toLong().coerceAtLeast(0L)
-                                        onSetLoopRegion(anchorMs, ms)
+                                        currentOnSetLoopRegion(anchorMs, ms)
                                     }
                                 }
                             }
