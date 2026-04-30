@@ -2514,25 +2514,33 @@ private fun PianoRollSubPanel(
             }
         }
 
-        // ── Bottom row: grid chips + SNAP toggle ──
+        // ── Bottom row: grid resolution rotary + SNAP toggle ──
+        // The chips for 1/2 .. 1/32 used to live here, but each chip needed
+        // its own LED + label and SNAP got squished off the right edge in
+        // portrait. A rotary takes one widget's width, scales to any number
+        // of values, and frees room for SNAP to sit comfortably alongside.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(NjPanelInset)
                 .padding(horizontal = 8.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            for (value in listOf(2, 4, 8, 16, 32)) {
-                NjButton(
-                    text = "1/$value",
-                    onClick = { onAction(PianoRollAction.SetGridResolution(value)) },
-                    isActive = state.gridResolution == value,
-                    ledColor = NjAmber
-                )
-            }
+            NjRotarySelector(
+                options = GRID_RESOLUTION_OPTIONS,
+                selected = state.gridResolution,
+                onSelect = { value ->
+                    if (value != state.gridResolution) {
+                        onAction(PianoRollAction.SetGridResolution(value))
+                    }
+                },
+                label = { "1/$it" },
+                caption = "GRID"
+            )
             Spacer(Modifier.weight(1f))
-            // Thin bevel separator -- groups chips visually distinct from SNAP.
+            // Thin bevel separator -- visually groups GRID rotary distinct
+            // from SNAP toggle.
             Box(
                 modifier = Modifier
                     .width(1.dp)
@@ -2549,3 +2557,5 @@ private fun PianoRollSubPanel(
         }
     }
 }
+
+private val GRID_RESOLUTION_OPTIONS = listOf(2, 4, 8, 16, 32)
