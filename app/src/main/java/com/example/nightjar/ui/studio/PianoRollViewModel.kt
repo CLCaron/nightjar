@@ -157,6 +157,8 @@ sealed interface PianoRollEffect {
 private const val PREVIEW_CHANNEL = 15
 private const val PREVIEW_VELOCITY = 80
 private const val PREVIEW_DURATION_MS = 200L
+private const val PATCH_AUDITION_PITCH = 60   // Middle C
+private const val PATCH_AUDITION_DURATION_MS = 600L
 
 @HiltViewModel
 class PianoRollViewModel @Inject constructor(
@@ -406,7 +408,9 @@ class PianoRollViewModel @Inject constructor(
     /**
      * Update the track's MIDI program, write to DB, and resync the engine
      * channel so the new patch takes effect immediately. Mirrors Studio's
-     * setMidiInstrument flow but scoped to this track only.
+     * setMidiInstrument flow but scoped to this track only. Plays a brief
+     * audition (middle C on the preview channel) so the user hears the new
+     * patch on tap without having to play a note manually.
      */
     private fun setMidiInstrument(program: Int) {
         viewModelScope.launch {
@@ -420,10 +424,29 @@ class PianoRollViewModel @Inject constructor(
                         instrumentName = gmInstrumentName(program)
                     )
                 }
+                auditionProgram(program)
             } catch (e: Exception) {
                 Log.e(TAG, "SetMidiInstrument failed", e)
                 _effects.emit(PianoRollEffect.ShowError("Failed to change instrument"))
             }
+        }
+    }
+
+    /**
+     * Play a short middle-C audition on the dedicated preview channel for
+     * the given program. Used to confirm a patch change in the INSTR picker.
+     */
+    private fun auditionProgram(program: Int) {
+        previewNoteOffJob?.cancel()
+        audioEngine.previewNote(
+            channel = PREVIEW_CHANNEL,
+            pitch = PATCH_AUDITION_PITCH,
+            velocity = PREVIEW_VELOCITY,
+            program = program
+        )
+        previewNoteOffJob = viewModelScope.launch {
+            delay(PATCH_AUDITION_DURATION_MS)
+            audioEngine.synthNoteOff(PREVIEW_CHANNEL, PATCH_AUDITION_PITCH)
         }
     }
 
