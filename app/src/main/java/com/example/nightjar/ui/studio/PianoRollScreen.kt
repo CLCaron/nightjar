@@ -16,6 +16,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
+import androidx.compose.foundation.gestures.awaitTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.horizontalDrag
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
@@ -139,10 +140,11 @@ private const val FAST_LONG_PRESS_MS = 200L
 
 /**
  * Fixed envelope height for the per-tab content row in the sub-panel. Sized
- * to the tallest tab (SCALE, two sub-rows). Other tabs center vertically
- * within this height so switching tabs no longer makes the sub-panel jump.
+ * to the tallest tab (SCALE, two sub-rows: knob unit ~71dp + button row ~56dp
+ * + gap + padding). Other tabs center vertically within this height so
+ * switching tabs no longer makes the sub-panel jump.
  */
-private val SUB_PANEL_CONTENT_HEIGHT = 124.dp
+private val SUB_PANEL_CONTENT_HEIGHT = 148.dp
 
 private val NOTE_NAMES = arrayOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 private val BLACK_KEYS = setOf(1, 3, 6, 8, 10) // indices within octave
@@ -566,20 +568,47 @@ fun PianoRollScreen(
                                             }
                                         }
                                     } else {
-                                        // ── EMPTY CELL: tap = place note / clear selection;
-                                        //    long-press + drag = marquee box-select ──
-                                        val longPress = awaitLongPressOrCancellation(down.id)
-                                        if (longPress == null) {
+                                        // ── EMPTY CELL ──
+                                        // Mode dispatch:
+                                        //   DRAW   - long-press → marquee, tap → place / clear
+                                        //   SELECT - drag (touch slop) → marquee, tap → clear
+                                        //   ERASE  - tap → no-op
+                                        val mode = state.editorMode
+                                        val startMarquee: Boolean
+                                        val drag: androidx.compose.ui.input.pointer.PointerInputChange?
+                                        when (mode) {
+                                            EditorMode.SELECT -> {
+                                                // Drag-from-empty marquees immediately on slop.
+                                                // No long-press required -- mode already declares
+                                                // "I'm selecting."
+                                                drag = awaitTouchSlopOrCancellation(down.id) { c, _ ->
+                                                    c.consume()
+                                                }
+                                                startMarquee = drag != null
+                                            }
+                                            EditorMode.DRAW -> {
+                                                // Long-press to marquee (preserves the existing
+                                                // tap-to-place affordance so a quick tap still
+                                                // creates a note).
+                                                val longPress = awaitLongPressOrCancellation(down.id)
+                                                drag = longPress
+                                                startMarquee = longPress != null
+                                            }
+                                            EditorMode.ERASE -> {
+                                                drag = null
+                                                startMarquee = false
+                                            }
+                                        }
+
+                                        if (!startMarquee) {
                                             val fingerLifted = currentEvent.changes
                                                 .none { it.id == down.id && it.pressed }
                                             if (fingerLifted) {
                                                 lastTapNoteId = null
                                                 lastTapTimeMs = 0L
                                                 if (state.selectedNoteIds.isNotEmpty()) {
-                                                    // Clear selection regardless of mode -- tapping
-                                                    // empty space always exits the selection state.
                                                     viewModel.onAction(PianoRollAction.ClearSelection)
-                                                } else if (state.editorMode == EditorMode.DRAW) {
+                                                } else if (mode == EditorMode.DRAW) {
                                                     val pitch = TOTAL_NOTES - 1 -
                                                         (down.position.y / rowHeightPx).toInt()
                                                     val tapMs = (down.position.x / pxPerMs).toLong()
@@ -605,15 +634,12 @@ fun PianoRollScreen(
                                                         )
                                                     )
                                                 }
-                                                // SELECT and ERASE: empty tap with no selection
-                                                // is a no-op. SELECT users get to keep tapping
-                                                // empty space without accidentally placing notes.
                                             }
                                         } else {
                                             // Marquee start. Track absolute (canvas-content)
                                             // coords so the rect stays put under the finger
                                             // when scroll moves the canvas.
-                                            longPress.consume()
+                                            drag?.consume()
                                             view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                                             val anchorAbsX = down.position.x + horizontalScrollState.value
                                             val anchorAbsY = down.position.y + verticalScrollState.value
@@ -645,9 +671,6 @@ fun PianoRollScreen(
                                             }
                                             val rect = marqueeRect
                                             marqueeRect = null
-                                            // Require minimum movement so a motionless long-press
-                                            // doesn't fire a 0-area selection that wipes the
-                                            // existing selection set.
                                             val minMovePx = 8.dp.toPx()
                                             val movedEnough = rect != null &&
                                                 ((rect.x2 - rect.x1) > minMovePx ||
