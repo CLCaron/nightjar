@@ -103,8 +103,19 @@ data class PianoRollState(
      * switches.
      */
     val isPanelCollapsed: Boolean = false,
+    /**
+     * Active editor mode. Disambiguates what taps and drags on the grid mean:
+     *  - DRAW: tap empty = place note, drag note = move, long-press = resize
+     *  - SELECT: tap note = toggle selection, drag empty = marquee
+     *  - ERASE: tap note = delete
+     * Acts as a hardware-style mode switch instead of overloading gestures.
+     */
+    val editorMode: EditorMode = EditorMode.DRAW,
     val isLoading: Boolean = true
 )
+
+/** Editing mode for grid interactions. */
+enum class EditorMode { DRAW, SELECT, ERASE }
 
 /** User-initiated actions on the piano roll editor. */
 sealed interface PianoRollAction {
@@ -152,6 +163,7 @@ sealed interface PianoRollAction {
     data class SetChordType(val type: MusicalScaleHelper.ChordType) : PianoRollAction
     // Tab/sub-panel
     data class SwitchTab(val tab: PianoRollTab) : PianoRollAction
+    data class SetEditorMode(val mode: EditorMode) : PianoRollAction
     // INSTR (embedded picker)
     data class SetMidiInstrument(val program: Int) : PianoRollAction
 }
@@ -421,6 +433,7 @@ class PianoRollViewModel @Inject constructor(
                     }
                 }
             }
+            is PianoRollAction.SetEditorMode -> _state.update { it.copy(editorMode = action.mode) }
             is PianoRollAction.SetMidiInstrument -> setMidiInstrument(action.program)
         }
     }

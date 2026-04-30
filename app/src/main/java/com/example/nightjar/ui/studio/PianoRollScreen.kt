@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Tune
 import com.example.nightjar.ui.components.NjIcons
@@ -473,24 +474,33 @@ fun PianoRollScreen(
                                                 )
                                             }
                                         } else {
-                                            // Tap on edge = double-tap or toggle selection
+                                            // Tap on edge: ERASE deletes; DRAW/SELECT toggle
+                                            // selection (with double-tap-to-delete fallback so
+                                            // DRAW users still have a quick delete affordance).
                                             val fingerLifted = currentEvent.changes
                                                 .none { it.id == down.id && it.pressed }
                                             if (fingerLifted) {
-                                                val now = System.currentTimeMillis()
-                                                if (lastTapNoteId == edgeNote.id &&
-                                                    now - lastTapTimeMs < DOUBLE_TAP_TIMEOUT_MS
-                                                ) {
+                                                if (state.editorMode == EditorMode.ERASE) {
                                                     view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                                                     viewModel.onAction(PianoRollAction.QuickDeleteNote(edgeNote.id))
                                                     lastTapNoteId = null
                                                     lastTapTimeMs = 0L
                                                 } else {
-                                                    viewModel.onAction(
-                                                        PianoRollAction.ToggleNoteSelection(edgeNote.id)
-                                                    )
-                                                    lastTapNoteId = edgeNote.id
-                                                    lastTapTimeMs = now
+                                                    val now = System.currentTimeMillis()
+                                                    if (lastTapNoteId == edgeNote.id &&
+                                                        now - lastTapTimeMs < DOUBLE_TAP_TIMEOUT_MS
+                                                    ) {
+                                                        view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                                        viewModel.onAction(PianoRollAction.QuickDeleteNote(edgeNote.id))
+                                                        lastTapNoteId = null
+                                                        lastTapTimeMs = 0L
+                                                    } else {
+                                                        viewModel.onAction(
+                                                            PianoRollAction.ToggleNoteSelection(edgeNote.id)
+                                                        )
+                                                        lastTapNoteId = edgeNote.id
+                                                        lastTapTimeMs = now
+                                                    }
                                                 }
                                             }
                                         }
@@ -526,23 +536,32 @@ fun PianoRollScreen(
                                                 onCancel = { dragState = null }
                                             )
                                         } else {
+                                            // Tap on body: ERASE deletes; DRAW/SELECT toggle
+                                            // selection (with double-tap-to-delete fallback).
                                             val fingerLifted = currentEvent.changes
                                                 .none { it.id == down.id && it.pressed }
                                             if (fingerLifted) {
-                                                val now = System.currentTimeMillis()
-                                                if (lastTapNoteId == hitNote.id &&
-                                                    now - lastTapTimeMs < DOUBLE_TAP_TIMEOUT_MS
-                                                ) {
+                                                if (state.editorMode == EditorMode.ERASE) {
                                                     view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                                                     viewModel.onAction(PianoRollAction.QuickDeleteNote(hitNote.id))
                                                     lastTapNoteId = null
                                                     lastTapTimeMs = 0L
                                                 } else {
-                                                    viewModel.onAction(
-                                                        PianoRollAction.ToggleNoteSelection(hitNote.id)
-                                                    )
-                                                    lastTapNoteId = hitNote.id
-                                                    lastTapTimeMs = now
+                                                    val now = System.currentTimeMillis()
+                                                    if (lastTapNoteId == hitNote.id &&
+                                                        now - lastTapTimeMs < DOUBLE_TAP_TIMEOUT_MS
+                                                    ) {
+                                                        view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                                        viewModel.onAction(PianoRollAction.QuickDeleteNote(hitNote.id))
+                                                        lastTapNoteId = null
+                                                        lastTapTimeMs = 0L
+                                                    } else {
+                                                        viewModel.onAction(
+                                                            PianoRollAction.ToggleNoteSelection(hitNote.id)
+                                                        )
+                                                        lastTapNoteId = hitNote.id
+                                                        lastTapTimeMs = now
+                                                    }
                                                 }
                                             }
                                         }
@@ -557,8 +576,10 @@ fun PianoRollScreen(
                                                 lastTapNoteId = null
                                                 lastTapTimeMs = 0L
                                                 if (state.selectedNoteIds.isNotEmpty()) {
+                                                    // Clear selection regardless of mode -- tapping
+                                                    // empty space always exits the selection state.
                                                     viewModel.onAction(PianoRollAction.ClearSelection)
-                                                } else {
+                                                } else if (state.editorMode == EditorMode.DRAW) {
                                                     val pitch = TOTAL_NOTES - 1 -
                                                         (down.position.y / rowHeightPx).toInt()
                                                     val tapMs = (down.position.x / pxPerMs).toLong()
@@ -584,6 +605,9 @@ fun PianoRollScreen(
                                                         )
                                                     )
                                                 }
+                                                // SELECT and ERASE: empty tap with no selection
+                                                // is a no-op. SELECT users get to keep tapping
+                                                // empty space without accidentally placing notes.
                                             }
                                         } else {
                                             // Marquee start. Track absolute (canvas-content)
@@ -1829,51 +1853,85 @@ private fun ToolsPanelContent(
     val hasSelection = state.selectedNoteIds.isNotEmpty()
     val dimColor = NjMuted2.copy(alpha = 0.3f)
 
-    Row(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalAlignment = Alignment.CenterVertically
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        NjButton(
-            text = "",
-            icon = Icons.AutoMirrored.Filled.CallSplit,
-            caption = "SPLIT",
-            onClick = { onAction(PianoRollAction.SplitSelected) },
-            textColor = if (hasSelection) NjOnBg else dimColor,
-            modifier = Modifier.weight(1f)
-        )
-        NjButton(
-            text = "",
-            icon = Icons.Filled.Delete,
-            caption = "ERASE",
-            onClick = { onAction(PianoRollAction.DeleteSelected) },
-            textColor = if (hasSelection) NjError else dimColor,
-            modifier = Modifier.weight(1f)
-        )
-        NjButton(
-            text = "",
-            icon = Icons.Filled.ContentCopy,
-            caption = "COPY",
-            onClick = { onAction(PianoRollAction.CopySelected) },
-            textColor = if (hasSelection) NjOnBg else dimColor,
-            modifier = Modifier.weight(1f)
-        )
-        NjButton(
-            text = "",
-            icon = Icons.AutoMirrored.Filled.Undo,
-            caption = "UNDO",
-            onClick = { onAction(PianoRollAction.Undo) },
-            textColor = if (state.canUndo) NjOnBg else dimColor,
-            modifier = Modifier.weight(1f)
-        )
-        NjButton(
-            text = "",
-            icon = Icons.AutoMirrored.Filled.Redo,
-            caption = "REDO",
-            onClick = { onAction(PianoRollAction.Redo) },
-            textColor = if (state.canRedo) NjOnBg else dimColor,
-            modifier = Modifier.weight(1f)
-        )
+        // Row 1 -- editor mode selector. Three latching buttons that
+        // disambiguate grid taps and drags. DRAW is the default.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            NjButton(
+                text = "",
+                icon = Icons.Filled.Edit,
+                caption = "DRAW",
+                onClick = { onAction(PianoRollAction.SetEditorMode(EditorMode.DRAW)) },
+                isActive = state.editorMode == EditorMode.DRAW,
+                ledColor = NjAmber,
+                modifier = Modifier.weight(1f)
+            )
+            NjButton(
+                text = "",
+                icon = Icons.Filled.SelectAll,
+                caption = "SELECT",
+                onClick = { onAction(PianoRollAction.SetEditorMode(EditorMode.SELECT)) },
+                isActive = state.editorMode == EditorMode.SELECT,
+                ledColor = NjAmber,
+                modifier = Modifier.weight(1f)
+            )
+            NjButton(
+                text = "",
+                icon = Icons.Filled.Delete,
+                caption = "ERASE",
+                onClick = { onAction(PianoRollAction.SetEditorMode(EditorMode.ERASE)) },
+                isActive = state.editorMode == EditorMode.ERASE,
+                ledColor = NjAmber,
+                modifier = Modifier.weight(1f)
+            )
+            Spacer(Modifier.weight(1f))  // keeps row width parity with row 2
+        }
+        // Row 2 -- one-shot actions.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            NjButton(
+                text = "",
+                icon = Icons.AutoMirrored.Filled.CallSplit,
+                caption = "SPLIT",
+                onClick = { onAction(PianoRollAction.SplitSelected) },
+                textColor = if (hasSelection) NjOnBg else dimColor,
+                modifier = Modifier.weight(1f)
+            )
+            NjButton(
+                text = "",
+                icon = Icons.Filled.ContentCopy,
+                caption = "COPY",
+                onClick = { onAction(PianoRollAction.CopySelected) },
+                textColor = if (hasSelection) NjOnBg else dimColor,
+                modifier = Modifier.weight(1f)
+            )
+            NjButton(
+                text = "",
+                icon = Icons.AutoMirrored.Filled.Undo,
+                caption = "UNDO",
+                onClick = { onAction(PianoRollAction.Undo) },
+                textColor = if (state.canUndo) NjOnBg else dimColor,
+                modifier = Modifier.weight(1f)
+            )
+            NjButton(
+                text = "",
+                icon = Icons.AutoMirrored.Filled.Redo,
+                caption = "REDO",
+                onClick = { onAction(PianoRollAction.Redo) },
+                textColor = if (state.canRedo) NjOnBg else dimColor,
+                modifier = Modifier.weight(1f)
+            )
+        }
     }
 }
 
