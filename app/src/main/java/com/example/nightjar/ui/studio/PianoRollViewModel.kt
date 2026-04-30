@@ -379,7 +379,7 @@ class PianoRollViewModel @Inject constructor(
             PianoRollAction.CycleGridResolution -> cycleGridResolution()
             is PianoRollAction.SetGridResolution -> setGridResolution(action.value)
             PianoRollAction.Play -> play()
-            PianoRollAction.Pause -> pause()
+            PianoRollAction.Pause -> audioEngine.pause()
             is PianoRollAction.SeekTo -> audioEngine.seekTo(action.positionMs)
             PianoRollAction.Restart -> restart()
             PianoRollAction.QuantizeSelected -> quantizeSelected()
@@ -1133,25 +1133,15 @@ class PianoRollViewModel @Inject constructor(
     }
 
     /**
-     * Start playback from the selector position. If the selector is at zero
-     * (default after load) the song plays from the start; if the user has
-     * tapped a position on the ruler, PLAY honors that tap.
+     * Start playback from the selector position. The selector is a persistent
+     * "home" marker -- only the user moves it (by tapping the ruler), so PLAY
+     * is a reliable "play from this point" affordance. Useful for practicing
+     * a passage repeatedly: tap once, hit PLAY each time.
      */
     private fun play() {
         val st = _state.value
         audioEngine.seekTo(st.selectorMs)
         audioEngine.play()
-    }
-
-    /**
-     * Pause and snapshot the current playback position into the selector so
-     * a follow-up PLAY resumes where it left off. The user can still tap
-     * elsewhere on the ruler before pressing PLAY to override.
-     */
-    private fun pause() {
-        audioEngine.pause()
-        val pos = audioEngine.positionMs.value
-        _state.update { it.copy(selectorMs = pos) }
     }
 
     /**
