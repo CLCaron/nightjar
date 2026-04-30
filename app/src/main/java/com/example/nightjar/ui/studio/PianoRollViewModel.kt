@@ -96,6 +96,13 @@ data class PianoRollState(
     val diatonicChords: List<MusicalScaleHelper.ChordInfo> = emptyList(),
     // Tab/sub-panel
     val activeTab: PianoRollTab = PianoRollTab.TOOLS,
+    /**
+     * When true, the sub-panel and (if applicable) the instrument picker are
+     * hidden so the piano roll grid fills the freed space. Tapping the active
+     * tab a second time toggles this; tapping any other tab expands and
+     * switches.
+     */
+    val isPanelCollapsed: Boolean = false,
     val isLoading: Boolean = true
 )
 
@@ -400,7 +407,20 @@ class PianoRollViewModel @Inject constructor(
             PianoRollAction.CycleChordType -> cycleChordType()
             is PianoRollAction.SetChordType -> setChordType(action.type)
             // Tab/sub-panel
-            is PianoRollAction.SwitchTab -> _state.update { it.copy(activeTab = action.tab) }
+            is PianoRollAction.SwitchTab -> {
+                val current = _state.value
+                val tappingActive = action.tab == current.activeTab
+                _state.update {
+                    if (tappingActive) {
+                        // Second tap on active tab toggles the sub-panel
+                        // (and picker, when on INSTR) collapse.
+                        it.copy(isPanelCollapsed = !current.isPanelCollapsed)
+                    } else {
+                        // Switching to a different tab always expands.
+                        it.copy(activeTab = action.tab, isPanelCollapsed = false)
+                    }
+                }
+            }
             is PianoRollAction.SetMidiInstrument -> setMidiInstrument(action.program)
         }
     }

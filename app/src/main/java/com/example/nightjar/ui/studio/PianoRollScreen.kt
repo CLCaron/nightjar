@@ -264,10 +264,11 @@ fun PianoRollScreen(
         // INSTR mode swaps the chord-ref strip, ruler, grid, and velocity
         // strip out for the embedded patch picker. AnimatedContent gives a
         // ~280ms vertical slide so the picker reads as sliding into the
-        // tab's slot rather than instant-flipping. Tab bar and sub-panel
-        // chip row below stay pinned through the transition.
+        // tab's slot rather than instant-flipping. The picker stays hidden
+        // when the panel is collapsed even if INSTR is the active tab --
+        // that's the "tap active tab again to hide everything" affordance.
         AnimatedContent(
-            targetState = state.activeTab == PianoRollTab.INSTR,
+            targetState = state.activeTab == PianoRollTab.INSTR && !state.isPanelCollapsed,
             transitionSpec = {
                 if (targetState) {
                     slideInVertically(animationSpec = tween(280)) { h -> h } togetherWith
@@ -711,13 +712,12 @@ fun PianoRollScreen(
             onTabSelect = { viewModel.onAction(PianoRollAction.SwitchTab(it)) }
         )
 
-        // Sub-panel slides down off-screen when INSTR is active so the
-        // grid-resolution chips and per-tab controls don't clutter the
-        // patch picker (they're irrelevant there). The piano roll's
-        // weight(1f) main content area expands to fill the freed space
-        // automatically.
+        // Sub-panel slides down off-screen when INSTR is active OR when
+        // the user has collapsed the panel by tapping the active tab again.
+        // The piano roll's weight(1f) main content area expands to fill
+        // the freed space automatically.
         AnimatedVisibility(
-            visible = state.activeTab != PianoRollTab.INSTR,
+            visible = state.activeTab != PianoRollTab.INSTR && !state.isPanelCollapsed,
             enter = expandVertically(animationSpec = tween(280)) +
                     slideInVertically(animationSpec = tween(280)) { h -> h },
             exit = shrinkVertically(animationSpec = tween(280)) +
