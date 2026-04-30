@@ -376,8 +376,8 @@ class PianoRollViewModel @Inject constructor(
             PianoRollAction.ToggleSnap -> _state.update { it.copy(isSnapEnabled = !it.isSnapEnabled) }
             PianoRollAction.CycleGridResolution -> cycleGridResolution()
             is PianoRollAction.SetGridResolution -> setGridResolution(action.value)
-            PianoRollAction.Play -> audioEngine.play()
-            PianoRollAction.Pause -> audioEngine.pause()
+            PianoRollAction.Play -> play()
+            PianoRollAction.Pause -> pause()
             is PianoRollAction.SeekTo -> audioEngine.seekTo(action.positionMs)
             PianoRollAction.Restart -> restart()
             PianoRollAction.QuantizeSelected -> quantizeSelected()
@@ -1095,9 +1095,11 @@ class PianoRollViewModel @Inject constructor(
     }
 
     /**
-     * Set the selector position (the user's "where I want to start from"
-     * marker, mirrors Studio's cursor) and seek the playhead there. Snaps
-     * to the active grid resolution so a tap near a beat lands cleanly.
+     * Set the selector position -- the user's "where I want to start from"
+     * marker. Tapping the ruler does NOT move the playhead; only PLAY and
+     * RESTART consult the selector. This keeps the marker concept independent
+     * from the playhead so the user can scout a start point without losing
+     * their current playback position.
      */
     private fun setSelector(ms: Long) {
         val st = _state.value
@@ -1105,7 +1107,28 @@ class PianoRollViewModel @Inject constructor(
             ms.coerceAtLeast(0L), st.bpm, st.gridResolution, st.timeSignatureDenominator
         )
         _state.update { it.copy(selectorMs = snapped) }
-        audioEngine.seekTo(snapped)
+    }
+
+    /**
+     * Start playback from the selector position. If the selector is at zero
+     * (default after load) the song plays from the start; if the user has
+     * tapped a position on the ruler, PLAY honors that tap.
+     */
+    private fun play() {
+        val st = _state.value
+        audioEngine.seekTo(st.selectorMs)
+        audioEngine.play()
+    }
+
+    /**
+     * Pause and snapshot the current playback position into the selector so
+     * a follow-up PLAY resumes where it left off. The user can still tap
+     * elsewhere on the ruler before pressing PLAY to override.
+     */
+    private fun pause() {
+        audioEngine.pause()
+        val pos = audioEngine.positionMs.value
+        _state.update { it.copy(selectorMs = pos) }
     }
 
     /**
