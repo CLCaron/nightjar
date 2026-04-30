@@ -84,6 +84,7 @@ import com.example.nightjar.data.db.entity.MidiNoteEntity
 import com.example.nightjar.ui.components.NjButton
 import com.example.nightjar.ui.components.NjKnob
 import com.example.nightjar.ui.components.NjRecessedPanel
+import com.example.nightjar.ui.components.NjRotarySelector
 import com.example.nightjar.ui.theme.IbmPlexMono
 import com.example.nightjar.ui.theme.NjBg
 import com.example.nightjar.ui.theme.NjCursorTeal
@@ -1644,10 +1645,16 @@ private fun EditPanelContent(
 // ── SCALE panel (phase 5) ───────────────────────────────────────────
 
 /**
- * SCALE sub-panel content: ROOT knob, SCALE knob, HILITE toggle, CHORDS
- * toggle, and the chord-type knob with LCD readout. All five render at the
- * same time, same footprint -- no controls appear or disappear (per the
- * hardware aesthetic rule).
+ * SCALE sub-panel content. Two rows:
+ *
+ *  Row 1 — primary controls: ROOT knob, SCALE knob (wide LCD spells out
+ *          the scale name), CHORD-type rotary selector.
+ *  Row 2 — modifiers: HILITE and CHORDS toggles, demoted below the
+ *          primary controls because they're modifiers, not core picks.
+ *
+ * Chord type uses [NjRotarySelector] instead of a knob: only three values
+ * (TRIAD / 7TH / 9TH) at present, and a vertical knob made you drag a long
+ * way per detent. The rotary scales naturally if more chord types are added.
  */
 @Composable
 private fun ScalePanelContent(
@@ -1662,66 +1669,73 @@ private fun ScalePanelContent(
     val scaleValue = if (scaleTypes.size > 1) {
         scaleIndex.toFloat() / (scaleTypes.size - 1)
     } else 0f
-    val chordIndex = chordTypes.indexOf(state.chordType).coerceAtLeast(0)
-    val chordValue = if (chordTypes.size > 1) {
-        chordIndex.toFloat() / (chordTypes.size - 1)
-    } else 0f
 
-    Row(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.CenterVertically
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        KnobWithReadout(
-            label = "ROOT",
-            readout = MusicalScaleHelper.NOTE_NAMES[state.scaleRoot.coerceIn(0, 11)],
-            value = rootValue,
-            onValueChange = { v ->
-                val newRoot = (v * 11f).roundToInt().coerceIn(0, 11)
-                if (newRoot != state.scaleRoot) {
-                    onAction(PianoRollAction.SetScaleRoot(newRoot))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            KnobWithReadout(
+                label = "ROOT",
+                readout = MusicalScaleHelper.NOTE_NAMES[state.scaleRoot.coerceIn(0, 11)],
+                value = rootValue,
+                onValueChange = { v ->
+                    val newRoot = (v * 11f).roundToInt().coerceIn(0, 11)
+                    if (newRoot != state.scaleRoot) {
+                        onAction(PianoRollAction.SetScaleRoot(newRoot))
+                    }
                 }
-            }
-        )
-        KnobWithReadout(
-            label = "SCALE",
-            readout = state.scaleType.name.take(4),
-            value = scaleValue,
-            onValueChange = { v ->
-                val maxIndex = scaleTypes.size - 1
-                val newIndex = (v * maxIndex).roundToInt().coerceIn(0, maxIndex)
-                val newType = scaleTypes[newIndex]
-                if (newType != state.scaleType) {
-                    onAction(PianoRollAction.SetScaleType(newType))
-                }
-            }
-        )
-        NjButton(
-            text = "HILITE",
-            onClick = { onAction(PianoRollAction.ToggleScale) },
-            isActive = state.isScaleEnabled,
-            ledColor = NjAmber
-        )
-        NjButton(
-            text = "CHORDS",
-            onClick = { onAction(PianoRollAction.ToggleChordMode) },
-            isActive = state.isChordMode,
-            ledColor = NjAmber
-        )
-        Spacer(Modifier.weight(1f))
-        KnobWithReadout(
-            label = "TYPE",
-            readout = state.chordType.displayName.uppercase(),
-            value = chordValue,
-            onValueChange = { v ->
-                val maxIndex = chordTypes.size - 1
-                val newIndex = (v * maxIndex).roundToInt().coerceIn(0, maxIndex)
-                val newType = chordTypes[newIndex]
-                if (newType != state.chordType) {
-                    onAction(PianoRollAction.SetChordType(newType))
-                }
-            }
-        )
+            )
+            KnobWithReadout(
+                label = "SCALE",
+                readout = state.scaleType.displayName.uppercase(),
+                value = scaleValue,
+                onValueChange = { v ->
+                    val maxIndex = scaleTypes.size - 1
+                    val newIndex = (v * maxIndex).roundToInt().coerceIn(0, maxIndex)
+                    val newType = scaleTypes[newIndex]
+                    if (newType != state.scaleType) {
+                        onAction(PianoRollAction.SetScaleType(newType))
+                    }
+                },
+                readoutWidth = 84.dp
+            )
+            Spacer(Modifier.weight(1f))
+            NjRotarySelector(
+                options = chordTypes,
+                selected = state.chordType,
+                onSelect = { newType ->
+                    if (newType != state.chordType) {
+                        onAction(PianoRollAction.SetChordType(newType))
+                    }
+                },
+                label = { it.displayName.uppercase() },
+                caption = "CHORD"
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            NjButton(
+                text = "HILITE",
+                onClick = { onAction(PianoRollAction.ToggleScale) },
+                isActive = state.isScaleEnabled,
+                ledColor = NjAmber
+            )
+            NjButton(
+                text = "CHORDS",
+                onClick = { onAction(PianoRollAction.ToggleChordMode) },
+                isActive = state.isChordMode,
+                ledColor = NjAmber
+            )
+            Spacer(Modifier.weight(1f))
+        }
     }
 }
 
@@ -1729,6 +1743,9 @@ private fun ScalePanelContent(
  * Knob with an LCD readout above and a small caption below -- the standard
  * SCALE-panel knob unit. Readout uses IBM Plex Mono in amber, like a
  * Roland faceplate's value window. Caption is muted IBM Plex Mono.
+ *
+ * [readoutWidth] lets the caller widen the LCD when the value text is
+ * longer than the default 44dp can fit (e.g. spelled-out scale names).
  */
 @Composable
 private fun KnobWithReadout(
@@ -1736,14 +1753,15 @@ private fun KnobWithReadout(
     readout: String,
     value: Float,
     onValueChange: (Float) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    readoutWidth: androidx.compose.ui.unit.Dp = 44.dp
 ) {
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         NjRecessedPanel(
-            modifier = Modifier.width(44.dp)
+            modifier = Modifier.width(readoutWidth)
         ) {
             Text(
                 text = readout,
