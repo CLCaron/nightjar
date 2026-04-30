@@ -137,9 +137,15 @@ oboe::DataCallbackResult OboePlaybackStream::onAudioReady(
         // (SynthEngine wraps renderPos_ at loop boundaries seamlessly)
     }
 
-    // End-of-timeline check
+    // End-of-timeline check. When a loop is active we let playback continue
+    // past `total` because the loop may extend beyond the last note (silent
+    // tail before the wrap point); the loop check above will wrap when
+    // pos >= loopEnd. Without this guard, the user would set a loop region
+    // longer than their note content and find that playback halted at the
+    // last note instead of wrapping.
     bool recording = transport_.recording.load(std::memory_order_relaxed);
-    if (!recording && total > 0 && pos >= total) {
+    bool loopActive = (loopStart >= 0 && loopEnd > loopStart);
+    if (!recording && !loopActive && total > 0 && pos >= total) {
         // Playback finished — stop and reset to 0
         transport_.playing.store(false, std::memory_order_release);
         transport_.posFrames.store(0, std::memory_order_relaxed);
