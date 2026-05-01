@@ -759,17 +759,12 @@ fun PianoRollScreen(
             onTabSelect = { viewModel.onAction(PianoRollAction.SwitchTab(it)) }
         )
 
-        // Sub-panel slides down off-screen when INSTR is active OR when
-        // the user has collapsed the panel by tapping the active tab again.
-        // The piano roll's weight(1f) main content area expands to fill
-        // the freed space automatically.
-        AnimatedVisibility(
-            visible = state.activeTab != PianoRollTab.INSTR && !state.isPanelCollapsed,
-            enter = expandVertically(animationSpec = tween(280)) +
-                    slideInVertically(animationSpec = tween(280)) { h -> h },
-            exit = shrinkVertically(animationSpec = tween(280)) +
-                    slideOutVertically(animationSpec = tween(280)) { h -> h }
-        ) {
+        // Sub-panel: conditional (no animation for now). Earlier wrapping
+        // this in AnimatedVisibility made the parent Column's layout pass
+        // misbehave -- the SubPanel's children stretched apart leaving a
+        // huge gap between the per-tab content and the chip row. Reverting
+        // to plain conditional rendering until the animation can be reworked.
+        if (state.activeTab != PianoRollTab.INSTR && !state.isPanelCollapsed) {
             PianoRollSubPanel(
                 activeTab = state.activeTab,
                 state = state,
