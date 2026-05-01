@@ -2565,10 +2565,8 @@ private fun PianoRollSubPanel(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(SUB_PANEL_CONTENT_HEIGHT)
                 .background(NjSurface)
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-            contentAlignment = Alignment.CenterStart
+                .padding(horizontal = 8.dp, vertical = 6.dp)
         ) {
             when (activeTab) {
                 PianoRollTab.TOOLS -> ToolsPanelContent(state, onAction)
