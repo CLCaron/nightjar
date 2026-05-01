@@ -264,38 +264,27 @@ fun PianoRollScreen(
             }
         )
 
-        // INSTR mode swaps the chord-ref strip, ruler, grid, and velocity
-        // strip out for the embedded patch picker. AnimatedContent gives a
-        // ~280ms vertical slide so the picker reads as sliding into the
-        // tab's slot rather than instant-flipping. The picker stays hidden
-        // when the panel is collapsed even if INSTR is the active tab --
-        // that's the "tap active tab again to hide everything" affordance.
-        AnimatedContent(
-            targetState = state.activeTab == PianoRollTab.INSTR && !state.isPanelCollapsed,
-            transitionSpec = {
-                if (targetState) {
-                    slideInVertically(animationSpec = tween(280)) { h -> h } togetherWith
-                        slideOutVertically(animationSpec = tween(280)) { h -> -h }
-                } else {
-                    slideInVertically(animationSpec = tween(280)) { h -> -h } togetherWith
-                        slideOutVertically(animationSpec = tween(280)) { h -> h }
-                }
-            },
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            label = "instr-tab-slide"
-        ) { isInstr ->
-            if (isInstr) {
-                InstrumentPickerEmbedded(
-                    selectedProgram = state.midiProgram,
-                    onSelectProgram = { program ->
-                        viewModel.onAction(PianoRollAction.SetMidiInstrument(program))
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
-            } else {
-                Column(modifier = Modifier.fillMaxSize()) {
+        // INSTR mode swaps the piano roll for the embedded patch picker.
+        // Plain conditional render -- AnimatedContent was causing the
+        // weight(1f) slot to collapse to zero height, which is what made
+        // the tab bar appear glued to the top bar. We can reintroduce the
+        // slide animation later via a different mechanism.
+        if (state.activeTab == PianoRollTab.INSTR && !state.isPanelCollapsed) {
+            InstrumentPickerEmbedded(
+                selectedProgram = state.midiProgram,
+                onSelectProgram = { program ->
+                    viewModel.onAction(PianoRollAction.SetMidiInstrument(program))
+                },
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            )
+        } else {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) {
         // Diatonic chord reference strip (visible when scale is enabled).
         // Sits just below the top bar so it's glance-able from any sub-panel.
         ChordReferenceStrip(chords = state.diatonicChords)
@@ -748,9 +737,8 @@ fun PianoRollScreen(
                 viewModel.onAction(PianoRollAction.SetNoteVelocities(newVelocities))
             }
         )
-                }  // end of inner Column
-            }      // end of else branch
-        }          // end of AnimatedContent
+            }  // end of inner Column inside else branch
+        }  // end of else branch
 
         // Tab bar -- four MODE buttons. Phases 4-6 + 10 fill in their respective
         // sub-panels.
