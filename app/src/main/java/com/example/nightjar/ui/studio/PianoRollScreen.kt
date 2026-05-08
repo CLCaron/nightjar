@@ -90,7 +90,7 @@ import com.example.nightjar.data.db.entity.MidiNoteEntity
 import com.example.nightjar.ui.components.NjButton
 import com.example.nightjar.ui.components.NjKnob
 import com.example.nightjar.ui.components.NjRecessedPanel
-import com.example.nightjar.ui.components.NjRotarySelector
+import com.example.nightjar.ui.components.NjStepper
 import com.example.nightjar.ui.theme.IbmPlexMono
 import com.example.nightjar.ui.theme.NjBg
 import com.example.nightjar.ui.theme.NjCursorTeal
@@ -1700,13 +1700,9 @@ private fun EditPanelContent(
  * SCALE sub-panel content. Two rows:
  *
  *  Row 1 — primary controls: ROOT knob, SCALE knob (wide LCD spells out
- *          the scale name), CHORD-type rotary selector.
- *  Row 2 — modifiers: HILITE and CHORDS toggles, demoted below the
- *          primary controls because they're modifiers, not core picks.
- *
- * Chord type uses [NjRotarySelector] instead of a knob: only three values
- * (TRIAD / 7TH / 9TH) at present, and a vertical knob made you drag a long
- * way per detent. The rotary scales naturally if more chord types are added.
+ *          the scale name), CHORD-type stepper with arrow buttons.
+ *  Row 2 — modifiers: HILITE and CHORDS as full-width latching buttons,
+ *          demoted below the primary controls because they're modifiers.
  */
 @Composable
 private fun ScalePanelContent(
@@ -1724,7 +1720,7 @@ private fun ScalePanelContent(
 
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -1756,8 +1752,7 @@ private fun ScalePanelContent(
                 },
                 readoutWidth = 84.dp
             )
-            Spacer(Modifier.weight(1f))
-            NjRotarySelector(
+            NjStepper(
                 options = chordTypes,
                 selected = state.chordType,
                 onSelect = { newType ->
@@ -1765,8 +1760,9 @@ private fun ScalePanelContent(
                         onAction(PianoRollAction.SetChordType(newType))
                     }
                 },
-                label = { it.displayName.uppercase() },
-                caption = "CHORD"
+                label = "CHORD",
+                valueText = { it.displayName.uppercase() },
+                modifier = Modifier.weight(1f)
             )
         }
         Row(
@@ -1778,15 +1774,16 @@ private fun ScalePanelContent(
                 text = "HILITE",
                 onClick = { onAction(PianoRollAction.ToggleScale) },
                 isActive = state.isScaleEnabled,
-                ledColor = NjAmber
+                ledColor = NjAmber,
+                modifier = Modifier.weight(1f)
             )
             NjButton(
                 text = "CHORDS",
                 onClick = { onAction(PianoRollAction.ToggleChordMode) },
                 isActive = state.isChordMode,
-                ledColor = NjAmber
+                ledColor = NjAmber,
+                modifier = Modifier.weight(1f)
             )
-            Spacer(Modifier.weight(1f))
         }
     }
 }
