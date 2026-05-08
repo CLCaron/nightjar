@@ -2558,32 +2558,38 @@ private fun PianoRollSubPanel(
             }
         }
 
-        // ── Bottom row: grid resolution rotary + SNAP toggle ──
-        // The chips for 1/2 .. 1/32 used to live here, but each chip needed
-        // its own LED + label and SNAP got squished off the right edge in
-        // portrait. A rotary takes one widget's width, scales to any number
-        // of values, and frees room for SNAP to sit comfortably alongside.
+        // ── Bottom row: GRID label, four latching chips, SNAP toggle ──
+        // Latching chips read more directly than a rotary -- the active
+        // resolution is visually obvious at a glance, and each chip is a
+        // one-tap target instead of a swipe-then-stop. SNAP sits on the
+        // right of a thin bevel separator.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(NjPanelInset)
                 .padding(horizontal = 8.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            NjRotarySelector(
-                options = GRID_RESOLUTION_OPTIONS,
-                selected = state.gridResolution,
-                onSelect = { value ->
-                    if (value != state.gridResolution) {
-                        onAction(PianoRollAction.SetGridResolution(value))
-                    }
-                },
-                label = { "1/$it" },
-                caption = "GRID"
+            Text(
+                text = "GRID",
+                fontFamily = IbmPlexMono,
+                fontSize = 9.sp,
+                color = NjMuted,
+                letterSpacing = 0.5.sp,
+                modifier = Modifier.padding(end = 4.dp)
             )
-            Spacer(Modifier.weight(1f))
-            // Thin bevel separator -- visually groups GRID rotary distinct
+            for (value in GRID_RESOLUTION_OPTIONS) {
+                NjButton(
+                    text = "1/$value",
+                    onClick = { onAction(PianoRollAction.SetGridResolution(value)) },
+                    isActive = state.gridResolution == value,
+                    ledColor = NjAmber,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            Spacer(Modifier.width(2.dp))
+            // Thin bevel separator -- visually groups GRID chips distinct
             // from SNAP toggle.
             Box(
                 modifier = Modifier
@@ -2591,7 +2597,7 @@ private fun PianoRollSubPanel(
                     .height(20.dp)
                     .background(Color.White.copy(alpha = 0.08f))
             )
-            Spacer(Modifier.width(6.dp))
+            Spacer(Modifier.width(2.dp))
             NjButton(
                 text = "SNAP",
                 onClick = { onAction(PianoRollAction.ToggleSnap) },
@@ -2602,4 +2608,4 @@ private fun PianoRollSubPanel(
     }
 }
 
-private val GRID_RESOLUTION_OPTIONS = listOf(2, 4, 8, 16, 32)
+private val GRID_RESOLUTION_OPTIONS = listOf(4, 8, 16, 32)
