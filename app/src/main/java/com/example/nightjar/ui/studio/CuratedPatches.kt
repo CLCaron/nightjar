@@ -195,3 +195,12 @@ fun curatedPatchFor(program: Int): CuratedPatch? =
 /** All curated patches in [category], ordered by position. */
 fun curatedPatchesIn(category: PatchCategory): List<CuratedPatch> =
     CURATED_PATCHES.filter { it.category == category }.sortedBy { it.position }
+
+/**
+ * All curated patches in display order: grouped by [PatchCategory] (in enum
+ * declaration order), then by [CuratedPatch.position] within each group.
+ * Used by the INSTR stepper to cycle through every patch in a predictable
+ * sequence.
+ */
+fun curatedPatchOrder(): List<CuratedPatch> =
+    PatchCategory.entries.flatMap { curatedPatchesIn(it) }

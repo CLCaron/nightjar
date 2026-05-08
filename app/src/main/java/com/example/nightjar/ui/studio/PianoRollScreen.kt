@@ -3,8 +3,10 @@ package com.example.nightjar.ui.studio
 import android.view.HapticFeedbackConstants
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
@@ -43,6 +45,7 @@ import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GridOn
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.SkipPrevious
@@ -141,11 +144,12 @@ private const val FAST_LONG_PRESS_MS = 200L
 
 /**
  * Fixed envelope height for the per-tab content row in the sub-panel. Sized
- * to the tallest tab (SCALE, two sub-rows: knob unit ~71dp + button row ~56dp
- * + gap + padding). Other tabs center vertically within this height so
- * switching tabs no longer makes the sub-panel jump.
+ * to the tallest tab (SCALE, with knob unit ~71dp + 6dp gap + button row
+ * ~48dp = ~125dp, plus the wrapping Box's 12dp vertical padding). Other
+ * tabs center vertically within this height so switching tabs never moves
+ * the GRID strip or the system tab bar.
  */
-private val SUB_PANEL_CONTENT_HEIGHT = 148.dp
+private val SUB_PANEL_CONTENT_HEIGHT = 140.dp
 
 private val NOTE_NAMES = arrayOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 private val BLACK_KEYS = setOf(1, 3, 6, 8, 10) // indices within octave
@@ -266,27 +270,17 @@ fun PianoRollScreen(
             }
         )
 
-        // INSTR mode swaps the piano roll for the embedded patch picker.
-        // Plain conditional render -- AnimatedContent was causing the
-        // weight(1f) slot to collapse to zero height, which is what made
-        // the tab bar appear glued to the top bar. We can reintroduce the
-        // slide animation later via a different mechanism.
-        // INSTR mode swaps the piano roll for the embedded patch picker.
-        if (state.activeTab == PianoRollTab.INSTR && !state.isPanelCollapsed) {
-            InstrumentPickerEmbedded(
-                selectedProgram = state.midiProgram,
-                onSelectProgram = { program ->
-                    viewModel.onAction(PianoRollAction.SetMidiInstrument(program))
-                },
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-            )
-        } else {
+        // Piano roll content area. The patch picker overlay (when
+        // isBrowsingPatches is true) renders ON TOP of this Box -- see
+        // the AnimatedVisibility just below this Column.
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+        ) {
             Column(
                 modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
+                    .fillMaxSize()
             ) {
         // Diatonic chord reference strip (visible when scale is enabled).
         // Sits just below the top bar so it's glance-able from any sub-panel.
@@ -740,8 +734,38 @@ fun PianoRollScreen(
                 viewModel.onAction(PianoRollAction.SetNoteVelocities(newVelocities))
             }
         )
-            }  // end of inner Column inside else branch
-        }  // end of else branch
+            }  // end of inner Column
+
+            // Patch picker overlay. Slides up from behind the tab bar to
+            // cover the piano roll grid + ruler + velocity strip when the
+            // user latches the BROWSE button on the INSTR sub-panel.
+            // Tapping BROWSE again or switching to a different tab dismisses.
+            // Manual offset animation so we don't fight Compose's nested-scope
+            // resolution of AnimatedVisibility.
+            val pickerProgress by animateFloatAsState(
+                targetValue = if (state.isBrowsingPatches) 1f else 0f,
+                animationSpec = tween(durationMillis = 240),
+                label = "patch-picker-slide"
+            )
+            if (pickerProgress > 0f) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .graphicsLayer {
+                            translationY = size.height * (1f - pickerProgress)
+                        }
+                        .background(NjBg)
+                ) {
+                    InstrumentPickerEmbedded(
+                        selectedProgram = state.midiProgram,
+                        onSelectProgram = { program ->
+                            viewModel.onAction(PianoRollAction.SetMidiInstrument(program))
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            }
+        }  // end of weight(1f) Box
 
         // Tab bar -- four MODE buttons. Phases 4-6 + 10 fill in their respective
         // sub-panels.
@@ -750,10 +774,11 @@ fun PianoRollScreen(
             onTabSelect = { viewModel.onAction(PianoRollAction.SwitchTab(it)) }
         )
 
-        // Sub-panel: hidden when INSTR is active (picker fills the area
-        // above) or when the user has tapped the active tab a second time
-        // to collapse it.
-        if (state.activeTab != PianoRollTab.INSTR && !state.isPanelCollapsed) {
+        // Sub-panel: hidden only when the user has tapped the active tab a
+        // second time to collapse it. INSTR keeps its sub-panel (the stepper
+        // + BROWSE button) visible -- the picker is an overlay that slides
+        // over the grid above.
+        if (!state.isPanelCollapsed) {
             PianoRollSubPanel(
                 activeTab = state.activeTab,
                 state = state,
@@ -1673,7 +1698,8 @@ private fun EditPanelContent(
             icon = Icons.Filled.GridOn,
             caption = "QUANT",
             onClick = { onAction(PianoRollAction.QuantizeSelected) },
-            textColor = if (hasContent) NjOnBg else dimColor
+            textColor = if (hasContent) NjOnBg else dimColor,
+            modifier = Modifier.weight(1f)
         )
         NjButton(
             text = "",
@@ -1681,16 +1707,61 @@ private fun EditPanelContent(
             caption = "VELOC",
             onClick = { onAction(PianoRollAction.ToggleVelocityEditMode) },
             isActive = state.isVelocityEditMode,
-            ledColor = NjAmber
+            ledColor = NjAmber,
+            modifier = Modifier.weight(1f)
         )
         NjButton(
             text = "",
             icon = Icons.Filled.AllInclusive,
             caption = "SUSTAIN",
             onClick = { /* reserved -- functional in a follow-up spec */ },
-            textColor = dimColor
+            textColor = dimColor,
+            modifier = Modifier.weight(1f)
         )
-        Spacer(Modifier.weight(1f))
+    }
+}
+
+// ── INSTR panel ─────────────────────────────────────────────────────
+
+/**
+ * INSTR sub-panel content. A patch stepper (left arrow / LCD / right arrow)
+ * cycles through the curated patch list while the piano roll stays visible
+ * behind it. The trailing BROWSE button is a latching toggle that slides
+ * the full categorized picker up over the grid.
+ */
+@Composable
+private fun InstrPanelContent(
+    state: PianoRollState,
+    onAction: (PianoRollAction) -> Unit
+) {
+    val patches = remember { curatedPatchOrder() }
+    val currentPatch = curatedPatchFor(state.midiProgram) ?: patches.firstOrNull() ?: return
+    val patchNumber = state.midiProgram.toString().padStart(3, '0')
+    val labelLine = "PATCH · $patchNumber"
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        NjStepper(
+            options = patches,
+            selected = currentPatch,
+            onSelect = { newPatch ->
+                onAction(PianoRollAction.SetMidiInstrument(newPatch.program))
+            },
+            label = labelLine,
+            valueText = { "${it.category.label} · ${it.descriptor.uppercase()}" },
+            modifier = Modifier.weight(1f)
+        )
+        NjButton(
+            text = "",
+            icon = Icons.Filled.MoreHoriz,
+            caption = "BROWSE",
+            onClick = { onAction(PianoRollAction.ToggleBrowsePatches) },
+            isActive = state.isBrowsingPatches,
+            ledColor = NjAmber
+        )
     }
 }
 
@@ -2544,14 +2615,16 @@ private fun PianoRollSubPanel(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .height(SUB_PANEL_CONTENT_HEIGHT)
                 .background(NjSurface)
-                .padding(horizontal = 8.dp, vertical = 6.dp)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            contentAlignment = Alignment.Center
         ) {
             when (activeTab) {
                 PianoRollTab.TOOLS -> ToolsPanelContent(state, onAction)
                 PianoRollTab.SCALE -> ScalePanelContent(state, onAction)
                 PianoRollTab.EDIT -> EditPanelContent(state, onAction)
-                PianoRollTab.INSTR -> Unit  // hidden -- sub-panel slides away
+                PianoRollTab.INSTR -> InstrPanelContent(state, onAction)
             }
         }
 

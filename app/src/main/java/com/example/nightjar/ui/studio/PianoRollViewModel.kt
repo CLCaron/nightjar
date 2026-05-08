@@ -111,6 +111,13 @@ data class PianoRollState(
      * Acts as a hardware-style mode switch instead of overloading gestures.
      */
     val editorMode: EditorMode = EditorMode.DRAW,
+    /**
+     * Latched state of the INSTR tab's BROWSE button. When true, the patch
+     * picker overlay slides up from behind the tab bar and covers the piano
+     * roll grid. Tapping BROWSE again or switching to a different tab
+     * dismisses the overlay.
+     */
+    val isBrowsingPatches: Boolean = false,
     val isLoading: Boolean = true
 )
 
@@ -164,6 +171,7 @@ sealed interface PianoRollAction {
     // Tab/sub-panel
     data class SwitchTab(val tab: PianoRollTab) : PianoRollAction
     data class SetEditorMode(val mode: EditorMode) : PianoRollAction
+    data object ToggleBrowsePatches : PianoRollAction
     // INSTR (embedded picker)
     data class SetMidiInstrument(val program: Int) : PianoRollAction
 }
@@ -425,15 +433,25 @@ class PianoRollViewModel @Inject constructor(
                 _state.update {
                     if (tappingActive) {
                         // Second tap on active tab toggles the sub-panel
-                        // (and picker, when on INSTR) collapse.
-                        it.copy(isPanelCollapsed = !current.isPanelCollapsed)
+                        // collapse. Switching tabs always dismisses the
+                        // browse overlay (returns the user to the grid).
+                        it.copy(
+                            isPanelCollapsed = !current.isPanelCollapsed,
+                            isBrowsingPatches = false
+                        )
                     } else {
-                        // Switching to a different tab always expands.
-                        it.copy(activeTab = action.tab, isPanelCollapsed = false)
+                        it.copy(
+                            activeTab = action.tab,
+                            isPanelCollapsed = false,
+                            isBrowsingPatches = false
+                        )
                     }
                 }
             }
             is PianoRollAction.SetEditorMode -> _state.update { it.copy(editorMode = action.mode) }
+            PianoRollAction.ToggleBrowsePatches -> _state.update {
+                it.copy(isBrowsingPatches = !it.isBrowsingPatches)
+            }
             is PianoRollAction.SetMidiInstrument -> setMidiInstrument(action.program)
         }
     }
