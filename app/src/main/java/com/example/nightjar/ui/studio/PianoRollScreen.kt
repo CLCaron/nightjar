@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -250,6 +251,7 @@ fun PianoRollScreen(
             .fillMaxSize()
             .background(NjBg)
             .statusBarsPadding()
+            .navigationBarsPadding()
     ) {
         // New captioned top bar: BACK, title (track + KEY/BPM/INSTRUMENT), RESTART, PLAY.
         // Replaces the old TopAppBar. Undo/Redo/Delete migrate to TOOLS panel
@@ -1858,85 +1860,66 @@ private fun ToolsPanelContent(
     val hasSelection = state.selectedNoteIds.isNotEmpty()
     val dimColor = NjMuted2.copy(alpha = 0.3f)
 
-    Column(
+    // One row, six buttons: three editor-mode toggles (DRAW/SELECT/ERASE)
+    // followed by three one-shot actions (COPY/UNDO/REDO). SPLIT was dropped
+    // to free up horizontal space and because the feature wasn't earning
+    // its keep -- existing notes can be edited in-place via DRAW + ERASE.
+    Row(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        // Row 1 -- editor mode selector. Three latching buttons that
-        // disambiguate grid taps and drags. DRAW is the default.
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            NjButton(
-                text = "",
-                icon = Icons.Filled.Edit,
-                caption = "DRAW",
-                onClick = { onAction(PianoRollAction.SetEditorMode(EditorMode.DRAW)) },
-                isActive = state.editorMode == EditorMode.DRAW,
-                ledColor = NjAmber,
-                modifier = Modifier.weight(1f)
-            )
-            NjButton(
-                text = "",
-                icon = Icons.Filled.SelectAll,
-                caption = "SELECT",
-                onClick = { onAction(PianoRollAction.SetEditorMode(EditorMode.SELECT)) },
-                isActive = state.editorMode == EditorMode.SELECT,
-                ledColor = NjAmber,
-                modifier = Modifier.weight(1f)
-            )
-            NjButton(
-                text = "",
-                icon = Icons.Filled.Delete,
-                caption = "ERASE",
-                onClick = { onAction(PianoRollAction.SetEditorMode(EditorMode.ERASE)) },
-                isActive = state.editorMode == EditorMode.ERASE,
-                ledColor = NjAmber,
-                modifier = Modifier.weight(1f)
-            )
-            Spacer(Modifier.weight(1f))  // keeps row width parity with row 2
-        }
-        // Row 2 -- one-shot actions.
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            NjButton(
-                text = "",
-                icon = Icons.AutoMirrored.Filled.CallSplit,
-                caption = "SPLIT",
-                onClick = { onAction(PianoRollAction.SplitSelected) },
-                textColor = if (hasSelection) NjOnBg else dimColor,
-                modifier = Modifier.weight(1f)
-            )
-            NjButton(
-                text = "",
-                icon = Icons.Filled.ContentCopy,
-                caption = "COPY",
-                onClick = { onAction(PianoRollAction.CopySelected) },
-                textColor = if (hasSelection) NjOnBg else dimColor,
-                modifier = Modifier.weight(1f)
-            )
-            NjButton(
-                text = "",
-                icon = Icons.AutoMirrored.Filled.Undo,
-                caption = "UNDO",
-                onClick = { onAction(PianoRollAction.Undo) },
-                textColor = if (state.canUndo) NjOnBg else dimColor,
-                modifier = Modifier.weight(1f)
-            )
-            NjButton(
-                text = "",
-                icon = Icons.AutoMirrored.Filled.Redo,
-                caption = "REDO",
-                onClick = { onAction(PianoRollAction.Redo) },
-                textColor = if (state.canRedo) NjOnBg else dimColor,
-                modifier = Modifier.weight(1f)
-            )
-        }
+        NjButton(
+            text = "",
+            icon = Icons.Filled.Edit,
+            caption = "DRAW",
+            onClick = { onAction(PianoRollAction.SetEditorMode(EditorMode.DRAW)) },
+            isActive = state.editorMode == EditorMode.DRAW,
+            ledColor = NjAmber,
+            modifier = Modifier.weight(1f)
+        )
+        NjButton(
+            text = "",
+            icon = Icons.Filled.SelectAll,
+            caption = "SELECT",
+            onClick = { onAction(PianoRollAction.SetEditorMode(EditorMode.SELECT)) },
+            isActive = state.editorMode == EditorMode.SELECT,
+            ledColor = NjAmber,
+            modifier = Modifier.weight(1f)
+        )
+        NjButton(
+            text = "",
+            icon = Icons.Filled.Delete,
+            caption = "ERASE",
+            onClick = { onAction(PianoRollAction.SetEditorMode(EditorMode.ERASE)) },
+            isActive = state.editorMode == EditorMode.ERASE,
+            ledColor = NjAmber,
+            modifier = Modifier.weight(1f)
+        )
+        NjButton(
+            text = "",
+            icon = Icons.Filled.ContentCopy,
+            caption = "COPY",
+            onClick = { onAction(PianoRollAction.CopySelected) },
+            textColor = if (hasSelection) NjOnBg else dimColor,
+            modifier = Modifier.weight(1f)
+        )
+        NjButton(
+            text = "",
+            icon = Icons.AutoMirrored.Filled.Undo,
+            caption = "UNDO",
+            onClick = { onAction(PianoRollAction.Undo) },
+            textColor = if (state.canUndo) NjOnBg else dimColor,
+            modifier = Modifier.weight(1f)
+        )
+        NjButton(
+            text = "",
+            icon = Icons.AutoMirrored.Filled.Redo,
+            caption = "REDO",
+            onClick = { onAction(PianoRollAction.Redo) },
+            textColor = if (state.canRedo) NjOnBg else dimColor,
+            modifier = Modifier.weight(1f)
+        )
     }
 }
 
