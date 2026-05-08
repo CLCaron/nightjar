@@ -3,6 +3,8 @@ package com.example.nightjar.ui.studio
 import android.view.HapticFeedbackConstants
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ScrollState
@@ -38,7 +40,6 @@ import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GridOn
-import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.SkipPrevious
@@ -86,6 +87,7 @@ import com.example.nightjar.data.db.entity.MidiNoteEntity
 import com.example.nightjar.ui.components.NjButton
 import com.example.nightjar.ui.components.NjKnob
 import com.example.nightjar.ui.components.NjRecessedPanel
+import com.example.nightjar.ui.components.NjSegmentedStrip
 import com.example.nightjar.ui.components.NjStepper
 import com.example.nightjar.ui.theme.IbmPlexMono
 import com.example.nightjar.ui.theme.NjBg
@@ -137,12 +139,13 @@ private const val FAST_LONG_PRESS_MS = 200L
 
 /**
  * Fixed envelope height for the per-tab content row in the sub-panel. Sized
- * to the tallest tab (SCALE, with knob unit ~71dp + 6dp gap + button row
- * ~48dp = ~125dp, plus the wrapping Box's 12dp vertical padding). Other
- * tabs center vertically within this height so switching tabs never moves
- * the GRID strip or the system tab bar.
+ * to the tallest tab (SCALE, with compact knob unit ~50dp on the left and
+ * a stepper ~36dp + toggles ~28dp = ~68dp on the right, plus 8dp wrapping
+ * padding). All other tabs center their single-row content vertically
+ * inside this envelope so switching tabs never moves the GRID strip or the
+ * tab bar.
  */
-private val SUB_PANEL_CONTENT_HEIGHT = 140.dp
+private val SUB_PANEL_CONTENT_HEIGHT = 80.dp
 
 private val NOTE_NAMES = arrayOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 private val BLACK_KEYS = setOf(1, 3, 6, 8, 10) // indices within octave
@@ -1731,6 +1734,7 @@ private fun InstrPanelContent(
     val currentPatch = curatedPatchFor(state.midiProgram) ?: patches.firstOrNull() ?: return
     val patchNumber = state.midiProgram.toString().padStart(3, '0')
     val labelLine = "PATCH · $patchNumber"
+    val controlHeight = 44.dp
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -1745,15 +1749,15 @@ private fun InstrPanelContent(
             },
             label = labelLine,
             valueText = { "${it.category.label} · ${it.descriptor.uppercase()}" },
-            modifier = Modifier.weight(1f)
+            modifier = Modifier.weight(1f),
+            height = controlHeight
         )
         NjButton(
-            text = "",
-            icon = Icons.Filled.MoreHoriz,
-            caption = "BROWSE",
+            text = "BROWSE",
             onClick = { onAction(PianoRollAction.ToggleBrowsePatches) },
             isActive = state.isBrowsingPatches,
-            ledColor = NjAmber
+            ledColor = NjAmber,
+            modifier = Modifier.height(controlHeight)
         )
     }
 }
@@ -1761,12 +1765,14 @@ private fun InstrPanelContent(
 // ── SCALE panel (phase 5) ───────────────────────────────────────────
 
 /**
- * SCALE sub-panel content. Two rows:
+ * SCALE sub-panel content. Single row with two regions:
  *
- *  Row 1 — primary controls: ROOT knob, SCALE knob (wide LCD spells out
- *          the scale name), CHORD-type stepper with arrow buttons.
- *  Row 2 — modifiers: HILITE and CHORDS as full-width latching buttons,
- *          demoted below the primary controls because they're modifiers.
+ *  Left:  ROOT and SCALE compact knob units (small knob + tight LCD).
+ *  Right: a vertical column with the CHORD stepper on top and the HILITE
+ *         + CHORDS modifier toggles tucked underneath. Stacking the
+ *         toggles under the stepper instead of on a separate row keeps
+ *         SCALE's overall height down to roughly the same as TOOLS / EDIT
+ *         / INSTR, so the sub-panel envelope stays compact.
  */
 @Composable
 private fun ScalePanelContent(
@@ -1782,40 +1788,41 @@ private fun ScalePanelContent(
         scaleIndex.toFloat() / (scaleTypes.size - 1)
     } else 0f
 
-    Column(
+    Row(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            KnobWithReadout(
-                label = "ROOT",
-                readout = MusicalScaleHelper.NOTE_NAMES[state.scaleRoot.coerceIn(0, 11)],
-                value = rootValue,
-                onValueChange = { v ->
-                    val newRoot = (v * 11f).roundToInt().coerceIn(0, 11)
-                    if (newRoot != state.scaleRoot) {
-                        onAction(PianoRollAction.SetScaleRoot(newRoot))
-                    }
+        KnobWithReadout(
+            label = "ROOT",
+            readout = MusicalScaleHelper.NOTE_NAMES[state.scaleRoot.coerceIn(0, 11)],
+            value = rootValue,
+            onValueChange = { v ->
+                val newRoot = (v * 11f).roundToInt().coerceIn(0, 11)
+                if (newRoot != state.scaleRoot) {
+                    onAction(PianoRollAction.SetScaleRoot(newRoot))
                 }
-            )
-            KnobWithReadout(
-                label = "SCALE",
-                readout = state.scaleType.displayName.uppercase(),
-                value = scaleValue,
-                onValueChange = { v ->
-                    val maxIndex = scaleTypes.size - 1
-                    val newIndex = (v * maxIndex).roundToInt().coerceIn(0, maxIndex)
-                    val newType = scaleTypes[newIndex]
-                    if (newType != state.scaleType) {
-                        onAction(PianoRollAction.SetScaleType(newType))
-                    }
-                },
-                readoutWidth = 84.dp
-            )
+            },
+            readoutWidth = 32.dp
+        )
+        KnobWithReadout(
+            label = "SCALE",
+            readout = scaleShorthand(state.scaleType),
+            value = scaleValue,
+            onValueChange = { v ->
+                val maxIndex = scaleTypes.size - 1
+                val newIndex = (v * maxIndex).roundToInt().coerceIn(0, maxIndex)
+                val newType = scaleTypes[newIndex]
+                if (newType != state.scaleType) {
+                    onAction(PianoRollAction.SetScaleType(newType))
+                }
+            },
+            readoutWidth = 56.dp
+        )
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
             NjStepper(
                 options = chordTypes,
                 selected = state.chordType,
@@ -1826,30 +1833,63 @@ private fun ScalePanelContent(
                 },
                 label = "CHORD",
                 valueText = { it.displayName.uppercase() },
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.fillMaxWidth(),
+                height = 36.dp
             )
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            NjButton(
-                text = "HILITE",
-                onClick = { onAction(PianoRollAction.ToggleScale) },
-                isActive = state.isScaleEnabled,
-                ledColor = NjAmber,
-                modifier = Modifier.weight(1f)
-            )
-            NjButton(
-                text = "CHORDS",
-                onClick = { onAction(PianoRollAction.ToggleChordMode) },
-                isActive = state.isChordMode,
-                ledColor = NjAmber,
-                modifier = Modifier.weight(1f)
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                NjButton(
+                    text = "HILITE",
+                    onClick = { onAction(PianoRollAction.ToggleScale) },
+                    isActive = state.isScaleEnabled,
+                    ledColor = NjAmber,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(28.dp)
+                )
+                NjButton(
+                    text = "CHORDS",
+                    onClick = { onAction(PianoRollAction.ToggleChordMode) },
+                    isActive = state.isChordMode,
+                    ledColor = NjAmber,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(28.dp)
+                )
+            }
         }
     }
+}
+
+/**
+ * Short LCD readout for a scale type. Long names like "Natural Minor" or
+ * "Harmonic Minor" get abbreviated to a four-character form so the SCALE
+ * knob's compact LCD doesn't truncate. Falls back to displayName for
+ * already-short names.
+ */
+private fun scaleShorthand(scale: MusicalScaleHelper.ScaleType): String = when (scale) {
+    MusicalScaleHelper.ScaleType.MAJOR -> "MAJOR"
+    MusicalScaleHelper.ScaleType.NATURAL_MINOR -> "MINOR"
+    MusicalScaleHelper.ScaleType.MINOR_PENTATONIC -> "MIN PT"
+    MusicalScaleHelper.ScaleType.MAJOR_PENTATONIC -> "MAJ PT"
+    MusicalScaleHelper.ScaleType.BLUES -> "BLUES"
+    MusicalScaleHelper.ScaleType.DORIAN -> "DORIAN"
+    MusicalScaleHelper.ScaleType.PHRYGIAN -> "PHRYG"
+    MusicalScaleHelper.ScaleType.LYDIAN -> "LYDIAN"
+    MusicalScaleHelper.ScaleType.MIXOLYDIAN -> "MIXO"
+    MusicalScaleHelper.ScaleType.LOCRIAN -> "LOCR"
+    MusicalScaleHelper.ScaleType.HARMONIC_MINOR -> "HARM"
+    MusicalScaleHelper.ScaleType.MELODIC_MINOR -> "MELO"
+    MusicalScaleHelper.ScaleType.FLAMENCO -> "FLAM"
+    MusicalScaleHelper.ScaleType.HUNGARIAN -> "HUNG"
+    MusicalScaleHelper.ScaleType.ROMANIAN -> "ROMA"
+    MusicalScaleHelper.ScaleType.PERSIAN -> "PERS"
+    MusicalScaleHelper.ScaleType.BEBOP -> "BEBOP"
+    MusicalScaleHelper.ScaleType.WHOLE_TONE -> "WHOLE"
+    MusicalScaleHelper.ScaleType.CHROMATIC -> "CHRO"
 }
 
 /**
@@ -1857,8 +1897,9 @@ private fun ScalePanelContent(
  * SCALE-panel knob unit. Readout uses IBM Plex Mono in amber, like a
  * Roland faceplate's value window. Caption is muted IBM Plex Mono.
  *
- * [readoutWidth] lets the caller widen the LCD when the value text is
- * longer than the default 44dp can fit (e.g. spelled-out scale names).
+ * The SCALE panel uses a compact variant (smaller knob + tighter LCD) so
+ * the whole sub-panel fits in an 84dp envelope alongside the chord stepper
+ * and HILITE/CHORDS toggles on the right.
  */
 @Composable
 private fun KnobWithReadout(
@@ -1867,22 +1908,27 @@ private fun KnobWithReadout(
     value: Float,
     onValueChange: (Float) -> Unit,
     modifier: Modifier = Modifier,
-    readoutWidth: androidx.compose.ui.unit.Dp = 44.dp
+    readoutWidth: androidx.compose.ui.unit.Dp = 44.dp,
+    knobSize: androidx.compose.ui.unit.Dp = 28.dp
 ) {
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        NjRecessedPanel(
-            modifier = Modifier.width(readoutWidth)
+        Box(
+            modifier = Modifier
+                .width(readoutWidth)
+                .height(14.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .background(NjPanelInset),
+            contentAlignment = Alignment.Center
         ) {
             Text(
                 text = readout,
                 fontFamily = IbmPlexMono,
-                fontSize = 9.sp,
-                color = NjAmber.copy(alpha = 0.85f),
-                letterSpacing = 0.5.sp,
-                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                fontSize = 8.sp,
+                color = NjAmber.copy(alpha = 0.9f),
+                letterSpacing = 0.4.sp,
                 maxLines = 1
             )
         }
@@ -1890,13 +1936,12 @@ private fun KnobWithReadout(
         NjKnob(
             value = value,
             onValueChange = onValueChange,
-            knobSize = 36.dp
+            knobSize = knobSize
         )
-        Spacer(Modifier.height(1.dp))
         Text(
             text = label,
             fontFamily = IbmPlexMono,
-            fontSize = 9.sp,
+            fontSize = 8.sp,
             color = NjMuted,
             letterSpacing = 0.5.sp
         )
@@ -2610,7 +2655,7 @@ private fun PianoRollSubPanel(
                 .fillMaxWidth()
                 .height(SUB_PANEL_CONTENT_HEIGHT)
                 .background(NjSurface)
-                .padding(horizontal = 8.dp, vertical = 6.dp),
+                .padding(horizontal = 8.dp, vertical = 4.dp),
             contentAlignment = Alignment.Center
         ) {
             when (activeTab) {
@@ -2621,17 +2666,17 @@ private fun PianoRollSubPanel(
             }
         }
 
-        // ── Bottom row: GRID label, four latching chips, SNAP toggle ──
-        // Latching chips read more directly than a rotary -- the active
-        // resolution is visually obvious at a glance, and each chip is a
-        // one-tap target instead of a swipe-then-stop. SNAP sits on the
-        // right of a thin bevel separator.
+        // ── Bottom row: GRID segmented strip, SNAP toggle ──
+        // The grid resolution lives in a single segmented pill (NjSegmented-
+        // Strip). Equal-width segments with a shared body so labels never
+        // wrap and sizes never drift between values. SNAP keeps its own
+        // hardware-button silhouette on the right.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(NjPanelInset)
                 .padding(horizontal = 8.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
@@ -2639,33 +2684,22 @@ private fun PianoRollSubPanel(
                 fontFamily = IbmPlexMono,
                 fontSize = 9.sp,
                 color = NjMuted,
-                letterSpacing = 0.5.sp,
-                modifier = Modifier.padding(end = 4.dp)
+                letterSpacing = 0.5.sp
             )
-            for (value in GRID_RESOLUTION_OPTIONS) {
-                NjButton(
-                    text = "1/$value",
-                    onClick = { onAction(PianoRollAction.SetGridResolution(value)) },
-                    isActive = state.gridResolution == value,
-                    ledColor = NjAmber,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-            Spacer(Modifier.width(2.dp))
-            // Thin bevel separator -- visually groups GRID chips distinct
-            // from SNAP toggle.
-            Box(
-                modifier = Modifier
-                    .width(1.dp)
-                    .height(20.dp)
-                    .background(Color.White.copy(alpha = 0.08f))
+            NjSegmentedStrip(
+                options = GRID_RESOLUTION_OPTIONS,
+                selected = state.gridResolution,
+                onSelect = { onAction(PianoRollAction.SetGridResolution(it)) },
+                label = { "1/$it" },
+                modifier = Modifier.weight(1f),
+                height = 32.dp
             )
-            Spacer(Modifier.width(2.dp))
             NjButton(
                 text = "SNAP",
                 onClick = { onAction(PianoRollAction.ToggleSnap) },
                 isActive = state.isSnapEnabled,
-                ledColor = NjAmber
+                ledColor = NjAmber,
+                modifier = Modifier.height(32.dp)
             )
         }
     }
