@@ -269,6 +269,7 @@ fun PianoRollScreen(
         // weight(1f) slot to collapse to zero height, which is what made
         // the tab bar appear glued to the top bar. We can reintroduce the
         // slide animation later via a different mechanism.
+        // INSTR mode swaps the piano roll for the embedded patch picker.
         if (state.activeTab == PianoRollTab.INSTR && !state.isPanelCollapsed) {
             InstrumentPickerEmbedded(
                 selectedProgram = state.midiProgram,
@@ -747,11 +748,9 @@ fun PianoRollScreen(
             onTabSelect = { viewModel.onAction(PianoRollAction.SwitchTab(it)) }
         )
 
-        // Sub-panel: conditional (no animation for now). Earlier wrapping
-        // this in AnimatedVisibility made the parent Column's layout pass
-        // misbehave -- the SubPanel's children stretched apart leaving a
-        // huge gap between the per-tab content and the chip row. Reverting
-        // to plain conditional rendering until the animation can be reworked.
+        // Sub-panel: hidden when INSTR is active (picker fills the area
+        // above) or when the user has tapped the active tab a second time
+        // to collapse it.
         if (state.activeTab != PianoRollTab.INSTR && !state.isPanelCollapsed) {
             PianoRollSubPanel(
                 activeTab = state.activeTab,

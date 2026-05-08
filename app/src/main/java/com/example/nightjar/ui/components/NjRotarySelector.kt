@@ -95,7 +95,7 @@ fun <T> NjRotarySelector(
     ) {
         Box(
             modifier = Modifier
-                .heightIn(min = 32.dp)
+                .height(36.dp)
                 .widthIn(min = 96.dp)
                 .clip(RoundedCornerShape(6.dp))
                 .background(NjPanelInset)
