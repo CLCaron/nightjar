@@ -174,6 +174,20 @@ fun InstrumentPickerEmbedded(
             ?: PatchCategory.entries.first()
         androidx.compose.runtime.mutableStateOf(category)
     }
+    val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+
+    // Scroll to the selected patch's position whenever it (or the category)
+    // changes -- including the first time the picker opens. Without this the
+    // grid always starts at the top and the user has to hunt for what's
+    // currently loaded.
+    androidx.compose.runtime.LaunchedEffect(selectedCategory, selectedProgram) {
+        val visible = curatedPatchesIn(selectedCategory)
+        val idx = visible.indexOfFirst { it.program == selectedProgram }
+        if (idx >= 0) {
+            // Two-column grid; aim for the row containing the selection.
+            gridState.scrollToItem(idx)
+        }
+    }
 
     Column(
         modifier = modifier
@@ -191,6 +205,7 @@ fun InstrumentPickerEmbedded(
                 onSelect = { selectedCategory = it }
             )
             LazyVerticalGrid(
+                state = gridState,
                 columns = GridCells.Fixed(2),
                 modifier = Modifier
                     .weight(1f)
