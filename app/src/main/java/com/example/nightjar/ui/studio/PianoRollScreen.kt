@@ -398,19 +398,22 @@ fun PianoRollScreen(
                                     val down = awaitFirstDown(requireUnconsumed = false)
                                     // DON'T consume down -- lets scroll handle swipes
 
-                                    // Check both edges. The zone covers a strip inside the
-                                    // note plus a grace strip in empty space just outside it,
-                                    // so taps aimed at the visible edge that land a few pixels
-                                    // past the note still grab the resize handle. For short
-                                    // notes both edge zones may overlap; tie-break by
-                                    // proximity to the touch X.
+                                    // Strict edge check first (inside the note only). This is
+                                    // used for tap actions on the visible edge -- toggle
+                                    // selection, double-tap delete -- so a tap in empty space
+                                    // doesn't accidentally select a nearby note. The relaxed
+                                    // grace zone is only checked after long-press fires
+                                    // (see the EMPTY / NEAR-EDGE branch below) so an
+                                    // overshot edge tap can still resize without breaking
+                                    // tap-to-place. For short notes both edge zones may
+                                    // overlap; tie-break by proximity to the touch X.
                                     val rightEdgeNote = findNoteEdgeAt(
                                         down.position, state.notes, rowHeightPx, pxPerMs,
-                                        edgeZonePx, edgeGraceOutsidePx
+                                        edgeZonePx, graceOutsidePx = 0f
                                     )
                                     val leftEdgeNote = findNoteLeftEdgeAt(
                                         down.position, state.notes, rowHeightPx, pxPerMs,
-                                        edgeZonePx, edgeGraceOutsidePx
+                                        edgeZonePx, graceOutsidePx = 0f
                                     )
                                     val (edgeNote, isLeftEdge) = when {
                                         rightEdgeNote != null && leftEdgeNote != null -> {
@@ -566,20 +569,94 @@ fun PianoRollScreen(
                                             }
                                         }
                                     } else {
-                                        // ── EMPTY CELL ──
-                                        // All modes wait on long-press so quick drags pass
-                                        // through to the parent scroll (the user can still pan
-                                        // the grid in any mode). On lift before long-press,
-                                        // the post-loop tap logic runs (place note in DRAW,
-                                        // clear selection otherwise). Only SELECT promotes a
-                                        // held press into a marquee; DRAW and ERASE stay inert
-                                        // on hold so a stray hold near a note edge can't sweep
-                                        // up a phantom selection.
+                                        // ── EMPTY / NEAR-EDGE ──
+                                        // No strict edge or body hit. Wait on long-press so
+                                        // quick drags pass through to the parent scroll. On
+                                        // lift before long-press, run the post-loop tap logic
+                                        // (place note in DRAW, clear selection otherwise).
+                                        // After a held press, the resolution depends on whether
+                                        // the touch landed in the relaxed outside-edge grace
+                                        // zone of a nearby note:
+                                        //   * grace zone match -> resize (lets users overshoot
+                                        //     the visible edge by a few px without losing the
+                                        //     resize affordance)
+                                        //   * SELECT, no grace match -> marquee
+                                        //   * DRAW / ERASE, no grace match -> no-op (stays
+                                        //     inert so a stray hold can't sweep up a phantom
+                                        //     selection)
                                         val mode = state.editorMode
                                         val longPress = awaitLongPressOrCancellation(down.id)
+                                        val nearEdge: Pair<MidiNoteEntity, Boolean>? =
+                                            if (longPress != null) {
+                                                val rightCand = findNoteEdgeAt(
+                                                    down.position, state.notes, rowHeightPx, pxPerMs,
+                                                    edgeZonePx, graceOutsidePx = edgeGraceOutsidePx
+                                                )
+                                                val leftCand = findNoteLeftEdgeAt(
+                                                    down.position, state.notes, rowHeightPx, pxPerMs,
+                                                    edgeZonePx, graceOutsidePx = edgeGraceOutsidePx
+                                                )
+                                                when {
+                                                    rightCand != null && leftCand != null -> {
+                                                        val rightX = (rightCand.startMs + rightCand.durationMs) * pxPerMs
+                                                        val leftX = leftCand.startMs * pxPerMs
+                                                        if (abs(down.position.x - leftX) <= abs(down.position.x - rightX)) {
+                                                            leftCand to true
+                                                        } else {
+                                                            rightCand to false
+                                                        }
+                                                    }
+                                                    rightCand != null -> rightCand to false
+                                                    leftCand != null -> leftCand to true
+                                                    else -> null
+                                                }
+                                            } else null
+
                                         val drag: androidx.compose.ui.input.pointer.PointerInputChange?
                                         val startMarquee: Boolean
-                                        if (mode == EditorMode.SELECT && longPress != null) {
+                                        if (longPress != null && nearEdge != null) {
+                                            // Held in the outside-edge grace zone -- resize.
+                                            val (nearEdgeNote, nearIsLeftEdge) = nearEdge
+                                            longPress.consume()
+                                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                            val dragIds = if (nearEdgeNote.id in state.selectedNoteIds) {
+                                                state.selectedNoteIds
+                                            } else {
+                                                setOf(nearEdgeNote.id)
+                                            }
+                                            if (nearIsLeftEdge) {
+                                                handleLeftEdgeResizeDrag(
+                                                    nearEdgeNote, dragIds, longPress.id, pxPerMs,
+                                                    state.isSnapEnabled, state.bpm,
+                                                    state.gridResolution, state.timeSignatureDenominator,
+                                                    scrollX = { horizontalScrollState.value },
+                                                    onPreview = { dragState = it },
+                                                    onCommit = { noteIds, deltaStartMs ->
+                                                        dragState = null
+                                                        viewModel.onAction(
+                                                            PianoRollAction.ResizeNotesLeftEdge(noteIds, deltaStartMs)
+                                                        )
+                                                    },
+                                                    onCancel = { dragState = null }
+                                                )
+                                            } else {
+                                                handleResizeDrag(
+                                                    nearEdgeNote, dragIds, longPress.id, pxPerMs, rowHeightPx,
+                                                    state.isSnapEnabled, state.bpm,
+                                                    state.gridResolution, state.timeSignatureDenominator,
+                                                    scrollX = { horizontalScrollState.value },
+                                                    onPreview = { dragState = it },
+                                                    onCommit = { noteIds, deltaDurationMs ->
+                                                        dragState = null
+                                                        viewModel.onAction(
+                                                            PianoRollAction.ResizeNotes(noteIds, deltaDurationMs)
+                                                        )
+                                                    },
+                                                    onCancel = { dragState = null }
+                                                )
+                                            }
+                                            return@awaitEachGesture
+                                        } else if (mode == EditorMode.SELECT && longPress != null) {
                                             drag = longPress
                                             startMarquee = true
                                         } else {
