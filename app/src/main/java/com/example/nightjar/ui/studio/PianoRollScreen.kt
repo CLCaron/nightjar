@@ -43,8 +43,6 @@ import androidx.compose.material.icons.filled.GridGoldenratio
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.Piano
-import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Tune
@@ -143,14 +141,13 @@ private const val FAST_LONG_PRESS_MS = 200L
 
 /**
  * Fixed envelope height for the per-tab content row in the sub-panel.
- * Sized to comfortably fit SCALE's two-stack right column (chord stepper
- * 44dp + 4dp gap + toggle row with icon+caption ~52dp = ~100dp) plus the
- * left column's knob unit (LCD 20dp + 2dp + knob 32dp + 2dp + caption
- * 11dp = ~67dp). 124dp gives ~12dp of vertical padding inside the
- * wrapping Box. Single-row tabs (TOOLS, EDIT, INSTR) center their
- * content vertically inside this envelope.
+ * After folding HILITE / CHORDS into OFF positions on the SCALE knob and
+ * CHORD stepper, SCALE's tallest control is the knob unit at ~67dp (LCD
+ * 20dp + 2dp + knob 32dp + 2dp + caption 11dp). 80dp gives 12dp wrapping
+ * padding -- single-row tabs (TOOLS, EDIT, INSTR) center their ~50dp
+ * content with ~15dp above and below. Tight but no longer loose.
  */
-private val SUB_PANEL_CONTENT_HEIGHT = 124.dp
+private val SUB_PANEL_CONTENT_HEIGHT = 80.dp
 
 private val NOTE_NAMES = arrayOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 private val BLACK_KEYS = setOf(1, 3, 6, 8, 10) // indices within octave
@@ -1771,14 +1768,18 @@ private fun InstrPanelContent(
 // ── SCALE panel (phase 5) ───────────────────────────────────────────
 
 /**
- * SCALE sub-panel content. Single row with two regions:
+ * SCALE sub-panel content. Single row, three controls:
  *
- *  Left:  ROOT and SCALE compact knob units (small knob + tight LCD).
- *  Right: a vertical column with the CHORD stepper on top and the HILITE
- *         + CHORDS modifier toggles tucked underneath. Stacking the
- *         toggles under the stepper instead of on a separate row keeps
- *         SCALE's overall height down to roughly the same as TOOLS / EDIT
- *         / INSTR, so the sub-panel envelope stays compact.
+ *  ROOT knob:    12 chromatic root pitches (C..B)
+ *  SCALE knob:   "OFF" + 19 scale types. Rotating to OFF disables scale
+ *                highlighting entirely; rotating to any scale enables it.
+ *  CHORD stepper: "OFF" + 3 chord types. OFF disables chord-name display;
+ *                any chord type re-enables it. Wraps cyclically.
+ *
+ * Folding the HILITE / CHORDS toggles into OFF positions on their parent
+ * controls eliminates the second row that previously sat under the chord
+ * stepper, which lets the sub-panel envelope shrink and the other tabs
+ * stop swimming in vertical padding.
  */
 @Composable
 private fun ScalePanelContent(
@@ -1789,10 +1790,21 @@ private fun ScalePanelContent(
     val chordTypes = remember { MusicalScaleHelper.ChordType.entries }
 
     val rootValue = state.scaleRoot.coerceIn(0, 11) / 11f
-    val scaleIndex = scaleTypes.indexOf(state.scaleType).coerceAtLeast(0)
-    val scaleValue = if (scaleTypes.size > 1) {
-        scaleIndex.toFloat() / (scaleTypes.size - 1)
-    } else 0f
+
+    // SCALE knob: position 0 = OFF (scale highlighting disabled); positions
+    // 1..N = scaleTypes[idx - 1]. We translate the float-valued knob to one
+    // of those slots and dispatch ToggleScale and/or SetScaleType as needed.
+    val scaleSlots = scaleTypes.size + 1
+    val scaleIdx = if (state.isScaleEnabled) {
+        1 + scaleTypes.indexOf(state.scaleType).coerceAtLeast(0)
+    } else 0
+    val scaleValue = scaleIdx.toFloat() / (scaleSlots - 1)
+
+    // CHORD stepper: a synthetic null-or-ChordType list. null = OFF.
+    val chordOptions: List<MusicalScaleHelper.ChordType?> =
+        remember { listOf<MusicalScaleHelper.ChordType?>(null) + chordTypes }
+    val selectedChord: MusicalScaleHelper.ChordType? =
+        if (state.isChordMode) state.chordType else null
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -1813,60 +1825,43 @@ private fun ScalePanelContent(
         )
         KnobWithReadout(
             label = "SCALE",
-            readout = scaleShorthand(state.scaleType),
+            readout = if (state.isScaleEnabled) {
+                scaleShorthand(state.scaleType)
+            } else {
+                "OFF"
+            },
             value = scaleValue,
             onValueChange = { v ->
-                val maxIndex = scaleTypes.size - 1
-                val newIndex = (v * maxIndex).roundToInt().coerceIn(0, maxIndex)
-                val newType = scaleTypes[newIndex]
-                if (newType != state.scaleType) {
-                    onAction(PianoRollAction.SetScaleType(newType))
+                val newIdx = (v * (scaleSlots - 1)).roundToInt().coerceIn(0, scaleSlots - 1)
+                if (newIdx == scaleIdx) return@KnobWithReadout
+                if (newIdx == 0) {
+                    if (state.isScaleEnabled) onAction(PianoRollAction.ToggleScale)
+                } else {
+                    val newType = scaleTypes[newIdx - 1]
+                    if (!state.isScaleEnabled) onAction(PianoRollAction.ToggleScale)
+                    if (newType != state.scaleType) onAction(PianoRollAction.SetScaleType(newType))
                 }
             },
             readoutWidth = 64.dp
         )
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            NjStepper(
-                options = chordTypes,
-                selected = state.chordType,
-                onSelect = { newType ->
-                    if (newType != state.chordType) {
-                        onAction(PianoRollAction.SetChordType(newType))
+        NjStepper(
+            options = chordOptions,
+            selected = selectedChord,
+            onSelect = { newOption ->
+                if (newOption == null) {
+                    if (state.isChordMode) onAction(PianoRollAction.ToggleChordMode)
+                } else {
+                    if (!state.isChordMode) onAction(PianoRollAction.ToggleChordMode)
+                    if (newOption != state.chordType) {
+                        onAction(PianoRollAction.SetChordType(newOption))
                     }
-                },
-                label = "CHORD",
-                valueText = { it.displayName.uppercase() },
-                modifier = Modifier.fillMaxWidth(),
-                height = 44.dp
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                NjButton(
-                    text = "",
-                    icon = Icons.Filled.Visibility,
-                    caption = "HILITE",
-                    onClick = { onAction(PianoRollAction.ToggleScale) },
-                    isActive = state.isScaleEnabled,
-                    ledColor = NjAmber,
-                    modifier = Modifier.weight(1f)
-                )
-                NjButton(
-                    text = "",
-                    icon = Icons.Filled.Piano,
-                    caption = "CHORDS",
-                    onClick = { onAction(PianoRollAction.ToggleChordMode) },
-                    isActive = state.isChordMode,
-                    ledColor = NjAmber,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
+                }
+            },
+            label = "CHORD",
+            valueText = { it?.displayName?.uppercase() ?: "OFF" },
+            modifier = Modifier.weight(1f),
+            height = 44.dp
+        )
     }
 }
 
