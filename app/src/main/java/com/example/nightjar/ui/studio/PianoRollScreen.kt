@@ -41,9 +41,9 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GridGoldenratio
 import androidx.compose.material.icons.filled.GridOn
-import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Piano
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.SkipPrevious
@@ -144,12 +144,13 @@ private const val FAST_LONG_PRESS_MS = 200L
 /**
  * Fixed envelope height for the per-tab content row in the sub-panel.
  * Sized to comfortably fit SCALE's two-stack right column (chord stepper
- * 44dp + 4dp gap + toggle row 36dp = 84dp, plus 12dp wrapping padding) and
- * the left column's knob unit (knob 32dp + LCD 14dp + caption 10dp = ~56dp).
- * Single-row tabs (TOOLS, EDIT, INSTR) center their content vertically in
- * this envelope; the resulting padding is comfortable but not loose.
+ * 44dp + 4dp gap + toggle row with icon+caption ~52dp = ~100dp) plus the
+ * left column's knob unit (LCD 20dp + 2dp + knob 32dp + 2dp + caption
+ * 11dp = ~67dp). 124dp gives ~12dp of vertical padding inside the
+ * wrapping Box. Single-row tabs (TOOLS, EDIT, INSTR) center their
+ * content vertically inside this envelope.
  */
-private val SUB_PANEL_CONTENT_HEIGHT = 104.dp
+private val SUB_PANEL_CONTENT_HEIGHT = 124.dp
 
 private val NOTE_NAMES = arrayOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 private val BLACK_KEYS = setOf(1, 3, 6, 8, 10) // indices within octave
@@ -1857,7 +1858,7 @@ private fun ScalePanelContent(
                 )
                 NjButton(
                     text = "",
-                    icon = Icons.Filled.Layers,
+                    icon = Icons.Filled.Piano,
                     caption = "CHORDS",
                     onClick = { onAction(PianoRollAction.ToggleChordMode) },
                     isActive = state.isChordMode,
@@ -1923,7 +1924,7 @@ private fun KnobWithReadout(
         Box(
             modifier = Modifier
                 .width(readoutWidth)
-                .height(14.dp)
+                .height(20.dp)
                 .clip(RoundedCornerShape(3.dp))
                 .background(NjPanelInset),
             contentAlignment = Alignment.Center
@@ -1931,7 +1932,8 @@ private fun KnobWithReadout(
             Text(
                 text = readout,
                 fontFamily = IbmPlexMono,
-                fontSize = 8.sp,
+                fontSize = 10.sp,
+                lineHeight = 12.sp,
                 color = NjAmber.copy(alpha = 0.9f),
                 letterSpacing = 0.4.sp,
                 maxLines = 1
@@ -1946,7 +1948,8 @@ private fun KnobWithReadout(
         Text(
             text = label,
             fontFamily = IbmPlexMono,
-            fontSize = 8.sp,
+            fontSize = 9.sp,
+            lineHeight = 11.sp,
             color = NjMuted,
             letterSpacing = 0.5.sp
         )

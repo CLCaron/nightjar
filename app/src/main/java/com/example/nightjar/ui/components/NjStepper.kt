@@ -104,7 +104,7 @@ fun <T> NjStepper(
                         sw
                     )
                 }
-                .padding(horizontal = 6.dp, vertical = 4.dp),
+                .padding(horizontal = 8.dp, vertical = 4.dp),
             contentAlignment = Alignment.Center
         ) {
             Column(
@@ -115,7 +115,8 @@ fun <T> NjStepper(
                 Text(
                     text = label,
                     fontFamily = IbmPlexMono,
-                    fontSize = 8.sp,
+                    fontSize = 9.sp,
+                    lineHeight = 11.sp,
                     color = NjMuted,
                     letterSpacing = 0.7.sp,
                     maxLines = 1
@@ -123,7 +124,8 @@ fun <T> NjStepper(
                 Text(
                     text = valueText(selected),
                     fontFamily = IbmPlexMono,
-                    fontSize = 12.sp,
+                    fontSize = 13.sp,
+                    lineHeight = 15.sp,
                     color = NjAmber.copy(alpha = 0.9f),
                     letterSpacing = 0.5.sp,
                     maxLines = 1
