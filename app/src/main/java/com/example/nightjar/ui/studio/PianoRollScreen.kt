@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GridGoldenratio
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.SelectAll
@@ -1755,7 +1756,9 @@ private fun InstrPanelContent(
             height = controlHeight
         )
         NjButton(
-            text = "BROWSE",
+            text = "",
+            icon = Icons.Filled.MoreHoriz,
+            caption = "BROWSE",
             onClick = { onAction(PianoRollAction.ToggleBrowsePatches) },
             isActive = state.isBrowsingPatches,
             ledColor = NjAmber,
