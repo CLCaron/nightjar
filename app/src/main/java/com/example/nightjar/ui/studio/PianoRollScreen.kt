@@ -39,8 +39,11 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.GridGoldenratio
 import androidx.compose.material.icons.filled.GridOn
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Tune
@@ -138,14 +141,14 @@ private val EDGE_TOUCH_ZONE = 16.dp
 private const val FAST_LONG_PRESS_MS = 200L
 
 /**
- * Fixed envelope height for the per-tab content row in the sub-panel. Sized
- * to the tallest tab (SCALE, with compact knob unit ~50dp on the left and
- * a stepper ~36dp + toggles ~28dp = ~68dp on the right, plus 8dp wrapping
- * padding). All other tabs center their single-row content vertically
- * inside this envelope so switching tabs never moves the GRID strip or the
- * tab bar.
+ * Fixed envelope height for the per-tab content row in the sub-panel.
+ * Sized to comfortably fit SCALE's two-stack right column (chord stepper
+ * 44dp + 4dp gap + toggle row 36dp = 84dp, plus 12dp wrapping padding) and
+ * the left column's knob unit (knob 32dp + LCD 14dp + caption 10dp = ~56dp).
+ * Single-row tabs (TOOLS, EDIT, INSTR) center their content vertically in
+ * this envelope; the resulting padding is comfortable but not loose.
  */
-private val SUB_PANEL_CONTENT_HEIGHT = 80.dp
+private val SUB_PANEL_CONTENT_HEIGHT = 104.dp
 
 private val NOTE_NAMES = arrayOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 private val BLACK_KEYS = setOf(1, 3, 6, 8, 10) // indices within octave
@@ -763,17 +766,11 @@ fun PianoRollScreen(
             }
         }  // end of weight(1f) Box
 
-        // Tab bar -- four MODE buttons. Phases 4-6 + 10 fill in their respective
-        // sub-panels.
-        PianoRollTabBar(
-            activeTab = state.activeTab,
-            onTabSelect = { viewModel.onAction(PianoRollAction.SwitchTab(it)) }
-        )
-
-        // Sub-panel: hidden only when the user has tapped the active tab a
-        // second time to collapse it. INSTR keeps its sub-panel (the stepper
-        // + BROWSE button) visible -- the picker is an overlay that slides
-        // over the grid above.
+        // Sub-panel order (top to bottom): GRID resolution strip, then the
+        // per-tab content area, then the tab bar pinned to the very bottom.
+        // Tab bar at the bottom matches Android's bottom-nav muscle memory
+        // and lets the per-tab controls sit directly above the user's thumb
+        // when they tap a tab.
         if (!state.isPanelCollapsed) {
             PianoRollSubPanel(
                 activeTab = state.activeTab,
@@ -781,6 +778,11 @@ fun PianoRollScreen(
                 onAction = viewModel::onAction
             )
         }
+
+        PianoRollTabBar(
+            activeTab = state.activeTab,
+            onTabSelect = { viewModel.onAction(PianoRollAction.SwitchTab(it)) }
+        )
     }
 }
 
@@ -1790,7 +1792,7 @@ private fun ScalePanelContent(
 
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         KnobWithReadout(
@@ -1803,7 +1805,7 @@ private fun ScalePanelContent(
                     onAction(PianoRollAction.SetScaleRoot(newRoot))
                 }
             },
-            readoutWidth = 32.dp
+            readoutWidth = 36.dp
         )
         KnobWithReadout(
             label = "SCALE",
@@ -1817,7 +1819,7 @@ private fun ScalePanelContent(
                     onAction(PianoRollAction.SetScaleType(newType))
                 }
             },
-            readoutWidth = 56.dp
+            readoutWidth = 64.dp
         )
         Column(
             modifier = Modifier.weight(1f),
@@ -1834,7 +1836,7 @@ private fun ScalePanelContent(
                 label = "CHORD",
                 valueText = { it.displayName.uppercase() },
                 modifier = Modifier.fillMaxWidth(),
-                height = 36.dp
+                height = 44.dp
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1842,22 +1844,22 @@ private fun ScalePanelContent(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 NjButton(
-                    text = "HILITE",
+                    text = "",
+                    icon = Icons.Filled.Visibility,
+                    caption = "HILITE",
                     onClick = { onAction(PianoRollAction.ToggleScale) },
                     isActive = state.isScaleEnabled,
                     ledColor = NjAmber,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(28.dp)
+                    modifier = Modifier.weight(1f)
                 )
                 NjButton(
-                    text = "CHORDS",
+                    text = "",
+                    icon = Icons.Filled.Layers,
+                    caption = "CHORDS",
                     onClick = { onAction(PianoRollAction.ToggleChordMode) },
                     isActive = state.isChordMode,
                     ledColor = NjAmber,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(28.dp)
+                    modifier = Modifier.weight(1f)
                 )
             }
         }
@@ -1909,7 +1911,7 @@ private fun KnobWithReadout(
     onValueChange: (Float) -> Unit,
     modifier: Modifier = Modifier,
     readoutWidth: androidx.compose.ui.unit.Dp = 44.dp,
-    knobSize: androidx.compose.ui.unit.Dp = 28.dp
+    knobSize: androidx.compose.ui.unit.Dp = 32.dp
 ) {
     Column(
         modifier = modifier,
@@ -2645,32 +2647,9 @@ private fun PianoRollSubPanel(
             .fillMaxWidth()
             .background(NjBg)
     ) {
-        // ── Top row: per-tab content ──
-        // Fixed height so the sub-panel doesn't jump when switching tabs.
-        // Sized to fit the tallest layout (SCALE's two sub-rows). Shorter
-        // panels (TOOLS, EDIT) center vertically inside this envelope.
-        // INSTR never reaches this row -- the whole sub-panel slides away.
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(SUB_PANEL_CONTENT_HEIGHT)
-                .background(NjSurface)
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            when (activeTab) {
-                PianoRollTab.TOOLS -> ToolsPanelContent(state, onAction)
-                PianoRollTab.SCALE -> ScalePanelContent(state, onAction)
-                PianoRollTab.EDIT -> EditPanelContent(state, onAction)
-                PianoRollTab.INSTR -> InstrPanelContent(state, onAction)
-            }
-        }
-
-        // ── Bottom row: GRID segmented strip, SNAP toggle ──
-        // The grid resolution lives in a single segmented pill (NjSegmented-
-        // Strip). Equal-width segments with a shared body so labels never
-        // wrap and sizes never drift between values. SNAP keeps its own
-        // hardware-button silhouette on the right.
+        // ── Row 1: GRID segmented strip + SNAP toggle ──
+        // Sits above the per-tab content because grid resolution is a
+        // session-level preference, not a per-tab control.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -2692,15 +2671,37 @@ private fun PianoRollSubPanel(
                 onSelect = { onAction(PianoRollAction.SetGridResolution(it)) },
                 label = { "1/$it" },
                 modifier = Modifier.weight(1f),
-                height = 32.dp
+                height = 36.dp
             )
             NjButton(
-                text = "SNAP",
+                text = "",
+                icon = Icons.Filled.GridGoldenratio,
+                caption = "SNAP",
                 onClick = { onAction(PianoRollAction.ToggleSnap) },
                 isActive = state.isSnapEnabled,
                 ledColor = NjAmber,
-                modifier = Modifier.height(32.dp)
+                modifier = Modifier.height(40.dp)
             )
+        }
+
+        // ── Row 2: per-tab content ──
+        // Fixed height so the sub-panel doesn't jump when switching tabs.
+        // Sized to fit the tallest layout (SCALE). Shorter panels (TOOLS,
+        // EDIT, INSTR) center vertically inside this envelope.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(SUB_PANEL_CONTENT_HEIGHT)
+                .background(NjSurface)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            when (activeTab) {
+                PianoRollTab.TOOLS -> ToolsPanelContent(state, onAction)
+                PianoRollTab.SCALE -> ScalePanelContent(state, onAction)
+                PianoRollTab.EDIT -> EditPanelContent(state, onAction)
+                PianoRollTab.INSTR -> InstrPanelContent(state, onAction)
+            }
         }
     }
 }
