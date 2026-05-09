@@ -554,34 +554,28 @@ fun PianoRollScreen(
                                     } else {
                                         // ── EMPTY CELL ──
                                         // Mode dispatch:
-                                        //   DRAW   - long-press → marquee, tap → place / clear
                                         //   SELECT - drag (touch slop) → marquee, tap → clear
+                                        //   DRAW   - tap → place / clear; hold/drag → no marquee
                                         //   ERASE  - tap → no-op
+                                        // Marquee is gated to SELECT only so DRAW never produces
+                                        // a phantom selection box when the user mis-taps a note edge.
                                         val mode = state.editorMode
-                                        val startMarquee: Boolean
                                         val drag: androidx.compose.ui.input.pointer.PointerInputChange?
-                                        when (mode) {
-                                            EditorMode.SELECT -> {
-                                                // Drag-from-empty marquees immediately on slop.
-                                                // No long-press required -- mode already declares
-                                                // "I'm selecting."
-                                                drag = awaitTouchSlopOrCancellation(down.id) { c, _ ->
-                                                    c.consume()
-                                                }
-                                                startMarquee = drag != null
+                                        val startMarquee: Boolean
+                                        if (mode == EditorMode.SELECT) {
+                                            // Drag-from-empty marquees immediately on slop.
+                                            drag = awaitTouchSlopOrCancellation(down.id) { c, _ ->
+                                                c.consume()
                                             }
-                                            EditorMode.DRAW -> {
-                                                // Long-press to marquee (preserves the existing
-                                                // tap-to-place affordance so a quick tap still
-                                                // creates a note).
-                                                val longPress = awaitLongPressOrCancellation(down.id)
-                                                drag = longPress
-                                                startMarquee = longPress != null
-                                            }
-                                            EditorMode.ERASE -> {
-                                                drag = null
-                                                startMarquee = false
-                                            }
+                                            startMarquee = drag != null
+                                        } else {
+                                            // DRAW or ERASE: no marquee. Wait for the press to
+                                            // resolve (lift, long-press timeout, or cancel) so
+                                            // the post-loop tap-to-place logic still runs on a
+                                            // quick tap. We discard the result.
+                                            awaitLongPressOrCancellation(down.id)
+                                            drag = null
+                                            startMarquee = false
                                         }
 
                                         if (!startMarquee) {
@@ -620,20 +614,22 @@ fun PianoRollScreen(
                                                 }
                                             }
                                         } else {
-                                            // Marquee start. Track absolute (canvas-content)
-                                            // coords so the rect stays put under the finger
-                                            // when scroll moves the canvas.
+                                            // Marquee start. The Canvas's pointerInput sits
+                                            // inside the scroll modifiers, so positions arrive
+                                            // already in canvas-content coords -- no scroll
+                                            // offset to add. (Adding it doubled the offset and
+                                            // shoved the rect off-screen to the bottom-right.)
                                             drag?.consume()
                                             view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                                            val anchorAbsX = down.position.x + horizontalScrollState.value
-                                            val anchorAbsY = down.position.y + verticalScrollState.value
-                                            var lastAbsX = anchorAbsX
-                                            var lastAbsY = anchorAbsY
+                                            val anchorX = down.position.x
+                                            val anchorY = down.position.y
+                                            var lastX = anchorX
+                                            var lastY = anchorY
                                             marqueeRect = MarqueeRect(
-                                                x1 = anchorAbsX,
-                                                y1 = anchorAbsY,
-                                                x2 = anchorAbsX,
-                                                y2 = anchorAbsY
+                                                x1 = anchorX,
+                                                y1 = anchorY,
+                                                x2 = anchorX,
+                                                y2 = anchorY
                                             )
                                             while (true) {
                                                 val event = awaitPointerEvent()
@@ -644,13 +640,13 @@ fun PianoRollScreen(
                                                     break
                                                 }
                                                 change.consume()
-                                                lastAbsX = change.position.x + horizontalScrollState.value
-                                                lastAbsY = change.position.y + verticalScrollState.value
+                                                lastX = change.position.x
+                                                lastY = change.position.y
                                                 marqueeRect = MarqueeRect(
-                                                    x1 = minOf(anchorAbsX, lastAbsX),
-                                                    y1 = minOf(anchorAbsY, lastAbsY),
-                                                    x2 = maxOf(anchorAbsX, lastAbsX),
-                                                    y2 = maxOf(anchorAbsY, lastAbsY)
+                                                    x1 = minOf(anchorX, lastX),
+                                                    y1 = minOf(anchorY, lastY),
+                                                    x2 = maxOf(anchorX, lastX),
+                                                    y2 = maxOf(anchorY, lastY)
                                                 )
                                             }
                                             val rect = marqueeRect
