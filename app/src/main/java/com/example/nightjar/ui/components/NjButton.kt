@@ -33,8 +33,16 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import com.example.nightjar.ui.theme.IbmPlexMono
 import com.example.nightjar.ui.theme.LocalNjColors
 import com.example.nightjar.ui.theme.NjAmber
+import com.example.nightjar.ui.theme.NjMuted
 
 // Pressed-in body -- reads from active palette.
 internal val PressedBodyColor: Color
@@ -64,6 +72,10 @@ internal val RaisedBodyColor: Color
  *                    Set false for action buttons (e.g. Clear) that use toggle
  *                    visuals for the rocker effect but aren't status indicators.
  * @param shape       Corner shape -- override for pill-pair grouping.
+ * @param caption     Optional IBM Plex Mono label rendered beneath the icon/text.
+ *                    Implements the "every button gets a caption" rule -- icon for the
+ *                    verb, caption for the noun. All-caps. Defaults to null so existing
+ *                    callers are unaffected.
  */
 @Composable
 fun NjButton(
@@ -77,12 +89,83 @@ fun NjButton(
     ledColor: Color? = null,
     activeGlow: Boolean = true,
     ledScale: Float = 1f,
-    shape: Shape = RoundedCornerShape(2.dp)
+    shape: Shape = RoundedCornerShape(2.dp),
+    caption: String? = null
 ) {
     if (ledColor != null) {
-        ToggleModeButton(text, onClick, modifier, icon, isActive, ledColor, activeGlow, ledScale, shape, textColor)
+        ToggleModeButton(text, onClick, modifier, icon, isActive, ledColor, activeGlow, ledScale, shape, textColor, caption)
     } else {
-        MomentaryModeButton(text, onClick, modifier, icon, isActive, activeAccent, textColor, shape)
+        MomentaryModeButton(text, onClick, modifier, icon, isActive, activeAccent, textColor, shape, caption)
+    }
+}
+
+/** Render an icon or text body, optionally with an IBM Plex Mono caption beneath. */
+@Composable
+private fun NjButtonContent(
+    icon: ImageVector?,
+    text: String,
+    caption: String?,
+    fgColor: Color,
+    captionColor: Color,
+    iconScaleModifier: Modifier,
+    iconGlowColor: Color = Color.Transparent,
+    textGlowShadow: Shadow? = null
+) {
+    val body: @Composable () -> Unit = {
+        if (icon != null) {
+            Icon(
+                imageVector = icon,
+                contentDescription = text.ifEmpty { caption },
+                tint = fgColor,
+                modifier = iconScaleModifier
+                    .size(20.dp)
+                    .drawBehind {
+                        if (iconGlowColor != Color.Transparent) {
+                            drawCircle(
+                                brush = Brush.radialGradient(
+                                    colors = listOf(
+                                        iconGlowColor.copy(alpha = 0.18f),
+                                        Color.Transparent
+                                    ),
+                                    center = center,
+                                    radius = 14.dp.toPx()
+                                ),
+                                radius = 14.dp.toPx(),
+                                center = center
+                            )
+                        }
+                    }
+            )
+        } else {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelLarge.let { base ->
+                    if (textGlowShadow != null) base.copy(shadow = textGlowShadow) else base
+                },
+                color = fgColor,
+                modifier = iconScaleModifier
+            )
+        }
+    }
+
+    if (caption.isNullOrEmpty()) {
+        body()
+    } else {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            body()
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = caption.uppercase(),
+                fontFamily = IbmPlexMono,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Normal,
+                color = captionColor,
+                letterSpacing = 0.5.sp
+            )
+        }
     }
 }
 
@@ -98,7 +181,8 @@ private fun ToggleModeButton(
     activeGlow: Boolean,
     ledScale: Float,
     shape: Shape,
-    inactiveTextColor: Color? = null
+    inactiveTextColor: Color? = null,
+    caption: String? = null
 ) {
     val toggleState = rememberMechanicalToggleState(isActive)
     val depth by toggleState.depth
@@ -205,35 +289,9 @@ private fun ToggleModeButton(
             Modifier.graphicsLayer(scaleX = ledScale, scaleY = ledScale)
         } else Modifier
 
-        if (icon != null) {
-            // Neon glow: radial gradient behind the icon
-            val glowColor = if (visuallyActive && activeGlow) ledColor else Color.Transparent
-            Icon(
-                imageVector = icon,
-                contentDescription = text.ifEmpty { null },
-                tint = fgColor,
-                modifier = scaleModifier
-                    .size(20.dp)
-                    .drawBehind {
-                        if (glowColor != Color.Transparent) {
-                            drawCircle(
-                                brush = Brush.radialGradient(
-                                    colors = listOf(
-                                        glowColor.copy(alpha = 0.18f),
-                                        Color.Transparent
-                                    ),
-                                    center = center,
-                                    radius = 14.dp.toPx()
-                                ),
-                                radius = 14.dp.toPx(),
-                                center = center
-                            )
-                        }
-                    }
-            )
-        } else {
-            // Per-letter glow via text shadow -- backlit lettering effect.
-            val glowShadow = when {
+        // Per-letter glow via text shadow -- backlit lettering effect.
+        val textGlowShadow = if (icon == null) {
+            when {
                 visuallyActive && activeGlow -> Shadow(
                     color = ledColor.copy(alpha = 0.8f),
                     offset = Offset.Zero,
@@ -246,15 +304,23 @@ private fun ToggleModeButton(
                 )
                 else -> null
             }
-            Text(
-                text = text,
-                style = MaterialTheme.typography.labelLarge.let { base ->
-                    if (glowShadow != null) base.copy(shadow = glowShadow) else base
-                },
-                color = fgColor,
-                modifier = scaleModifier
-            )
-        }
+        } else null
+
+        val iconGlowColor = if (icon != null && visuallyActive && activeGlow) ledColor else Color.Transparent
+
+        // Caption color: muted when inactive, ledColor.copy(alpha=0.7) when latched.
+        val captionColor = if (visuallyActive) ledColor.copy(alpha = 0.7f) else NjMuted
+
+        NjButtonContent(
+            icon = icon,
+            text = text,
+            caption = caption,
+            fgColor = fgColor,
+            captionColor = captionColor,
+            iconScaleModifier = scaleModifier,
+            iconGlowColor = iconGlowColor,
+            textGlowShadow = textGlowShadow
+        )
     }
 }
 
@@ -268,7 +334,8 @@ private fun MomentaryModeButton(
     isActive: Boolean,
     activeAccent: Color,
     textColor: Color?,
-    shape: Shape
+    shape: Shape,
+    caption: String? = null
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedWithMinDuration()
@@ -385,47 +452,29 @@ private fun MomentaryModeButton(
             ),
         contentAlignment = Alignment.Center
     ) {
-        if (icon != null) {
-            // Neon glow: radial gradient behind the icon -- only when active
-            val glowColor = if (isActive) (textColor ?: activeAccent) else Color.Transparent
-            Icon(
-                imageVector = icon,
-                contentDescription = text.ifEmpty { null },
-                tint = fgColor,
-                modifier = Modifier
-                    .size(20.dp)
-                    .drawBehind {
-                        if (glowColor != Color.Transparent) {
-                            drawCircle(
-                                brush = Brush.radialGradient(
-                                    colors = listOf(
-                                        glowColor.copy(alpha = 0.18f),
-                                        Color.Transparent
-                                    ),
-                                    center = center,
-                                    radius = 14.dp.toPx()
-                                ),
-                                radius = 14.dp.toPx(),
-                                center = center
-                            )
-                        }
-                    }
-            )
-        } else {
-            val glowShadow = textColor?.let {
+        val iconGlowColor = if (icon != null && isActive) (textColor ?: activeAccent) else Color.Transparent
+
+        val textGlowShadow = if (icon == null) {
+            textColor?.let {
                 Shadow(
                     color = it.copy(alpha = 0.8f),
                     offset = Offset.Zero,
                     blurRadius = 8f
                 )
             }
-            Text(
-                text = text,
-                style = MaterialTheme.typography.labelLarge.let { base ->
-                    if (glowShadow != null) base.copy(shadow = glowShadow) else base
-                },
-                color = fgColor
-            )
-        }
+        } else null
+
+        val captionColor = if (isActive) (textColor ?: activeAccent).copy(alpha = 0.7f) else NjMuted
+
+        NjButtonContent(
+            icon = icon,
+            text = text,
+            caption = caption,
+            fgColor = fgColor,
+            captionColor = captionColor,
+            iconScaleModifier = Modifier,
+            iconGlowColor = iconGlowColor,
+            textGlowShadow = textGlowShadow
+        )
     }
 }

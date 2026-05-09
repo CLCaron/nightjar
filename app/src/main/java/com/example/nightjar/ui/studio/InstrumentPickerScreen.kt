@@ -39,6 +39,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -142,6 +143,86 @@ fun InstrumentPickerScreen(
             }
         }
 
+    }
+}
+
+/**
+ * Embeddable variant of the instrument picker for use inside other screens
+ * (currently the full-screen piano roll's INSTR tab).
+ *
+ * Differs from [InstrumentPickerScreen] by:
+ * - No top bar / back button (the host provides those).
+ * - No InstrumentPickerViewModel -- selectedProgram is supplied from outside,
+ *   selection events go up via [onSelectProgram].
+ * - Category state is local to this composable (defaults to KEYS), so the
+ *   sidebar still works without external plumbing.
+ *
+ * The host wires [onSelectProgram] to its own SetMidiInstrument-style
+ * action, and the picker just reflects the host's [selectedProgram].
+ */
+@Composable
+fun InstrumentPickerEmbedded(
+    selectedProgram: Int,
+    onSelectProgram: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var selectedCategory by androidx.compose.runtime.remember(selectedProgram) {
+        // Open the sidebar on the category that owns the current patch so the
+        // user lands on a useful starting tab. Falls back to the first category
+        // if the program isn't in the curated set.
+        val category = curatedPatchFor(selectedProgram)?.category
+            ?: PatchCategory.entries.first()
+        androidx.compose.runtime.mutableStateOf(category)
+    }
+    val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+
+    // Scroll to the selected patch's position whenever it (or the category)
+    // changes -- including the first time the picker opens. Without this the
+    // grid always starts at the top and the user has to hunt for what's
+    // currently loaded.
+    androidx.compose.runtime.LaunchedEffect(selectedCategory, selectedProgram) {
+        val visible = curatedPatchesIn(selectedCategory)
+        val idx = visible.indexOfFirst { it.program == selectedProgram }
+        if (idx >= 0) {
+            // Two-column grid; aim for the row containing the selection.
+            gridState.scrollToItem(idx)
+        }
+    }
+
+    Column(
+        modifier = modifier
+            .background(NjBg)
+    ) {
+        SelectedPatchReadout(
+            program = selectedProgram,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+        )
+        Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            CategorySidebar(
+                selected = selectedCategory,
+                onSelect = { selectedCategory = it }
+            )
+            LazyVerticalGrid(
+                state = gridState,
+                columns = GridCells.Fixed(2),
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxSize(),
+                contentPadding = PaddingValues(start = 8.dp, end = 12.dp, top = 4.dp, bottom = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(curatedPatchesIn(selectedCategory), key = { it.program }) { patch ->
+                    PatchCard(
+                        patch = patch,
+                        isSelected = patch.program == selectedProgram,
+                        onClick = { onSelectProgram(patch.program) }
+                    )
+                }
+            }
+        }
     }
 }
 

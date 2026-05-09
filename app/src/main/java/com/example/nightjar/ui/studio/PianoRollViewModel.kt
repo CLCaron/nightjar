@@ -30,6 +30,9 @@ data class PianoRollClipInfo(
     val endMs: Long
 )
 
+/** Sub-panel modes for the full-screen piano roll's tab bar. */
+enum class PianoRollTab { TOOLS, SCALE, EDIT, INSTR }
+
 /**
  * Per-note metadata used by move/resize operations.
  *
@@ -76,6 +79,14 @@ data class PianoRollState(
     val gridResolution: Int = 16,
     val isSnapEnabled: Boolean = true,
     val stickyNoteDurationMs: Long? = null,
+    // Selector (mirrors Studio's cursor): set by ruler tap, drives RESTART target.
+    val selectorMs: Long = 0L,
+    // Loop region (engine-level state, synced in phase 7). Drives RESTART when on.
+    val loopStartMs: Long? = null,
+    val loopEndMs: Long? = null,
+    val isLoopEnabled: Boolean = false,
+    // EDIT > VELOC latch: when true, the velocity strip becomes draggable for selected notes.
+    val isVelocityEditMode: Boolean = false,
     // Scale & chord
     val scaleRoot: Int = 0,
     val scaleType: MusicalScaleHelper.ScaleType = MusicalScaleHelper.ScaleType.MAJOR,
@@ -83,32 +94,86 @@ data class PianoRollState(
     val isChordMode: Boolean = false,
     val chordType: MusicalScaleHelper.ChordType = MusicalScaleHelper.ChordType.TRIAD,
     val diatonicChords: List<MusicalScaleHelper.ChordInfo> = emptyList(),
+    // Tab/sub-panel
+    val activeTab: PianoRollTab = PianoRollTab.TOOLS,
+    /**
+     * When true, the sub-panel and (if applicable) the instrument picker are
+     * hidden so the piano roll grid fills the freed space. Tapping the active
+     * tab a second time toggles this; tapping any other tab expands and
+     * switches.
+     */
+    val isPanelCollapsed: Boolean = false,
+    /**
+     * Active editor mode. Disambiguates what taps and drags on the grid mean:
+     *  - DRAW: tap empty = place note, drag note = move, long-press = resize
+     *  - SELECT: tap note = toggle selection, drag empty = marquee
+     *  - ERASE: tap note = delete
+     * Acts as a hardware-style mode switch instead of overloading gestures.
+     */
+    val editorMode: EditorMode = EditorMode.DRAW,
+    /**
+     * Latched state of the INSTR tab's BROWSE button. When true, the patch
+     * picker overlay slides up from behind the tab bar and covers the piano
+     * roll grid. Tapping BROWSE again or switching to a different tab
+     * dismisses the overlay.
+     */
+    val isBrowsingPatches: Boolean = false,
     val isLoading: Boolean = true
 )
+
+/** Editing mode for grid interactions. */
+enum class EditorMode { DRAW, SELECT, ERASE }
 
 /** User-initiated actions on the piano roll editor. */
 sealed interface PianoRollAction {
     data class PlaceNote(val pitch: Int, val startMs: Long, val durationMs: Long) : PianoRollAction
     data class MoveNotes(val noteIds: Set<Long>, val deltaMs: Long, val deltaPitch: Int) : PianoRollAction
     data class ResizeNotes(val noteIds: Set<Long>, val deltaDurationMs: Long) : PianoRollAction
+    /** Drag the LEFT edge: start moves by deltaStartMs, end stays anchored. */
+    data class ResizeNotesLeftEdge(val noteIds: Set<Long>, val deltaStartMs: Long) : PianoRollAction
     data class QuickDeleteNote(val noteId: Long) : PianoRollAction
     data class ToggleNoteSelection(val noteId: Long) : PianoRollAction
     data object ClearSelection : PianoRollAction
     data object DeleteSelected : PianoRollAction
+    data object SplitSelected : PianoRollAction
+    data object CopySelected : PianoRollAction
     data object Undo : PianoRollAction
     data object Redo : PianoRollAction
     data class PreviewPitch(val pitch: Int) : PianoRollAction
     data object ToggleSnap : PianoRollAction
     data object CycleGridResolution : PianoRollAction
+    data class SetGridResolution(val value: Int) : PianoRollAction
     data object Play : PianoRollAction
     data object Pause : PianoRollAction
     data class SeekTo(val positionMs: Long) : PianoRollAction
+    data object Restart : PianoRollAction
+    // EDIT panel
+    data object QuantizeSelected : PianoRollAction
+    data object ToggleVelocityEditMode : PianoRollAction
+    data class SetNoteVelocities(val newVelocities: Map<Long, Float>) : PianoRollAction
+    // Ruler / loop / selector
+    data class SetSelector(val ms: Long) : PianoRollAction
+    data class SetLoopRegion(val startMs: Long, val endMs: Long) : PianoRollAction
+    data object ClearLoopRegion : PianoRollAction
+    data object ToggleLoopEnabled : PianoRollAction
+    data class SelectNotesInRect(
+        val startMs: Long,
+        val endMs: Long,
+        val pitchRange: IntRange
+    ) : PianoRollAction
     // Scale & chord
     data object ToggleScale : PianoRollAction
     data class SetScaleRoot(val root: Int) : PianoRollAction
     data class SetScaleType(val type: MusicalScaleHelper.ScaleType) : PianoRollAction
     data object ToggleChordMode : PianoRollAction
     data object CycleChordType : PianoRollAction
+    data class SetChordType(val type: MusicalScaleHelper.ChordType) : PianoRollAction
+    // Tab/sub-panel
+    data class SwitchTab(val tab: PianoRollTab) : PianoRollAction
+    data class SetEditorMode(val mode: EditorMode) : PianoRollAction
+    data object ToggleBrowsePatches : PianoRollAction
+    // INSTR (embedded picker)
+    data class SetMidiInstrument(val program: Int) : PianoRollAction
 }
 
 /** One-shot effects from the piano roll. */
@@ -119,6 +184,8 @@ sealed interface PianoRollEffect {
 private const val PREVIEW_CHANNEL = 15
 private const val PREVIEW_VELOCITY = 80
 private const val PREVIEW_DURATION_MS = 200L
+private const val PATCH_AUDITION_PITCH = 60   // Middle C
+private const val PATCH_AUDITION_DURATION_MS = 600L
 
 @HiltViewModel
 class PianoRollViewModel @Inject constructor(
@@ -218,6 +285,11 @@ class PianoRollViewModel @Inject constructor(
                     idea?.scaleType ?: "MAJOR"
                 )
 
+                // Pull any active loop from the engine so a region set in
+                // Studio shows up here on entry. Studio and the piano roll
+                // share the engine's cached state.
+                val activeLoop = audioEngine.getCurrentLoopRegion()
+
                 _state.update {
                     it.copy(
                         trackId = trackId,
@@ -236,6 +308,9 @@ class PianoRollViewModel @Inject constructor(
                         gridResolution = idea?.gridResolution ?: 16,
                         scaleRoot = scaleRoot,
                         scaleType = scaleType,
+                        loopStartMs = activeLoop?.first,
+                        loopEndMs = activeLoop?.second,
+                        isLoopEnabled = activeLoop != null,
                         isLoading = false
                     )
                 }
@@ -316,24 +391,113 @@ class PianoRollViewModel @Inject constructor(
             is PianoRollAction.PlaceNote -> placeNote(action.pitch, action.startMs, action.durationMs)
             is PianoRollAction.MoveNotes -> moveNotes(action.noteIds, action.deltaMs, action.deltaPitch)
             is PianoRollAction.ResizeNotes -> resizeNotes(action.noteIds, action.deltaDurationMs)
+            is PianoRollAction.ResizeNotesLeftEdge ->
+                resizeNotesLeftEdge(action.noteIds, action.deltaStartMs)
             is PianoRollAction.QuickDeleteNote -> quickDeleteNote(action.noteId)
             is PianoRollAction.ToggleNoteSelection -> toggleNoteSelection(action.noteId)
             PianoRollAction.ClearSelection -> _state.update { it.copy(selectedNoteIds = emptySet()) }
             PianoRollAction.DeleteSelected -> deleteSelected()
+            PianoRollAction.SplitSelected -> splitSelected()
+            PianoRollAction.CopySelected -> copySelected()
             PianoRollAction.Undo -> undo()
             PianoRollAction.Redo -> redo()
             is PianoRollAction.PreviewPitch -> previewPitch(action.pitch)
             PianoRollAction.ToggleSnap -> _state.update { it.copy(isSnapEnabled = !it.isSnapEnabled) }
             PianoRollAction.CycleGridResolution -> cycleGridResolution()
-            PianoRollAction.Play -> audioEngine.play()
+            is PianoRollAction.SetGridResolution -> setGridResolution(action.value)
+            PianoRollAction.Play -> play()
             PianoRollAction.Pause -> audioEngine.pause()
             is PianoRollAction.SeekTo -> audioEngine.seekTo(action.positionMs)
+            PianoRollAction.Restart -> restart()
+            PianoRollAction.QuantizeSelected -> quantizeSelected()
+            PianoRollAction.ToggleVelocityEditMode ->
+                _state.update { it.copy(isVelocityEditMode = !it.isVelocityEditMode) }
+            is PianoRollAction.SetNoteVelocities -> setNoteVelocities(action.newVelocities)
+            is PianoRollAction.SetSelector -> setSelector(action.ms)
+            is PianoRollAction.SetLoopRegion -> setLoopRegion(action.startMs, action.endMs)
+            PianoRollAction.ClearLoopRegion -> clearLoopRegion()
+            PianoRollAction.ToggleLoopEnabled -> toggleLoopEnabled()
+            is PianoRollAction.SelectNotesInRect ->
+                selectNotesInRect(action.startMs, action.endMs, action.pitchRange)
             // Scale & chord
             PianoRollAction.ToggleScale -> toggleScale()
             is PianoRollAction.SetScaleRoot -> setScaleRoot(action.root)
             is PianoRollAction.SetScaleType -> setScaleType(action.type)
             PianoRollAction.ToggleChordMode -> toggleChordMode()
             PianoRollAction.CycleChordType -> cycleChordType()
+            is PianoRollAction.SetChordType -> setChordType(action.type)
+            // Tab/sub-panel
+            is PianoRollAction.SwitchTab -> {
+                val current = _state.value
+                val tappingActive = action.tab == current.activeTab
+                _state.update {
+                    if (tappingActive) {
+                        // Second tap on active tab toggles the sub-panel
+                        // collapse. Switching tabs always dismisses the
+                        // browse overlay (returns the user to the grid).
+                        it.copy(
+                            isPanelCollapsed = !current.isPanelCollapsed,
+                            isBrowsingPatches = false
+                        )
+                    } else {
+                        it.copy(
+                            activeTab = action.tab,
+                            isPanelCollapsed = false,
+                            isBrowsingPatches = false
+                        )
+                    }
+                }
+            }
+            is PianoRollAction.SetEditorMode -> _state.update { it.copy(editorMode = action.mode) }
+            PianoRollAction.ToggleBrowsePatches -> _state.update {
+                it.copy(isBrowsingPatches = !it.isBrowsingPatches)
+            }
+            is PianoRollAction.SetMidiInstrument -> setMidiInstrument(action.program)
+        }
+    }
+
+    /**
+     * Update the track's MIDI program, write to DB, and resync the engine
+     * channel so the new patch takes effect immediately. Mirrors Studio's
+     * setMidiInstrument flow but scoped to this track only. Plays a brief
+     * audition (middle C on the preview channel) so the user hears the new
+     * patch on tap without having to play a note manually.
+     */
+    private fun setMidiInstrument(program: Int) {
+        viewModelScope.launch {
+            try {
+                val ch = _state.value.midiChannel
+                midiRepo.setInstrument(trackId, program)
+                audioEngine.synthProgramChange(ch, program)
+                _state.update {
+                    it.copy(
+                        midiProgram = program,
+                        instrumentName = gmInstrumentName(program)
+                    )
+                }
+                auditionProgram(program)
+            } catch (e: Exception) {
+                Log.e(TAG, "SetMidiInstrument failed", e)
+                _effects.emit(PianoRollEffect.ShowError("Failed to change instrument"))
+            }
+        }
+    }
+
+    /**
+     * Play a short middle-C audition on the dedicated preview channel for
+     * the given program. Used to confirm a patch change in the INSTR picker.
+     */
+    private fun auditionProgram(program: Int) {
+        previewNoteOffJob?.cancel()
+        audioEngine.previewNote(
+            channel = PREVIEW_CHANNEL,
+            pitch = PATCH_AUDITION_PITCH,
+            velocity = PREVIEW_VELOCITY,
+            program = program
+        )
+        previewNoteOffJob = viewModelScope.launch {
+            delay(PATCH_AUDITION_DURATION_MS)
+            audioEngine.synthNoteOff(PREVIEW_CHANNEL, PATCH_AUDITION_PITCH)
         }
     }
 
@@ -482,6 +646,75 @@ class PianoRollViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Resize from the LEFT edge: move startMs by deltaStartMs and shrink/grow
+     * durationMs by the same amount so the right edge stays anchored. Each
+     * note's delta is independently capped: minimum duration of 50ms and
+     * clip-relative start clamped at 0. Pushes one Composite undo entry
+     * (MoveBatch + ResizeBatch) so undo restores the original position and
+     * length together.
+     */
+    private fun resizeNotesLeftEdge(noteIds: Set<Long>, deltaStartMs: Long) {
+        if (noteIds.isEmpty()) return
+        viewModelScope.launch {
+            try {
+                val st = _state.value
+                val moveEntries = mutableListOf<NoteOperation.MoveBatch.MoveEntry>()
+                val resizeEntries = mutableListOf<NoteOperation.ResizeBatch.ResizeEntry>()
+
+                for (id in noteIds) {
+                    val note = st.notes.find { it.id == id } ?: continue
+                    val info = noteClipMap[id] ?: continue
+                    val oldClipRel = info.rawStartMs
+                    val oldDuration = note.durationMs
+                    // Cap so duration stays >= 50ms and clip-rel start stays >= 0.
+                    val capped = deltaStartMs
+                        .coerceAtMost(oldDuration - 50L)
+                        .coerceAtLeast(-oldClipRel)
+                    if (capped == 0L) continue
+                    val newClipRel = oldClipRel + capped
+                    val newDuration = oldDuration - capped
+
+                    midiRepo.updateNoteTiming(id, newClipRel, newDuration)
+
+                    moveEntries.add(
+                        NoteOperation.MoveBatch.MoveEntry(
+                            noteId = id,
+                            oldStartMs = oldClipRel,
+                            newStartMs = newClipRel,
+                            oldPitch = note.pitch,
+                            newPitch = note.pitch
+                        )
+                    )
+                    resizeEntries.add(
+                        NoteOperation.ResizeBatch.ResizeEntry(
+                            noteId = id,
+                            clipRelativeStartMs = newClipRel,
+                            oldDurationMs = oldDuration,
+                            newDurationMs = newDuration
+                        )
+                    )
+                }
+
+                if (moveEntries.isEmpty()) return@launch
+
+                undoManager.push(
+                    NoteOperation.Composite(
+                        ops = listOf(
+                            NoteOperation.MoveBatch(moveEntries),
+                            NoteOperation.ResizeBatch(resizeEntries)
+                        )
+                    )
+                )
+                syncUndoRedoState()
+                midiRepo.recomputeTrackDuration(trackId)
+            } catch (e: Exception) {
+                Log.e(TAG, "Left-edge resize failed", e)
+                _effects.emit(PianoRollEffect.ShowError("Failed to resize notes"))
+            }
+        }
+    }
+
     private fun quickDeleteNote(noteId: Long) {
         viewModelScope.launch {
             try {
@@ -527,6 +760,140 @@ class PianoRollViewModel @Inject constructor(
                 _state.update { it.copy(selectedNoteIds = emptySet()) }
             } catch (e: Exception) {
                 _effects.emit(PianoRollEffect.ShowError("Failed to delete notes"))
+            }
+        }
+    }
+
+    /**
+     * Split selected notes at the playhead, falling back to the note's midpoint
+     * when the playhead is outside it. Each selected note becomes two notes that
+     * sum to the original duration. Notes shorter than 100ms are left alone.
+     * Wrapped as a single undo entry via NoteOperation.Composite.
+     */
+    private fun splitSelected() {
+        viewModelScope.launch {
+            try {
+                val st = _state.value
+                if (st.selectedNoteIds.isEmpty()) return@launch
+
+                val resizeEntries = mutableListOf<NoteOperation.ResizeBatch.ResizeEntry>()
+                val newNoteEntities = mutableListOf<MidiNoteEntity>()
+
+                for (id in st.selectedNoteIds) {
+                    val note = st.notes.find { it.id == id } ?: continue
+                    val info = noteClipMap[id] ?: continue
+                    if (note.durationMs < 100L) continue   // too short to split meaningfully
+
+                    val noteStartAbs = note.startMs
+                    val noteEndAbs = noteStartAbs + note.durationMs
+                    val splitAbs = if (st.positionMs in (noteStartAbs + 50)..(noteEndAbs - 50)) {
+                        st.positionMs
+                    } else {
+                        noteStartAbs + note.durationMs / 2
+                    }
+                    val firstHalfDuration = splitAbs - noteStartAbs
+                    val secondHalfDuration = note.durationMs - firstHalfDuration
+                    if (firstHalfDuration < 50L || secondHalfDuration < 50L) continue
+
+                    val clipRelStart = info.rawStartMs
+                    val clipRelSplit = clipRelStart + firstHalfDuration
+
+                    // Truncate the original to the first half.
+                    midiRepo.updateNoteTiming(id, clipRelStart, firstHalfDuration)
+                    resizeEntries.add(
+                        NoteOperation.ResizeBatch.ResizeEntry(
+                            noteId = id,
+                            clipRelativeStartMs = clipRelStart,
+                            oldDurationMs = note.durationMs,
+                            newDurationMs = firstHalfDuration
+                        )
+                    )
+
+                    // Build the second half (same pitch, same clip).
+                    newNoteEntities.add(
+                        MidiNoteEntity(
+                            trackId = trackId,
+                            clipId = info.clipId,
+                            pitch = note.pitch,
+                            startMs = clipRelSplit,
+                            durationMs = secondHalfDuration
+                        )
+                    )
+                }
+
+                if (resizeEntries.isEmpty() && newNoteEntities.isEmpty()) return@launch
+
+                val newIds = if (newNoteEntities.isNotEmpty()) {
+                    midiRepo.insertNotes(newNoteEntities)
+                } else emptyList()
+                val newSnapshots = if (newIds.isNotEmpty()) midiRepo.getNotesByIds(newIds) else emptyList()
+
+                val composite = NoteOperation.Composite(
+                    ops = buildList {
+                        if (resizeEntries.isNotEmpty()) {
+                            add(NoteOperation.ResizeBatch(resizeEntries))
+                        }
+                        if (newIds.isNotEmpty()) {
+                            add(NoteOperation.Place(noteIds = newIds, snapshots = newSnapshots))
+                        }
+                    }
+                )
+                undoManager.push(composite)
+                syncUndoRedoState()
+
+                midiRepo.recomputeTrackDuration(trackId)
+                // Selection now includes both halves of every split note.
+                _state.update {
+                    it.copy(selectedNoteIds = it.selectedNoteIds + newIds.toSet())
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Split failed", e)
+                _effects.emit(PianoRollEffect.ShowError("Failed to split notes"))
+            }
+        }
+    }
+
+    /**
+     * Duplicate selected notes immediately to the right of the selection with
+     * no gap. Each new note keeps its pitch and duration but starts at
+     * (originalStart + selectionSpan). Single Place undo entry.
+     */
+    private fun copySelected() {
+        viewModelScope.launch {
+            try {
+                val st = _state.value
+                if (st.selectedNoteIds.isEmpty()) return@launch
+                val sourceNotes = st.notes.filter { it.id in st.selectedNoteIds }
+                if (sourceNotes.isEmpty()) return@launch
+
+                val minStartAbs = sourceNotes.minOf { it.startMs }
+                val maxEndAbs = sourceNotes.maxOf { it.startMs + it.durationMs }
+                val spanMs = (maxEndAbs - minStartAbs).coerceAtLeast(50L)
+
+                val newEntities = sourceNotes.map { src ->
+                    val newAbsStart = src.startMs + spanMs
+                    val targetClip = findClipForPosition(newAbsStart)
+                    val newClipRel = (newAbsStart - targetClip.offsetMs).coerceAtLeast(0L)
+                    MidiNoteEntity(
+                        trackId = trackId,
+                        clipId = targetClip.id,
+                        pitch = src.pitch,
+                        startMs = newClipRel,
+                        durationMs = src.durationMs
+                    )
+                }
+
+                val newIds = midiRepo.insertNotes(newEntities)
+                val newSnapshots = midiRepo.getNotesByIds(newIds)
+
+                undoManager.push(NoteOperation.Place(noteIds = newIds, snapshots = newSnapshots))
+                syncUndoRedoState()
+
+                midiRepo.recomputeTrackDuration(trackId)
+                _state.update { it.copy(selectedNoteIds = newIds.toSet()) }
+            } catch (e: Exception) {
+                Log.e(TAG, "Copy failed", e)
+                _effects.emit(PianoRollEffect.ShowError("Failed to copy notes"))
             }
         }
     }
@@ -603,6 +970,20 @@ class PianoRollViewModel @Inject constructor(
                     midiRepo.updateNoteTiming(entry.noteId, entry.clipRelativeStartMs, targetDuration)
                 }
             }
+            is NoteOperation.Composite -> {
+                // Reverse: undo each sub-op in reverse order with reverse semantics.
+                // Forward: redo each sub-op in order with forward semantics.
+                val ordered = if (reverse) op.ops.reversed() else op.ops
+                for (sub in ordered) {
+                    executeOperation(sub, reverse)
+                }
+            }
+            is NoteOperation.VelocityBatch -> {
+                for (entry in op.entries) {
+                    val target = if (reverse) entry.oldVelocity else entry.newVelocity
+                    midiRepo.updateNoteVelocity(entry.noteId, target)
+                }
+            }
         }
     }
 
@@ -663,6 +1044,16 @@ class PianoRollViewModel @Inject constructor(
         }
     }
 
+    private fun setChordType(type: MusicalScaleHelper.ChordType) {
+        if (_state.value.chordType == type) return
+        _state.update {
+            val chords = if (it.isScaleEnabled) {
+                MusicalScaleHelper.getDiatonicChords(it.scaleRoot, it.scaleType, type)
+            } else emptyList()
+            it.copy(chordType = type, diatonicChords = chords)
+        }
+    }
+
     private fun persistScale() {
         viewModelScope.launch {
             try {
@@ -677,10 +1068,226 @@ class PianoRollViewModel @Inject constructor(
     // ── Grid ─────────────────────────────────────────────────────────
 
     private fun cycleGridResolution() {
-        val presets = listOf(4, 8, 16, 32)
+        val presets = listOf(2, 4, 8, 16, 32)
         val current = _state.value.gridResolution
-        val nextIndex = (presets.indexOf(current) + 1) % presets.size
+        val nextIndex = (presets.indexOf(current).coerceAtLeast(0) + 1) % presets.size
         _state.update { it.copy(gridResolution = presets[nextIndex], stickyNoteDurationMs = null) }
+    }
+
+    private fun setGridResolution(value: Int) {
+        if (value <= 0) return
+        _state.update { it.copy(gridResolution = value, stickyNoteDurationMs = null) }
+    }
+
+    /**
+     * Quantize selected notes (or all notes when no selection) to the active
+     * grid resolution. Each affected note's startMs snaps to the nearest grid
+     * line; duration is preserved. Pitch is untouched. Pushes a single
+     * MoveBatch undo entry so the user can revert in one step.
+     */
+    private fun quantizeSelected() {
+        viewModelScope.launch {
+            try {
+                val st = _state.value
+                val targetIds = if (st.selectedNoteIds.isNotEmpty()) {
+                    st.selectedNoteIds
+                } else {
+                    st.notes.map { it.id }.toSet()
+                }
+                if (targetIds.isEmpty()) return@launch
+
+                val entries = mutableListOf<NoteOperation.MoveBatch.MoveEntry>()
+                for (id in targetIds) {
+                    val note = st.notes.find { it.id == id } ?: continue
+                    val info = noteClipMap[id] ?: continue
+                    val snappedAbs = MusicalTimeConverter.snapToGrid(
+                        note.startMs, st.bpm, st.gridResolution, st.timeSignatureDenominator
+                    )
+                    val deltaMs = snappedAbs - note.startMs
+                    if (deltaMs == 0L) continue   // already on grid -- skip
+
+                    val oldClipRel = info.rawStartMs
+                    val newClipRel = (oldClipRel + deltaMs).coerceAtLeast(0L)
+
+                    midiRepo.updateNoteTiming(id, newClipRel, note.durationMs)
+                    entries.add(
+                        NoteOperation.MoveBatch.MoveEntry(
+                            noteId = id,
+                            oldStartMs = oldClipRel,
+                            newStartMs = newClipRel,
+                            oldPitch = note.pitch,
+                            newPitch = note.pitch
+                        )
+                    )
+                }
+
+                if (entries.isEmpty()) return@launch
+
+                undoManager.push(NoteOperation.MoveBatch(entries))
+                syncUndoRedoState()
+                midiRepo.recomputeTrackDuration(trackId)
+            } catch (e: Exception) {
+                Log.e(TAG, "Quantize failed", e)
+                _effects.emit(PianoRollEffect.ShowError("Quantize failed"))
+            }
+        }
+    }
+
+    /**
+     * Apply a batch of velocity changes -- one per noteId -- and record a
+     * single VelocityBatch undo entry. Called on velocity-strip drag release.
+     * Notes whose new velocity equals the old are skipped so empty-drag
+     * gestures don't pollute the undo stack.
+     */
+    private fun setNoteVelocities(newVelocities: Map<Long, Float>) {
+        if (newVelocities.isEmpty()) return
+        viewModelScope.launch {
+            try {
+                val st = _state.value
+                val entries = mutableListOf<NoteOperation.VelocityBatch.VelocityEntry>()
+                for ((id, newVel) in newVelocities) {
+                    val note = st.notes.find { it.id == id } ?: continue
+                    val clamped = newVel.coerceIn(0f, 1f)
+                    if (clamped == note.velocity) continue
+                    midiRepo.updateNoteVelocity(id, clamped)
+                    entries.add(
+                        NoteOperation.VelocityBatch.VelocityEntry(
+                            noteId = id,
+                            oldVelocity = note.velocity,
+                            newVelocity = clamped
+                        )
+                    )
+                }
+                if (entries.isEmpty()) return@launch
+                undoManager.push(NoteOperation.VelocityBatch(entries))
+                syncUndoRedoState()
+            } catch (e: Exception) {
+                Log.e(TAG, "Set velocities failed", e)
+                _effects.emit(PianoRollEffect.ShowError("Failed to set velocity"))
+            }
+        }
+    }
+
+    /**
+     * Set the selector position -- the user's "where I want to start from"
+     * marker. Tapping the ruler does NOT move the playhead; only PLAY and
+     * RESTART consult the selector. This keeps the marker concept independent
+     * from the playhead so the user can scout a start point without losing
+     * their current playback position.
+     */
+    private fun setSelector(ms: Long) {
+        val st = _state.value
+        val snapped = MusicalTimeConverter.snapToGrid(
+            ms.coerceAtLeast(0L), st.bpm, st.gridResolution, st.timeSignatureDenominator
+        )
+        _state.update { it.copy(selectorMs = snapped) }
+    }
+
+    /**
+     * Start playback from the selector position. The selector is a persistent
+     * "home" marker -- only the user moves it (by tapping the ruler), so PLAY
+     * is a reliable "play from this point" affordance. Useful for practicing
+     * a passage repeatedly: tap once, hit PLAY each time.
+     */
+    private fun play() {
+        val st = _state.value
+        audioEngine.seekTo(st.selectorMs)
+        audioEngine.play()
+    }
+
+    /**
+     * Set or replace the loop region. Snaps both endpoints to grid. Pushes
+     * the region to the audio engine, so playback wraps within it.
+     */
+    private fun setLoopRegion(startMs: Long, endMs: Long) {
+        val st = _state.value
+        val a = startMs.coerceAtLeast(0L)
+        val b = endMs.coerceAtLeast(0L)
+        val rawStart = minOf(a, b)
+        val rawEnd = maxOf(a, b)
+        val snappedStart = MusicalTimeConverter.snapToGrid(
+            rawStart, st.bpm, st.gridResolution, st.timeSignatureDenominator
+        )
+        val snappedEnd = MusicalTimeConverter.snapToGrid(
+            rawEnd, st.bpm, st.gridResolution, st.timeSignatureDenominator
+        )
+        // Treat zero-length drags as "clear": snapping can collapse a tiny
+        // span when both endpoints land in the same grid cell.
+        if (snappedEnd <= snappedStart) {
+            clearLoopRegion()
+            return
+        }
+        _state.update {
+            it.copy(
+                loopStartMs = snappedStart,
+                loopEndMs = snappedEnd,
+                isLoopEnabled = true
+            )
+        }
+        audioEngine.setLoopRegion(snappedStart, snappedEnd)
+    }
+
+    private fun clearLoopRegion() {
+        _state.update {
+            it.copy(loopStartMs = null, loopEndMs = null, isLoopEnabled = false)
+        }
+        audioEngine.clearLoopRegion()
+    }
+
+    /**
+     * Toggle the loop's engaged state. When the region exists but is
+     * disengaged, calling this re-engages it without the user having to
+     * redraw the bracket. When engaged, calling this disengages without
+     * losing the region (matches Studio's behavior).
+     */
+    /**
+     * Replace the current selection with all notes whose bounding rect
+     * intersects the given timeline span and pitch range. Marquee semantics:
+     * a fresh marquee resets selection to the matched set.
+     */
+    private fun selectNotesInRect(startMs: Long, endMs: Long, pitchRange: IntRange) {
+        val st = _state.value
+        val matched = st.notes.asSequence()
+            .filter { note ->
+                val noteEnd = note.startMs + note.durationMs
+                note.pitch in pitchRange &&
+                    noteEnd >= startMs &&
+                    note.startMs <= endMs
+            }
+            .map { it.id }
+            .toSet()
+        _state.update { it.copy(selectedNoteIds = matched) }
+    }
+
+    private fun toggleLoopEnabled() {
+        val st = _state.value
+        when {
+            st.isLoopEnabled -> {
+                _state.update { it.copy(isLoopEnabled = false) }
+                audioEngine.clearLoopRegion()
+            }
+            !st.isLoopEnabled && st.loopStartMs != null && st.loopEndMs != null -> {
+                _state.update { it.copy(isLoopEnabled = true) }
+                audioEngine.setLoopRegion(st.loopStartMs, st.loopEndMs)
+            }
+            else -> Unit  // no region defined, nothing to toggle
+        }
+    }
+
+    /**
+     * Restart playback to the natural restart point: loop start if loop is on,
+     * else the user-set selector position, else 0. Preserves playback state --
+     * does NOT pause. This mirrors Studio's planned restart-button behavior
+     * and replaces the legacy direct seekTo(0) wired to the old toolbar.
+     */
+    private fun restart() {
+        val st = _state.value
+        val target = when {
+            st.isLoopEnabled && st.loopStartMs != null -> st.loopStartMs
+            st.selectorMs > 0L -> st.selectorMs
+            else -> 0L
+        }
+        audioEngine.seekTo(target)
     }
 
     private fun previewPitch(pitch: Int) {

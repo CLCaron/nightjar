@@ -132,10 +132,29 @@ class OboeAudioEngine @Inject constructor() {
 
     // ── Loop ───────────────────────────────────────────────────────────────
 
-    fun setLoopRegion(startMs: Long, endMs: Long) =
-        nativeSetLoopRegion(startMs, endMs)
+    /**
+     * Last-set loop region cached on the Kotlin side. The native engine has
+     * the source of truth for playback wrap, but it doesn't expose a query,
+     * so this cache lets screens read the current region. Exposed as a
+     * StateFlow so multiple screens (Studio + full-screen Piano Roll) stay
+     * in sync without polling. All writes go through [setLoopRegion] /
+     * [clearLoopRegion], keeping native and Kotlin consistent.
+     */
+    private val _loopRegion = MutableStateFlow<Pair<Long, Long>?>(null)
+    val loopRegion: StateFlow<Pair<Long, Long>?> = _loopRegion
 
-    fun clearLoopRegion() = nativeClearLoopRegion()
+    fun setLoopRegion(startMs: Long, endMs: Long) {
+        nativeSetLoopRegion(startMs, endMs)
+        _loopRegion.value = startMs to endMs
+    }
+
+    fun clearLoopRegion() {
+        nativeClearLoopRegion()
+        _loopRegion.value = null
+    }
+
+    /** Currently engaged loop region, or null when no loop is active. */
+    fun getCurrentLoopRegion(): Pair<Long, Long>? = _loopRegion.value
 
     // ── Overdub support ────────────────────────────────────────────────────
 

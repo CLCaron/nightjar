@@ -86,6 +86,29 @@ class StudioViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Pull the current loop region from the engine into our UI state. Called
+     * by the Studio screen on resume so that any change made on the full-screen
+     * Piano Roll (which writes through the same engine cache) shows up here
+     * without losing Studio's local "toggled off but region preserved" semantics
+     * during a single in-screen session.
+     */
+    fun refreshLoopFromEngine() {
+        if (currentIdeaId == null) return
+        val region = audioEngine.getCurrentLoopRegion()
+        val current = _state.value
+        val newStart = region?.first
+        val newEnd = region?.second
+        if (newStart == current.loopStartMs && newEnd == current.loopEndMs) return
+        _state.update {
+            it.copy(
+                loopStartMs = newStart,
+                loopEndMs = newEnd,
+                isLoopEnabled = region != null
+            )
+        }
+    }
+
     private var currentIdeaId: Long? = null
 
     companion object {
@@ -1616,9 +1639,13 @@ class StudioViewModel @Inject constructor(
     private fun updateLoopRegionEnd(endMs: Long) {
         val current = _state.value
         val start = current.loopStartMs ?: return
-        val total = current.totalDurationMs
         val snapped = snapIfEnabled(endMs)
-        val clamped = snapped.coerceIn(start + MIN_LOOP_DURATION_MS, total)
+        // Lower bound only: the loop end is allowed to sit past totalDurationMs
+        // (the native engine wraps at loopEnd regardless of content length).
+        // Clamping to total used to crash here when a loop synced from the
+        // Piano Roll extended past Studio's content end -- coerceIn would see
+        // an inverted range.
+        val clamped = snapped.coerceAtLeast(start + MIN_LOOP_DURATION_MS)
         _state.update { it.copy(loopEndMs = clamped) }
         if (current.isLoopEnabled) {
             audioEngine.setLoopRegion(start, clamped)

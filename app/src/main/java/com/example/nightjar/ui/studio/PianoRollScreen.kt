@@ -1,13 +1,20 @@
 package com.example.nightjar.ui.studio
 
 import android.view.HapticFeedbackConstants
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
+import androidx.compose.foundation.gestures.awaitTouchSlopOrCancellation
+import androidx.compose.foundation.gestures.horizontalDrag
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,24 +23,33 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.CallSplit
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.filled.AllInclusive
+import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.GridGoldenratio
+import androidx.compose.material.icons.filled.GridOn
+import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Tune
 import com.example.nightjar.ui.components.NjIcons
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
@@ -42,13 +58,16 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerId
@@ -68,7 +87,14 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.example.nightjar.audio.MusicalTimeConverter
 import com.example.nightjar.data.db.entity.MidiNoteEntity
 import com.example.nightjar.ui.components.NjButton
+import com.example.nightjar.ui.components.NjKnob
+import com.example.nightjar.ui.components.NjRecessedPanel
+import com.example.nightjar.ui.components.NjSegmentedStrip
+import com.example.nightjar.ui.components.NjStepper
+import com.example.nightjar.ui.theme.IbmPlexMono
 import com.example.nightjar.ui.theme.NjBg
+import com.example.nightjar.ui.theme.NjCursorTeal
+import com.example.nightjar.ui.theme.NjMuted
 import com.example.nightjar.ui.theme.NjMuted2
 import com.example.nightjar.ui.theme.NjOnBg
 import com.example.nightjar.ui.theme.NjAmber
@@ -81,11 +107,11 @@ import com.example.nightjar.ui.theme.NjTrackColors
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Alignment
 import com.example.nightjar.audio.MusicalScaleHelper
 import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
 /** Height of each semitone row in dp. */
@@ -113,6 +139,16 @@ private val EDGE_TOUCH_ZONE = 16.dp
 /** Fast long-press threshold in ms (matches Timeline). */
 private const val FAST_LONG_PRESS_MS = 200L
 
+/**
+ * Fixed envelope height for the per-tab content row in the sub-panel.
+ * After folding HILITE / CHORDS into OFF positions on the SCALE knob and
+ * CHORD stepper, SCALE's tallest control is the knob unit at ~67dp (LCD
+ * 20dp + 2dp + knob 32dp + 2dp + caption 11dp). 80dp gives 12dp wrapping
+ * padding -- single-row tabs (TOOLS, EDIT, INSTR) center their ~50dp
+ * content with ~15dp above and below. Tight but no longer loose.
+ */
+private val SUB_PANEL_CONTENT_HEIGHT = 80.dp
+
 private val NOTE_NAMES = arrayOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 private val BLACK_KEYS = setOf(1, 3, 6, 8, 10) // indices within octave
 
@@ -122,14 +158,23 @@ private data class GroupDragState(
     val anchorNoteId: Long,       // the note the user touched
     val deltaMs: Long = 0L,       // time offset (move mode)
     val deltaPitch: Int = 0,      // pitch offset (move mode)
-    val deltaDurationMs: Long = 0L, // duration offset (resize mode)
-    val isResize: Boolean = false
+    val deltaDurationMs: Long = 0L, // duration offset (right-edge resize mode)
+    val deltaStartMs: Long = 0L,    // start offset (left-edge resize mode; end anchored)
+    val isResize: Boolean = false,
+    val isLeftEdgeResize: Boolean = false
+)
+
+/** Marquee selection rectangle in canvas-content coordinates. */
+private data class MarqueeRect(
+    val x1: Float,
+    val y1: Float,
+    val x2: Float,
+    val y2: Float
 )
 
 /** Timeout for double-tap-to-delete detection. */
 private const val DOUBLE_TAP_TIMEOUT_MS = 300L
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PianoRollScreen(
     onBack: () -> Unit,
@@ -188,6 +233,8 @@ fun PianoRollScreen(
 
     // Drag preview state (local to composable, not in ViewModel)
     var dragState by remember { mutableStateOf<GroupDragState?>(null) }
+    // Marquee selection rect during box-drag (local; only the result hits the VM)
+    var marqueeRect by remember { mutableStateOf<MarqueeRect?>(null) }
 
     // Double-tap detection state
     var lastTapNoteId by remember { mutableStateOf<Long?>(null) }
@@ -206,113 +253,65 @@ fun PianoRollScreen(
             .fillMaxSize()
             .background(NjBg)
             .statusBarsPadding()
+            .navigationBarsPadding()
     ) {
-        // Toolbar
-        TopAppBar(
-            title = {
-                Column {
-                    Text(
-                        text = state.trackName.ifEmpty { "Piano Roll" },
-                        style = MaterialTheme.typography.titleSmall,
-                        color = NjOnBg
-                    )
-                    if (state.instrumentName.isNotEmpty()) {
-                        Text(
-                            text = state.instrumentName,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = NjMuted2
-                        )
-                    }
-                }
-            },
-            navigationIcon = {
-                IconButton(onClick = onBack) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = NjOnBg
-                    )
-                }
-            },
-            actions = {
-                NjButton(
-                    text = "",
-                    icon = Icons.AutoMirrored.Filled.Undo,
-                    onClick = { viewModel.onAction(PianoRollAction.Undo) },
-                    textColor = if (state.canUndo) NjOnBg else NjMuted2.copy(alpha = 0.3f)
-                )
-                Spacer(Modifier.width(2.dp))
-                NjButton(
-                    text = "",
-                    icon = Icons.AutoMirrored.Filled.Redo,
-                    onClick = { viewModel.onAction(PianoRollAction.Redo) },
-                    textColor = if (state.canRedo) NjOnBg else NjMuted2.copy(alpha = 0.3f)
-                )
-                Spacer(Modifier.width(2.dp))
-                NjButton(
-                    text = "",
-                    icon = Icons.Filled.Delete,
-                    onClick = { viewModel.onAction(PianoRollAction.DeleteSelected) },
-                    textColor = if (state.selectedNoteIds.isNotEmpty()) NjError else NjMuted2.copy(alpha = 0.3f)
-                )
-                Spacer(Modifier.width(8.dp))
-                @OptIn(ExperimentalFoundationApi::class)
-                Box(
-                    modifier = Modifier.combinedClickable(
-                        onClick = { viewModel.onAction(PianoRollAction.CycleGridResolution) },
-                        onLongClick = {
-                            horizontalZoom = 1f
-                            verticalZoom = 1f
-                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                        }
-                    )
-                ) {
-                    NjButton(
-                        text = "1/${state.gridResolution}",
-                        onClick = { viewModel.onAction(PianoRollAction.CycleGridResolution) },
-                        textColor = NjAmber.copy(alpha = 0.8f)
-                    )
-                }
-                Spacer(Modifier.width(4.dp))
-                NjButton(
-                    text = "Snap",
-                    onClick = { viewModel.onAction(PianoRollAction.ToggleSnap) },
-                    isActive = state.isSnapEnabled,
-                    ledColor = NjAmber
-                )
-                Spacer(Modifier.width(4.dp))
-                NjButton(
-                    text = "Restart",
-                    icon = Icons.Filled.SkipPrevious,
-                    onClick = { viewModel.onAction(PianoRollAction.SeekTo(0L)) },
-                    textColor = NjLedGreen.copy(alpha = 0.5f),
-                )
-                Spacer(Modifier.width(4.dp))
-                NjButton(
-                    text = "Play",
-                    icon = NjIcons.PlayPause,
-                    onClick = {
-                        if (state.isPlaying) viewModel.onAction(PianoRollAction.Pause)
-                        else viewModel.onAction(PianoRollAction.Play)
-                    },
-                    isActive = state.isPlaying,
-                    ledColor = NjLedGreen
-                )
-                Spacer(Modifier.width(8.dp))
-            },
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = NjSurface
-            )
+        // New captioned top bar: BACK, title (track + KEY/BPM/INSTRUMENT), RESTART, PLAY.
+        // Replaces the old TopAppBar. Undo/Redo/Delete migrate to TOOLS panel
+        // (phase 4); GridRes + Snap migrate to the bottom-row chips below.
+        PianoRollTopBar(
+            state = state,
+            onBack = onBack,
+            onRestart = { viewModel.onAction(PianoRollAction.Restart) },
+            onPlayPause = {
+                if (state.isPlaying) viewModel.onAction(PianoRollAction.Pause)
+                else viewModel.onAction(PianoRollAction.Play)
+            }
         )
 
-        // Scale & chord controls
-        ScaleChordControls(state = state, onAction = viewModel::onAction)
-
-        // Diatonic chord reference strip (visible when scale is enabled)
+        // Piano roll content area. The patch picker overlay (when
+        // isBrowsingPatches is true) renders ON TOP of this Box -- see
+        // the AnimatedVisibility just below this Column.
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+            ) {
+        // Diatonic chord reference strip (visible when scale is enabled).
+        // Sits just below the top bar so it's glance-able from any sub-panel.
         ChordReferenceStrip(chords = state.diatonicChords)
 
-        // Piano keys + Grid
-        Row(modifier = Modifier.fillMaxSize()) {
+        // Adaptive timeline ruler: bar/beat labels, selector + loop region,
+        // tap to set selector, drag to define/adjust loop. Scrolls with the grid.
+        PianoRollTimelineRuler(
+            contentMs = contentMs,
+            pxPerMs = PX_PER_MS * horizontalZoom * density.density,
+            bpm = state.bpm,
+            timeSigNum = state.timeSignatureNumerator,
+            timeSigDen = state.timeSignatureDenominator,
+            gridResolution = state.gridResolution,
+            selectorMs = state.selectorMs,
+            positionMs = state.positionMs,
+            isPlaying = state.isPlaying,
+            loopStartMs = state.loopStartMs,
+            loopEndMs = state.loopEndMs,
+            isLoopEnabled = state.isLoopEnabled,
+            horizontalScrollState = horizontalScrollState,
+            onSetSelector = { ms -> viewModel.onAction(PianoRollAction.SetSelector(ms)) },
+            onSetLoopRegion = { startMs, endMs ->
+                viewModel.onAction(PianoRollAction.SetLoopRegion(startMs, endMs))
+            }
+        )
+
+        // Piano keys + Grid -- weight(1f) so the placeholders below sit at the bottom.
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+        ) {
             // Piano keys column (scrolls vertically with the grid)
             Box(
                 modifier = Modifier
@@ -343,7 +342,7 @@ fun PianoRollScreen(
                         .fillMaxHeight()
                         .pointerInput(effectiveMaxHZoom) {
                             detectPinchZoom(
-                                canStart = { dragState == null },
+                                canStart = { dragState == null && marqueeRect == null },
                                 onPinchStart = { isPinching = true },
                                 onPinchZoom = { scaleX, scaleY, centroidX, centroidY ->
                                     val oldHZoom = horizontalZoom
@@ -391,16 +390,35 @@ fun PianoRollScreen(
                                     val down = awaitFirstDown(requireUnconsumed = false)
                                     // DON'T consume down -- lets scroll handle swipes
 
-                                    // Check edge hit FIRST (extends past the note boundary)
-                                    val edgeNote = findNoteEdgeAt(
+                                    // Check both edges. For short notes both edge zones may
+                                    // overlap; tie-break by proximity to the touch X.
+                                    val rightEdgeNote = findNoteEdgeAt(
                                         down.position, state.notes, rowHeightPx, pxPerMs, edgeZonePx
                                     )
+                                    val leftEdgeNote = findNoteLeftEdgeAt(
+                                        down.position, state.notes, rowHeightPx, pxPerMs, edgeZonePx
+                                    )
+                                    val (edgeNote, isLeftEdge) = when {
+                                        rightEdgeNote != null && leftEdgeNote != null -> {
+                                            val rightX = (rightEdgeNote.startMs + rightEdgeNote.durationMs) * pxPerMs
+                                            val leftX = leftEdgeNote.startMs * pxPerMs
+                                            if (abs(down.position.x - leftX) <= abs(down.position.x - rightX)) {
+                                                leftEdgeNote to true
+                                            } else {
+                                                rightEdgeNote to false
+                                            }
+                                        }
+                                        rightEdgeNote != null -> rightEdgeNote to false
+                                        leftEdgeNote != null -> leftEdgeNote to true
+                                        else -> null to false
+                                    }
                                     // Then check body hit (strict bounds)
                                     val hitNote = edgeNote
                                         ?: findNoteAt(down.position, state.notes, rowHeightPx, pxPerMs)
 
                                     if (edgeNote != null) {
-                                        // ── RIGHT EDGE: hold to resize ──
+                                        // ── EDGE: hold to resize ──
+                                        // Right edge anchors the start; left edge anchors the end.
                                         val longPress = awaitLongPressOrCancellation(down.id)
                                         if (longPress != null) {
                                             longPress.consume()
@@ -410,39 +428,65 @@ fun PianoRollScreen(
                                             } else {
                                                 setOf(edgeNote.id)
                                             }
-                                            handleResizeDrag(
-                                                edgeNote, dragIds, longPress.id, pxPerMs, rowHeightPx,
-                                                state.isSnapEnabled, state.bpm,
-                                                state.gridResolution, state.timeSignatureDenominator,
-                                                scrollX = { horizontalScrollState.value },
-                                                onPreview = { dragState = it },
-                                                onCommit = { noteIds, deltaDurationMs ->
-                                                    dragState = null
-                                                    viewModel.onAction(
-                                                        PianoRollAction.ResizeNotes(noteIds, deltaDurationMs)
-                                                    )
-                                                },
-                                                onCancel = { dragState = null }
-                                            )
+                                            if (isLeftEdge) {
+                                                handleLeftEdgeResizeDrag(
+                                                    edgeNote, dragIds, longPress.id, pxPerMs,
+                                                    state.isSnapEnabled, state.bpm,
+                                                    state.gridResolution, state.timeSignatureDenominator,
+                                                    scrollX = { horizontalScrollState.value },
+                                                    onPreview = { dragState = it },
+                                                    onCommit = { noteIds, deltaStartMs ->
+                                                        dragState = null
+                                                        viewModel.onAction(
+                                                            PianoRollAction.ResizeNotesLeftEdge(noteIds, deltaStartMs)
+                                                        )
+                                                    },
+                                                    onCancel = { dragState = null }
+                                                )
+                                            } else {
+                                                handleResizeDrag(
+                                                    edgeNote, dragIds, longPress.id, pxPerMs, rowHeightPx,
+                                                    state.isSnapEnabled, state.bpm,
+                                                    state.gridResolution, state.timeSignatureDenominator,
+                                                    scrollX = { horizontalScrollState.value },
+                                                    onPreview = { dragState = it },
+                                                    onCommit = { noteIds, deltaDurationMs ->
+                                                        dragState = null
+                                                        viewModel.onAction(
+                                                            PianoRollAction.ResizeNotes(noteIds, deltaDurationMs)
+                                                        )
+                                                    },
+                                                    onCancel = { dragState = null }
+                                                )
+                                            }
                                         } else {
-                                            // Tap on edge = double-tap or toggle selection
+                                            // Tap on edge: ERASE deletes; DRAW/SELECT toggle
+                                            // selection (with double-tap-to-delete fallback so
+                                            // DRAW users still have a quick delete affordance).
                                             val fingerLifted = currentEvent.changes
                                                 .none { it.id == down.id && it.pressed }
                                             if (fingerLifted) {
-                                                val now = System.currentTimeMillis()
-                                                if (lastTapNoteId == edgeNote.id &&
-                                                    now - lastTapTimeMs < DOUBLE_TAP_TIMEOUT_MS
-                                                ) {
+                                                if (state.editorMode == EditorMode.ERASE) {
                                                     view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                                                     viewModel.onAction(PianoRollAction.QuickDeleteNote(edgeNote.id))
                                                     lastTapNoteId = null
                                                     lastTapTimeMs = 0L
                                                 } else {
-                                                    viewModel.onAction(
-                                                        PianoRollAction.ToggleNoteSelection(edgeNote.id)
-                                                    )
-                                                    lastTapNoteId = edgeNote.id
-                                                    lastTapTimeMs = now
+                                                    val now = System.currentTimeMillis()
+                                                    if (lastTapNoteId == edgeNote.id &&
+                                                        now - lastTapTimeMs < DOUBLE_TAP_TIMEOUT_MS
+                                                    ) {
+                                                        view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                                        viewModel.onAction(PianoRollAction.QuickDeleteNote(edgeNote.id))
+                                                        lastTapNoteId = null
+                                                        lastTapTimeMs = 0L
+                                                    } else {
+                                                        viewModel.onAction(
+                                                            PianoRollAction.ToggleNoteSelection(edgeNote.id)
+                                                        )
+                                                        lastTapNoteId = edgeNote.id
+                                                        lastTapTimeMs = now
+                                                    }
                                                 }
                                             }
                                         }
@@ -478,30 +522,69 @@ fun PianoRollScreen(
                                                 onCancel = { dragState = null }
                                             )
                                         } else {
+                                            // Tap on body: ERASE deletes; DRAW/SELECT toggle
+                                            // selection (with double-tap-to-delete fallback).
                                             val fingerLifted = currentEvent.changes
                                                 .none { it.id == down.id && it.pressed }
                                             if (fingerLifted) {
-                                                val now = System.currentTimeMillis()
-                                                if (lastTapNoteId == hitNote.id &&
-                                                    now - lastTapTimeMs < DOUBLE_TAP_TIMEOUT_MS
-                                                ) {
+                                                if (state.editorMode == EditorMode.ERASE) {
                                                     view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                                                     viewModel.onAction(PianoRollAction.QuickDeleteNote(hitNote.id))
                                                     lastTapNoteId = null
                                                     lastTapTimeMs = 0L
                                                 } else {
-                                                    viewModel.onAction(
-                                                        PianoRollAction.ToggleNoteSelection(hitNote.id)
-                                                    )
-                                                    lastTapNoteId = hitNote.id
-                                                    lastTapTimeMs = now
+                                                    val now = System.currentTimeMillis()
+                                                    if (lastTapNoteId == hitNote.id &&
+                                                        now - lastTapTimeMs < DOUBLE_TAP_TIMEOUT_MS
+                                                    ) {
+                                                        view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                                        viewModel.onAction(PianoRollAction.QuickDeleteNote(hitNote.id))
+                                                        lastTapNoteId = null
+                                                        lastTapTimeMs = 0L
+                                                    } else {
+                                                        viewModel.onAction(
+                                                            PianoRollAction.ToggleNoteSelection(hitNote.id)
+                                                        )
+                                                        lastTapNoteId = hitNote.id
+                                                        lastTapTimeMs = now
+                                                    }
                                                 }
                                             }
                                         }
                                     } else {
-                                        // ── EMPTY CELL: tap to clear selection or place note ──
-                                        val longPress = awaitLongPressOrCancellation(down.id)
-                                        if (longPress == null) {
+                                        // ── EMPTY CELL ──
+                                        // Mode dispatch:
+                                        //   DRAW   - long-press → marquee, tap → place / clear
+                                        //   SELECT - drag (touch slop) → marquee, tap → clear
+                                        //   ERASE  - tap → no-op
+                                        val mode = state.editorMode
+                                        val startMarquee: Boolean
+                                        val drag: androidx.compose.ui.input.pointer.PointerInputChange?
+                                        when (mode) {
+                                            EditorMode.SELECT -> {
+                                                // Drag-from-empty marquees immediately on slop.
+                                                // No long-press required -- mode already declares
+                                                // "I'm selecting."
+                                                drag = awaitTouchSlopOrCancellation(down.id) { c, _ ->
+                                                    c.consume()
+                                                }
+                                                startMarquee = drag != null
+                                            }
+                                            EditorMode.DRAW -> {
+                                                // Long-press to marquee (preserves the existing
+                                                // tap-to-place affordance so a quick tap still
+                                                // creates a note).
+                                                val longPress = awaitLongPressOrCancellation(down.id)
+                                                drag = longPress
+                                                startMarquee = longPress != null
+                                            }
+                                            EditorMode.ERASE -> {
+                                                drag = null
+                                                startMarquee = false
+                                            }
+                                        }
+
+                                        if (!startMarquee) {
                                             val fingerLifted = currentEvent.changes
                                                 .none { it.id == down.id && it.pressed }
                                             if (fingerLifted) {
@@ -509,7 +592,7 @@ fun PianoRollScreen(
                                                 lastTapTimeMs = 0L
                                                 if (state.selectedNoteIds.isNotEmpty()) {
                                                     viewModel.onAction(PianoRollAction.ClearSelection)
-                                                } else {
+                                                } else if (mode == EditorMode.DRAW) {
                                                     val pitch = TOTAL_NOTES - 1 -
                                                         (down.position.y / rowHeightPx).toInt()
                                                     val tapMs = (down.position.x / pxPerMs).toLong()
@@ -535,6 +618,66 @@ fun PianoRollScreen(
                                                         )
                                                     )
                                                 }
+                                            }
+                                        } else {
+                                            // Marquee start. Track absolute (canvas-content)
+                                            // coords so the rect stays put under the finger
+                                            // when scroll moves the canvas.
+                                            drag?.consume()
+                                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                            val anchorAbsX = down.position.x + horizontalScrollState.value
+                                            val anchorAbsY = down.position.y + verticalScrollState.value
+                                            var lastAbsX = anchorAbsX
+                                            var lastAbsY = anchorAbsY
+                                            marqueeRect = MarqueeRect(
+                                                x1 = anchorAbsX,
+                                                y1 = anchorAbsY,
+                                                x2 = anchorAbsX,
+                                                y2 = anchorAbsY
+                                            )
+                                            while (true) {
+                                                val event = awaitPointerEvent()
+                                                val change = event.changes.firstOrNull { it.id == down.id }
+                                                    ?: break
+                                                if (!change.pressed) {
+                                                    change.consume()
+                                                    break
+                                                }
+                                                change.consume()
+                                                lastAbsX = change.position.x + horizontalScrollState.value
+                                                lastAbsY = change.position.y + verticalScrollState.value
+                                                marqueeRect = MarqueeRect(
+                                                    x1 = minOf(anchorAbsX, lastAbsX),
+                                                    y1 = minOf(anchorAbsY, lastAbsY),
+                                                    x2 = maxOf(anchorAbsX, lastAbsX),
+                                                    y2 = maxOf(anchorAbsY, lastAbsY)
+                                                )
+                                            }
+                                            val rect = marqueeRect
+                                            marqueeRect = null
+                                            val minMovePx = 8.dp.toPx()
+                                            val movedEnough = rect != null &&
+                                                ((rect.x2 - rect.x1) > minMovePx ||
+                                                 (rect.y2 - rect.y1) > minMovePx)
+                                            if (rect != null && movedEnough) {
+                                                val startMs = (rect.x1 / pxPerMs).toLong()
+                                                    .coerceAtLeast(0L)
+                                                val endMs = (rect.x2 / pxPerMs).toLong()
+                                                    .coerceAtLeast(startMs)
+                                                val topPitch = (TOTAL_NOTES - 1 -
+                                                    (rect.y1 / rowHeightPx).toInt()).coerceIn(0, 127)
+                                                val bottomPitch = (TOTAL_NOTES - 1 -
+                                                    (rect.y2 / rowHeightPx).toInt()).coerceIn(0, 127)
+                                                val pitchRange = minOf(topPitch, bottomPitch)..
+                                                    maxOf(topPitch, bottomPitch)
+                                                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                                viewModel.onAction(
+                                                    PianoRollAction.SelectNotesInRect(
+                                                        startMs = startMs,
+                                                        endMs = endMs,
+                                                        pitchRange = pitchRange
+                                                    )
+                                                )
                                             }
                                         }
                                     }
@@ -563,101 +706,81 @@ fun PianoRollScreen(
                             isScaleEnabled = state.isScaleEnabled,
                             scaleRoot = state.scaleRoot,
                             scaleType = state.scaleType,
-                            scaleHighlightColor = pianoAmber
+                            scaleHighlightColor = pianoAmber,
+                            loopStartMs = state.loopStartMs,
+                            loopEndMs = state.loopEndMs,
+                            isLoopEnabled = state.isLoopEnabled,
+                            marqueeRect = marqueeRect
                         )
                     }
                 }
             }
         }
-    }
-}
 
-// ── Scale & chord controls ──────────────────────────────────────────
-
-@Composable
-private fun ScaleChordControls(
-    state: PianoRollState,
-    onAction: (PianoRollAction) -> Unit
-) {
-    var scaleDropdownExpanded by remember { mutableStateOf(false) }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(NjSurface)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // Scale on/off toggle
-        NjButton(
-            text = "Scale",
-            onClick = { onAction(PianoRollAction.ToggleScale) },
-            isActive = state.isScaleEnabled,
-            ledColor = NjAmber
+        // Velocity strip: read-only display by default; becomes draggable
+        // for selected notes when EDIT > VELOC is latched. Scrolls horizontally
+        // in lockstep with the grid.
+        PianoRollVelocityStrip(
+            notes = state.notes,
+            selectedNoteIds = state.selectedNoteIds,
+            isVelocityEditMode = state.isVelocityEditMode,
+            horizontalScrollState = horizontalScrollState,
+            pxPerMs = PX_PER_MS * horizontalZoom * density.density,
+            contentMs = contentMs,
+            trackColor = noteColor,
+            onCommitVelocities = { newVelocities ->
+                viewModel.onAction(PianoRollAction.SetNoteVelocities(newVelocities))
+            }
         )
+            }  // end of inner Column
 
-        // Root note (tap to cycle C → C# → D → ...)
-        NjButton(
-            text = MusicalScaleHelper.NOTE_NAMES[state.scaleRoot],
-            onClick = { onAction(PianoRollAction.SetScaleRoot((state.scaleRoot + 1) % 12)) },
-            textColor = NjAmber.copy(alpha = 0.8f)
-        )
-
-        // Scale type (tap to open dropdown)
-        Box {
-            NjButton(
-                text = state.scaleType.displayName,
-                onClick = { scaleDropdownExpanded = true },
-                textColor = NjAmber.copy(alpha = 0.8f)
+            // Patch picker overlay. Slides up from behind the tab bar to
+            // cover the piano roll grid + ruler + velocity strip when the
+            // user latches the BROWSE button on the INSTR sub-panel.
+            // Tapping BROWSE again or switching to a different tab dismisses.
+            // Manual offset animation so we don't fight Compose's nested-scope
+            // resolution of AnimatedVisibility.
+            val pickerProgress by animateFloatAsState(
+                targetValue = if (state.isBrowsingPatches) 1f else 0f,
+                animationSpec = tween(durationMillis = 240),
+                label = "patch-picker-slide"
             )
-            DropdownMenu(
-                expanded = scaleDropdownExpanded,
-                onDismissRequest = { scaleDropdownExpanded = false },
-                modifier = Modifier.background(NjSurface)
-            ) {
-                for (group in MusicalScaleHelper.ScaleGroup.entries) {
-                    // Group header
-                    Text(
-                        text = group.displayName,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = NjMuted2
+            if (pickerProgress > 0f) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .graphicsLayer {
+                            translationY = size.height * (1f - pickerProgress)
+                        }
+                        .background(NjBg)
+                ) {
+                    InstrumentPickerEmbedded(
+                        selectedProgram = state.midiProgram,
+                        onSelectProgram = { program ->
+                            viewModel.onAction(PianoRollAction.SetMidiInstrument(program))
+                        },
+                        modifier = Modifier.fillMaxSize()
                     )
-                    // Scales in this group
-                    for (scale in MusicalScaleHelper.ScaleType.entries.filter { it.group == group }) {
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    text = scale.displayName,
-                                    color = if (scale == state.scaleType) NjAmber else NjOnBg
-                                )
-                            },
-                            onClick = {
-                                onAction(PianoRollAction.SetScaleType(scale))
-                                scaleDropdownExpanded = false
-                            }
-                        )
-                    }
                 }
             }
+        }  // end of weight(1f) Box
+
+        // Sub-panel order (top to bottom): GRID resolution strip, then the
+        // per-tab content area, then the tab bar pinned to the very bottom.
+        // Tab bar at the bottom matches Android's bottom-nav muscle memory
+        // and lets the per-tab controls sit directly above the user's thumb
+        // when they tap a tab.
+        if (!state.isPanelCollapsed) {
+            PianoRollSubPanel(
+                activeTab = state.activeTab,
+                state = state,
+                onAction = viewModel::onAction
+            )
         }
 
-        Spacer(Modifier.weight(1f))
-
-        // Chord on/off toggle
-        NjButton(
-            text = "Chord",
-            onClick = { onAction(PianoRollAction.ToggleChordMode) },
-            isActive = state.isChordMode,
-            ledColor = NjAmber
-        )
-
-        // Chord type (tap to cycle Triad → 7th → 9th)
-        NjButton(
-            text = state.chordType.displayName,
-            onClick = { onAction(PianoRollAction.CycleChordType) },
-            textColor = NjAmber.copy(alpha = 0.8f)
+        PianoRollTabBar(
+            activeTab = state.activeTab,
+            onTabSelect = { viewModel.onAction(PianoRollAction.SwitchTab(it)) }
         )
     }
 }
@@ -797,7 +920,11 @@ private fun DrawScope.drawGrid(
     isScaleEnabled: Boolean = false,
     scaleRoot: Int = 0,
     scaleType: MusicalScaleHelper.ScaleType = MusicalScaleHelper.ScaleType.MAJOR,
-    scaleHighlightColor: Color = Color.Transparent
+    scaleHighlightColor: Color = Color.Transparent,
+    loopStartMs: Long? = null,
+    loopEndMs: Long? = null,
+    isLoopEnabled: Boolean = false,
+    marqueeRect: MarqueeRect? = null
 ) {
     val totalHeight = TOTAL_NOTES * rowHeightPx
     val beatMs = 60_000.0 / bpm
@@ -841,6 +968,19 @@ private fun DrawScope.drawGrid(
             start = Offset(0f, y),
             end = Offset(size.width, y),
             strokeWidth = if (isC) 1f else 0.5f
+        )
+    }
+
+    // Loop region: translucent amber fill across the full pitch range so the
+    // user can see at a glance where the loop wraps. Sits behind clip regions
+    // and notes; alpha is lower when the loop is set-but-disengaged.
+    if (loopStartMs != null && loopEndMs != null && loopEndMs > loopStartMs) {
+        val loopStartPx = loopStartMs * pxPerMs
+        val loopWidthPx = (loopEndMs - loopStartMs) * pxPerMs
+        drawRect(
+            color = amberColor.copy(alpha = if (isLoopEnabled) 0.08f else 0.04f),
+            topLeft = Offset(loopStartPx, 0f),
+            size = Size(loopWidthPx, totalHeight)
         )
     }
 
@@ -935,14 +1075,25 @@ private fun DrawScope.drawGrid(
         val drawStartMs: Long
         val drawDurationMs: Long
         if (isDragging) {
-            if (dragState!!.isResize) {
-                drawPitch = note.pitch
-                drawStartMs = note.startMs
-                drawDurationMs = (note.durationMs + dragState.deltaDurationMs).coerceAtLeast(50L)
-            } else {
-                drawPitch = (note.pitch + dragState.deltaPitch).coerceIn(0, 127)
-                drawStartMs = (note.startMs + dragState.deltaMs).coerceAtLeast(0L)
-                drawDurationMs = note.durationMs
+            when {
+                dragState!!.isLeftEdgeResize -> {
+                    drawPitch = note.pitch
+                    val capped = dragState.deltaStartMs
+                        .coerceAtMost(note.durationMs - 50L)
+                        .coerceAtLeast(-note.startMs)
+                    drawStartMs = (note.startMs + capped).coerceAtLeast(0L)
+                    drawDurationMs = (note.durationMs - capped).coerceAtLeast(50L)
+                }
+                dragState.isResize -> {
+                    drawPitch = note.pitch
+                    drawStartMs = note.startMs
+                    drawDurationMs = (note.durationMs + dragState.deltaDurationMs).coerceAtLeast(50L)
+                }
+                else -> {
+                    drawPitch = (note.pitch + dragState.deltaPitch).coerceIn(0, 127)
+                    drawStartMs = (note.startMs + dragState.deltaMs).coerceAtLeast(0L)
+                    drawDurationMs = note.durationMs
+                }
             }
         } else {
             drawPitch = note.pitch
@@ -1006,6 +1157,28 @@ private fun DrawScope.drawGrid(
         }
     }
 
+    // Marquee (box-select) -- dashed amber rectangle while the user drags.
+    if (marqueeRect != null) {
+        val w = marqueeRect.x2 - marqueeRect.x1
+        val h = marqueeRect.y2 - marqueeRect.y1
+        if (w > 0f && h > 0f) {
+            drawRect(
+                color = amberColor.copy(alpha = 0.10f),
+                topLeft = Offset(marqueeRect.x1, marqueeRect.y1),
+                size = Size(w, h)
+            )
+            drawRect(
+                color = amberColor,
+                topLeft = Offset(marqueeRect.x1, marqueeRect.y1),
+                size = Size(w, h),
+                style = Stroke(
+                    width = 1.5f,
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 4f))
+                )
+            )
+        }
+    }
+
     // Playhead
     if (isPlaying || positionMs > 0) {
         val playheadX = positionMs * pxPerMs
@@ -1041,6 +1214,31 @@ private fun findNoteEdgeAt(
         val endPx = (note.startMs + note.durationMs) * pxPerMs
         val edgeStart = (endPx - edgeZonePx).coerceAtLeast(startPx)
         position.x in edgeStart..endPx
+    }
+}
+
+/**
+ * Find a note whose LEFT-edge resize zone contains the tap.
+ *
+ * The edge zone is the first [edgeZonePx] pixels inside the note body,
+ * clamped to the note's end so narrow notes stay grabbable. Symmetric
+ * to [findNoteEdgeAt] (right edge). For very short notes both edges
+ * overlap; the caller does the tie-break by proximity.
+ */
+private fun findNoteLeftEdgeAt(
+    position: Offset,
+    notes: List<MidiNoteEntity>,
+    rowHeightPx: Float,
+    pxPerMs: Float,
+    edgeZonePx: Float
+): MidiNoteEntity? {
+    val pitch = TOTAL_NOTES - 1 - (position.y / rowHeightPx).toInt()
+    return notes.find { note ->
+        if (note.pitch != pitch) return@find false
+        val startPx = note.startMs * pxPerMs
+        val endPx = (note.startMs + note.durationMs) * pxPerMs
+        val edgeEnd = (startPx + edgeZonePx).coerceAtMost(endPx)
+        position.x in startPx..edgeEnd
     }
 }
 
@@ -1134,6 +1332,86 @@ private suspend fun AwaitPointerEventScope.handleResizeDrag(
                 rawEndMs, bpm, gridResolution, timeSignatureDenominator
             )
             snappedEnd - (anchorNote.startMs + anchorNote.durationMs)
+        } else deltaMs
+        onCommit(dragNoteIds, finalDelta)
+    } else {
+        onCancel()
+    }
+}
+
+/**
+ * Handle resize drag on a note's LEFT edge (group-aware).
+ *
+ * Symmetric to [handleResizeDrag] but tracks deltaStart -- the start
+ * moves while the right edge stays anchored. Snap operates on the
+ * proposed new start. Same absolute-position pattern to stay invariant
+ * to scroll movement during the long-press latch.
+ */
+private suspend fun AwaitPointerEventScope.handleLeftEdgeResizeDrag(
+    anchorNote: MidiNoteEntity,
+    dragNoteIds: Set<Long>,
+    pointerId: PointerId,
+    pxPerMs: Float,
+    isSnapEnabled: Boolean,
+    bpm: Double,
+    gridResolution: Int,
+    timeSignatureDenominator: Int,
+    scrollX: () -> Int,
+    onPreview: (GroupDragState) -> Unit,
+    onCommit: (noteIds: Set<Long>, deltaStartMs: Long) -> Unit,
+    onCancel: () -> Unit
+) {
+    onPreview(
+        GroupDragState(
+            noteIds = dragNoteIds,
+            anchorNoteId = anchorNote.id,
+            isLeftEdgeResize = true
+        )
+    )
+
+    var startAbsX: Float? = null
+    var completed = false
+
+    while (true) {
+        val event = awaitPointerEvent()
+        val change = event.changes.firstOrNull { it.id == pointerId } ?: break
+        if (startAbsX == null) startAbsX = change.position.x + scrollX()
+        if (!change.pressed) {
+            completed = true
+            change.consume()
+            break
+        }
+        change.consume()
+        val accumulatedPx = change.position.x + scrollX() - startAbsX
+        val deltaMs = (accumulatedPx / pxPerMs).toLong()
+        val rawNewStart = anchorNote.startMs + deltaMs
+        val snappedDelta = if (isSnapEnabled) {
+            val snappedStart = MusicalTimeConverter.snapToGrid(
+                rawNewStart, bpm, gridResolution, timeSignatureDenominator
+            )
+            snappedStart - anchorNote.startMs
+        } else deltaMs
+        onPreview(
+            GroupDragState(
+                noteIds = dragNoteIds,
+                anchorNoteId = anchorNote.id,
+                deltaStartMs = snappedDelta,
+                isLeftEdgeResize = true
+            )
+        )
+    }
+
+    if (completed && startAbsX != null) {
+        val lastEvent = currentEvent.changes.firstOrNull { it.id == pointerId }
+        val finalAbsX = if (lastEvent != null) lastEvent.position.x + scrollX() else startAbsX
+        val accumulatedPx = finalAbsX - startAbsX
+        val deltaMs = (accumulatedPx / pxPerMs).toLong()
+        val rawNewStart = anchorNote.startMs + deltaMs
+        val finalDelta = if (isSnapEnabled) {
+            val snappedStart = MusicalTimeConverter.snapToGrid(
+                rawNewStart, bpm, gridResolution, timeSignatureDenominator
+            )
+            snappedStart - anchorNote.startMs
         } else deltaMs
         onCommit(dragNoteIds, finalDelta)
     } else {
@@ -1388,3 +1666,1045 @@ private suspend fun PointerInputScope.detectPinchZoom(
         }
     }
 }
+
+// ── EDIT panel (phase 6) ────────────────────────────────────────────
+
+/**
+ * EDIT sub-panel: QUANT, VELOC, SUSTAIN. Three captioned NjButtons.
+ *
+ * QUANT is a momentary action -- snap selected notes (or all notes if no
+ * selection) to the active grid. VELOC is a latching toggle that puts the
+ * velocity strip into edit mode. SUSTAIN is reserved (always dim) -- the
+ * slot exists so the layout doesn't shift when the feature lands.
+ */
+@Composable
+private fun EditPanelContent(
+    state: PianoRollState,
+    onAction: (PianoRollAction) -> Unit
+) {
+    val dimColor = NjMuted2.copy(alpha = 0.3f)
+    val hasContent = state.notes.isNotEmpty()
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        NjButton(
+            text = "",
+            icon = Icons.Filled.GridOn,
+            caption = "QUANT",
+            onClick = { onAction(PianoRollAction.QuantizeSelected) },
+            textColor = if (hasContent) NjOnBg else dimColor,
+            modifier = Modifier.weight(1f)
+        )
+        NjButton(
+            text = "",
+            icon = Icons.Filled.BarChart,
+            caption = "VELOC",
+            onClick = { onAction(PianoRollAction.ToggleVelocityEditMode) },
+            isActive = state.isVelocityEditMode,
+            ledColor = NjAmber,
+            modifier = Modifier.weight(1f)
+        )
+        NjButton(
+            text = "",
+            icon = Icons.Filled.AllInclusive,
+            caption = "SUSTAIN",
+            onClick = { /* reserved -- functional in a follow-up spec */ },
+            textColor = dimColor,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+// ── INSTR panel ─────────────────────────────────────────────────────
+
+/**
+ * INSTR sub-panel content. A patch stepper (left arrow / LCD / right arrow)
+ * cycles through the curated patch list while the piano roll stays visible
+ * behind it. The trailing BROWSE button is a latching toggle that slides
+ * the full categorized picker up over the grid.
+ */
+@Composable
+private fun InstrPanelContent(
+    state: PianoRollState,
+    onAction: (PianoRollAction) -> Unit
+) {
+    val patches = remember { curatedPatchOrder() }
+    val currentPatch = curatedPatchFor(state.midiProgram) ?: patches.firstOrNull() ?: return
+    val patchNumber = state.midiProgram.toString().padStart(3, '0')
+    val labelLine = "PATCH · $patchNumber"
+    val controlHeight = 44.dp
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        NjStepper(
+            options = patches,
+            selected = currentPatch,
+            onSelect = { newPatch ->
+                onAction(PianoRollAction.SetMidiInstrument(newPatch.program))
+            },
+            label = labelLine,
+            valueText = { "${it.category.label} · ${it.descriptor.uppercase()}" },
+            modifier = Modifier.weight(1f),
+            height = controlHeight
+        )
+        NjButton(
+            text = "",
+            icon = Icons.Filled.MoreHoriz,
+            caption = "BROWSE",
+            onClick = { onAction(PianoRollAction.ToggleBrowsePatches) },
+            isActive = state.isBrowsingPatches,
+            ledColor = NjAmber,
+            modifier = Modifier.height(controlHeight)
+        )
+    }
+}
+
+// ── SCALE panel (phase 5) ───────────────────────────────────────────
+
+/**
+ * SCALE sub-panel content. Single row, three controls:
+ *
+ *  ROOT knob:    12 chromatic root pitches (C..B)
+ *  SCALE knob:   "OFF" + 19 scale types. Rotating to OFF disables scale
+ *                highlighting entirely; rotating to any scale enables it.
+ *  CHORD stepper: "OFF" + 3 chord types. OFF disables chord-name display;
+ *                any chord type re-enables it. Wraps cyclically.
+ *
+ * Folding the HILITE / CHORDS toggles into OFF positions on their parent
+ * controls eliminates the second row that previously sat under the chord
+ * stepper, which lets the sub-panel envelope shrink and the other tabs
+ * stop swimming in vertical padding.
+ */
+@Composable
+private fun ScalePanelContent(
+    state: PianoRollState,
+    onAction: (PianoRollAction) -> Unit
+) {
+    val scaleTypes = remember { MusicalScaleHelper.ScaleType.entries }
+    val chordTypes = remember { MusicalScaleHelper.ChordType.entries }
+
+    val rootValue = state.scaleRoot.coerceIn(0, 11) / 11f
+
+    // SCALE knob: position 0 = OFF (scale highlighting disabled); positions
+    // 1..N = scaleTypes[idx - 1]. We translate the float-valued knob to one
+    // of those slots and dispatch ToggleScale and/or SetScaleType as needed.
+    val scaleSlots = scaleTypes.size + 1
+    val scaleIdx = if (state.isScaleEnabled) {
+        1 + scaleTypes.indexOf(state.scaleType).coerceAtLeast(0)
+    } else 0
+    val scaleValue = scaleIdx.toFloat() / (scaleSlots - 1)
+
+    // CHORD stepper: a synthetic null-or-ChordType list. null = OFF.
+    val chordOptions: List<MusicalScaleHelper.ChordType?> =
+        remember { listOf<MusicalScaleHelper.ChordType?>(null) + chordTypes }
+    val selectedChord: MusicalScaleHelper.ChordType? =
+        if (state.isChordMode) state.chordType else null
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        KnobWithReadout(
+            label = "ROOT",
+            readout = MusicalScaleHelper.NOTE_NAMES[state.scaleRoot.coerceIn(0, 11)],
+            value = rootValue,
+            onValueChange = { v ->
+                val newRoot = (v * 11f).roundToInt().coerceIn(0, 11)
+                if (newRoot != state.scaleRoot) {
+                    onAction(PianoRollAction.SetScaleRoot(newRoot))
+                }
+            },
+            readoutWidth = 36.dp
+        )
+        KnobWithReadout(
+            label = "SCALE",
+            readout = if (state.isScaleEnabled) {
+                scaleShorthand(state.scaleType)
+            } else {
+                "OFF"
+            },
+            value = scaleValue,
+            onValueChange = { v ->
+                val newIdx = (v * (scaleSlots - 1)).roundToInt().coerceIn(0, scaleSlots - 1)
+                if (newIdx == scaleIdx) return@KnobWithReadout
+                if (newIdx == 0) {
+                    if (state.isScaleEnabled) onAction(PianoRollAction.ToggleScale)
+                } else {
+                    val newType = scaleTypes[newIdx - 1]
+                    if (!state.isScaleEnabled) onAction(PianoRollAction.ToggleScale)
+                    if (newType != state.scaleType) onAction(PianoRollAction.SetScaleType(newType))
+                }
+            },
+            readoutWidth = 64.dp
+        )
+        NjStepper(
+            options = chordOptions,
+            selected = selectedChord,
+            onSelect = { newOption ->
+                if (newOption == null) {
+                    if (state.isChordMode) onAction(PianoRollAction.ToggleChordMode)
+                } else {
+                    if (!state.isChordMode) onAction(PianoRollAction.ToggleChordMode)
+                    if (newOption != state.chordType) {
+                        onAction(PianoRollAction.SetChordType(newOption))
+                    }
+                }
+            },
+            label = "CHORD",
+            valueText = { it?.displayName?.uppercase() ?: "OFF" },
+            modifier = Modifier.weight(1f),
+            height = 44.dp
+        )
+    }
+}
+
+/**
+ * Short LCD readout for a scale type. Long names like "Natural Minor" or
+ * "Harmonic Minor" get abbreviated to a four-character form so the SCALE
+ * knob's compact LCD doesn't truncate. Falls back to displayName for
+ * already-short names.
+ */
+private fun scaleShorthand(scale: MusicalScaleHelper.ScaleType): String = when (scale) {
+    MusicalScaleHelper.ScaleType.MAJOR -> "MAJOR"
+    MusicalScaleHelper.ScaleType.NATURAL_MINOR -> "MINOR"
+    MusicalScaleHelper.ScaleType.MINOR_PENTATONIC -> "MIN PT"
+    MusicalScaleHelper.ScaleType.MAJOR_PENTATONIC -> "MAJ PT"
+    MusicalScaleHelper.ScaleType.BLUES -> "BLUES"
+    MusicalScaleHelper.ScaleType.DORIAN -> "DORIAN"
+    MusicalScaleHelper.ScaleType.PHRYGIAN -> "PHRYG"
+    MusicalScaleHelper.ScaleType.LYDIAN -> "LYDIAN"
+    MusicalScaleHelper.ScaleType.MIXOLYDIAN -> "MIXO"
+    MusicalScaleHelper.ScaleType.LOCRIAN -> "LOCR"
+    MusicalScaleHelper.ScaleType.HARMONIC_MINOR -> "HARM"
+    MusicalScaleHelper.ScaleType.MELODIC_MINOR -> "MELO"
+    MusicalScaleHelper.ScaleType.FLAMENCO -> "FLAM"
+    MusicalScaleHelper.ScaleType.HUNGARIAN -> "HUNG"
+    MusicalScaleHelper.ScaleType.ROMANIAN -> "ROMA"
+    MusicalScaleHelper.ScaleType.PERSIAN -> "PERS"
+    MusicalScaleHelper.ScaleType.BEBOP -> "BEBOP"
+    MusicalScaleHelper.ScaleType.WHOLE_TONE -> "WHOLE"
+    MusicalScaleHelper.ScaleType.CHROMATIC -> "CHRO"
+}
+
+/**
+ * Knob with an LCD readout above and a small caption below -- the standard
+ * SCALE-panel knob unit. Readout uses IBM Plex Mono in amber, like a
+ * Roland faceplate's value window. Caption is muted IBM Plex Mono.
+ *
+ * The SCALE panel uses a compact variant (smaller knob + tighter LCD) so
+ * the whole sub-panel fits in an 84dp envelope alongside the chord stepper
+ * and HILITE/CHORDS toggles on the right.
+ */
+@Composable
+private fun KnobWithReadout(
+    label: String,
+    readout: String,
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    modifier: Modifier = Modifier,
+    readoutWidth: androidx.compose.ui.unit.Dp = 44.dp,
+    knobSize: androidx.compose.ui.unit.Dp = 32.dp
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier
+                .width(readoutWidth)
+                .height(20.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .background(NjPanelInset),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = readout,
+                fontFamily = IbmPlexMono,
+                fontSize = 10.sp,
+                lineHeight = 12.sp,
+                color = NjAmber.copy(alpha = 0.9f),
+                letterSpacing = 0.4.sp,
+                maxLines = 1
+            )
+        }
+        Spacer(Modifier.height(2.dp))
+        NjKnob(
+            value = value,
+            onValueChange = onValueChange,
+            knobSize = knobSize
+        )
+        Text(
+            text = label,
+            fontFamily = IbmPlexMono,
+            fontSize = 9.sp,
+            lineHeight = 11.sp,
+            color = NjMuted,
+            letterSpacing = 0.5.sp
+        )
+    }
+}
+
+// ── TOOLS panel (phase 4) ───────────────────────────────────────────
+
+/**
+ * TOOLS sub-panel content: SPLIT, ERASE, COPY, UNDO, REDO. Five captioned
+ * NjButtons in a row, each weighted equally so they fill the sub-panel width.
+ *
+ * Disabled state: each button dims via `textColor` when its action would be
+ * a no-op. The button still receives the tap (and the haptic) but the VM
+ * handler bails early -- same pattern the old toolbar used for Undo/Redo.
+ */
+@Composable
+private fun ToolsPanelContent(
+    state: PianoRollState,
+    onAction: (PianoRollAction) -> Unit
+) {
+    val hasSelection = state.selectedNoteIds.isNotEmpty()
+    val dimColor = NjMuted2.copy(alpha = 0.3f)
+
+    // One row, six buttons: three editor-mode toggles (DRAW/SELECT/ERASE)
+    // followed by three one-shot actions (COPY/UNDO/REDO). SPLIT was dropped
+    // to free up horizontal space and because the feature wasn't earning
+    // its keep -- existing notes can be edited in-place via DRAW + ERASE.
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        NjButton(
+            text = "",
+            icon = Icons.Filled.Edit,
+            caption = "DRAW",
+            onClick = { onAction(PianoRollAction.SetEditorMode(EditorMode.DRAW)) },
+            isActive = state.editorMode == EditorMode.DRAW,
+            ledColor = NjAmber,
+            modifier = Modifier.weight(1f)
+        )
+        NjButton(
+            text = "",
+            icon = Icons.Filled.SelectAll,
+            caption = "SELECT",
+            onClick = { onAction(PianoRollAction.SetEditorMode(EditorMode.SELECT)) },
+            isActive = state.editorMode == EditorMode.SELECT,
+            ledColor = NjAmber,
+            modifier = Modifier.weight(1f)
+        )
+        NjButton(
+            text = "",
+            icon = Icons.Filled.Delete,
+            caption = "ERASE",
+            onClick = { onAction(PianoRollAction.SetEditorMode(EditorMode.ERASE)) },
+            isActive = state.editorMode == EditorMode.ERASE,
+            ledColor = NjAmber,
+            modifier = Modifier.weight(1f)
+        )
+        NjButton(
+            text = "",
+            icon = Icons.Filled.ContentCopy,
+            caption = "COPY",
+            onClick = { onAction(PianoRollAction.CopySelected) },
+            textColor = if (hasSelection) NjOnBg else dimColor,
+            modifier = Modifier.weight(1f)
+        )
+        NjButton(
+            text = "",
+            icon = Icons.AutoMirrored.Filled.Undo,
+            caption = "UNDO",
+            onClick = { onAction(PianoRollAction.Undo) },
+            textColor = if (state.canUndo) NjOnBg else dimColor,
+            modifier = Modifier.weight(1f)
+        )
+        NjButton(
+            text = "",
+            icon = Icons.AutoMirrored.Filled.Redo,
+            caption = "REDO",
+            onClick = { onAction(PianoRollAction.Redo) },
+            textColor = if (state.canRedo) NjOnBg else dimColor,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+// ── New top bar (phase 2) ───────────────────────────────────────────
+
+/**
+ * Captioned top bar for the full-screen piano roll.
+ *
+ * Layout: BACK on the left, two-line title in the middle (track name on top,
+ * KEY · BPM · INSTRUMENT below), RESTART + PLAY on the right. Mirrors a
+ * Roland/Korg faceplate -- every control is a labeled hardware button.
+ */
+@Composable
+private fun PianoRollTopBar(
+    state: PianoRollState,
+    onBack: () -> Unit,
+    onRestart: () -> Unit,
+    onPlayPause: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(NjSurface)
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        NjButton(
+            text = "",
+            icon = Icons.AutoMirrored.Filled.ArrowBack,
+            caption = "BACK",
+            onClick = onBack
+        )
+        Spacer(Modifier.width(8.dp))
+        Column(
+            modifier = Modifier.weight(1f)
+        ) {
+            Text(
+                text = state.trackName.ifEmpty { "Piano Roll" },
+                style = MaterialTheme.typography.titleSmall,
+                color = NjOnBg,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = formatTopBarSubtitle(state),
+                fontFamily = IbmPlexMono,
+                fontSize = 10.sp,
+                color = NjMuted2,
+                letterSpacing = 0.5.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        NjButton(
+            text = "",
+            icon = Icons.Filled.SkipPrevious,
+            caption = "RESTART",
+            onClick = onRestart
+        )
+        Spacer(Modifier.width(4.dp))
+        NjButton(
+            text = "",
+            icon = NjIcons.PlayPause,
+            caption = "PLAY",
+            onClick = onPlayPause,
+            isActive = state.isPlaying,
+            ledColor = NjLedGreen
+        )
+    }
+}
+
+private fun formatTopBarSubtitle(state: PianoRollState): String {
+    val key = MusicalScaleHelper.NOTE_NAMES[state.scaleRoot.coerceIn(0, 11)]
+    // 3-letter abbreviation of the scale type for the LCD readout aesthetic
+    // (e.g. MAJOR -> MAJ, DORIAN -> DOR). Matches the Roland/Korg compact form.
+    val scale = state.scaleType.name.take(3)
+    val bpm = state.bpm.toInt()
+    val instr = state.instrumentName.uppercase().ifEmpty { "—" }
+    return "$key $scale · $bpm BPM · $instr"
+}
+
+// ── Phase 1 skeleton placeholders ───────────────────────────────────
+// These render the new layout shape so the screen reads as the redesign
+// in progress. Phases 2-10 progressively replace each with real behavior.
+
+/**
+ * Adaptive timeline ruler for the full-screen piano roll.
+ *
+ * Mirrors Studio's TimeRuler: bar/beat/sub-beat ticks with measure number
+ * labels that adapt to zoom -- bar ticks always, beat ticks once each
+ * beat is wider than 4px, sub-beat ticks at the active grid resolution
+ * once those are visible too.
+ *
+ * Renders the selector (NjCursorTeal vertical line) and the loop region
+ * band (amber fill + endpoint borders + triangle handles) on top of the
+ * ticks. The grid playhead extends through the ruler so the user sees
+ * the playback position in musical time.
+ *
+ * Gestures: tap = SetSelector at tap position. Drag from far away = define
+ * a new loop region from down position to release position. Drag near an
+ * existing loop handle = adjust just that endpoint. The ruler scrolls
+ * horizontally in lockstep with the grid via [horizontalScrollState].
+ */
+@Composable
+private fun PianoRollTimelineRuler(
+    contentMs: Long,
+    pxPerMs: Float,
+    bpm: Double,
+    timeSigNum: Int,
+    timeSigDen: Int,
+    gridResolution: Int,
+    selectorMs: Long,
+    positionMs: Long,
+    isPlaying: Boolean,
+    loopStartMs: Long?,
+    loopEndMs: Long?,
+    isLoopEnabled: Boolean,
+    horizontalScrollState: ScrollState,
+    onSetSelector: (Long) -> Unit,
+    onSetLoopRegion: (Long, Long) -> Unit
+) {
+    val density = LocalDensity.current
+    val gridWidthDp = with(density) { (contentMs * pxPerMs).toDp() }
+    val textMeasurer = rememberTextMeasurer()
+    val rulerHeight = 28.dp
+    val view = LocalView.current
+
+    // Hoist composable theme reads -- DrawScope is not composable.
+    val tickColor = NjMuted2.copy(alpha = 0.55f)
+    val subBeatColor = NjMuted2.copy(alpha = 0.25f)
+    val labelColor = NjOnBg.copy(alpha = 0.75f)
+    val selectorColor = NjCursorTeal
+    val loopColor = NjAmber
+    val playheadColor = NjAmber
+
+    // Capture latest values without restarting the pointerInput coroutine on
+    // every change. Keying pointerInput on loopStartMs/loopEndMs would cancel
+    // the in-flight drag the moment we updated state, which made loop region
+    // drags die after a single snap step.
+    val currentLoopStart by rememberUpdatedState(loopStartMs)
+    val currentLoopEnd by rememberUpdatedState(loopEndMs)
+    val currentPxPerMs by rememberUpdatedState(pxPerMs)
+    val currentOnSetSelector by rememberUpdatedState(onSetSelector)
+    val currentOnSetLoopRegion by rememberUpdatedState(onSetLoopRegion)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(rulerHeight)
+            .background(NjSurface)
+    ) {
+        // Empty 48dp column to match the keys column above the grid.
+        Box(modifier = Modifier.width(KEYS_WIDTH_DP.dp).fillMaxHeight())
+
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .background(NjPanelInset)
+                .horizontalScroll(horizontalScrollState)
+        ) {
+            Canvas(
+                modifier = Modifier
+                    .width(gridWidthDp)
+                    .fillMaxHeight()
+                    .pointerInput(Unit) {
+                        val handleHitZonePx = 32.dp.toPx()
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            down.consume()
+                            val touchX = down.position.x
+                            val px = currentPxPerMs
+
+                            val startPx = currentLoopStart?.let { it * px }
+                            val endPx = currentLoopEnd?.let { it * px }
+                            val nearStart = startPx != null &&
+                                abs(touchX - startPx) <= handleHitZonePx
+                            val nearEnd = endPx != null &&
+                                abs(touchX - endPx) <= handleHitZonePx
+
+                            // Pick the closer handle when both are in range.
+                            val handleMode: Int = when {
+                                nearStart && nearEnd -> {
+                                    if (abs(touchX - startPx!!) <= abs(touchX - endPx!!)) 1 else 2
+                                }
+                                nearStart -> 1
+                                nearEnd -> 2
+                                else -> 0
+                            }
+
+                            // Wait for slop-crossing drag, or release for a tap.
+                            val firstDrag = awaitHorizontalTouchSlopOrCancellation(down.id) { c, _ ->
+                                c.consume()
+                            }
+                            if (firstDrag == null) {
+                                // Pure tap -- set selector at tap position.
+                                if (handleMode == 0) {
+                                    view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                                    val tapMs = (touchX / px).toLong().coerceAtLeast(0L)
+                                    currentOnSetSelector(tapMs)
+                                }
+                                return@awaitEachGesture
+                            }
+
+                            // Drag began -- haptic latch matches the existing
+                            // long-press feel on note drags.
+                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+
+                            when (handleMode) {
+                                1 -> {
+                                    // Drag the loop start handle.
+                                    horizontalDrag(firstDrag.id) { change ->
+                                        change.consume()
+                                        val ms = (change.position.x / currentPxPerMs)
+                                            .toLong().coerceAtLeast(0L)
+                                        val keepEnd = currentLoopEnd ?: return@horizontalDrag
+                                        currentOnSetLoopRegion(ms, keepEnd)
+                                    }
+                                }
+                                2 -> {
+                                    // Drag the loop end handle.
+                                    horizontalDrag(firstDrag.id) { change ->
+                                        change.consume()
+                                        val ms = (change.position.x / currentPxPerMs)
+                                            .toLong().coerceAtLeast(0L)
+                                        val keepStart = currentLoopStart ?: return@horizontalDrag
+                                        currentOnSetLoopRegion(keepStart, ms)
+                                    }
+                                }
+                                else -> {
+                                    // Define a new loop region from down to finger position.
+                                    val anchorMs = (touchX / px).toLong().coerceAtLeast(0L)
+                                    horizontalDrag(firstDrag.id) { change ->
+                                        change.consume()
+                                        val ms = (change.position.x / currentPxPerMs)
+                                            .toLong().coerceAtLeast(0L)
+                                        currentOnSetLoopRegion(anchorMs, ms)
+                                    }
+                                }
+                            }
+                        }
+                    }
+            ) {
+                val rulerHeightPx = size.height
+                val tickAreaTop = rulerHeightPx * 0.45f
+                val beatTickTop = rulerHeightPx * 0.65f
+                val subBeatTickTop = rulerHeightPx * 0.78f
+
+                fun msToX(ms: Double): Float = (ms * pxPerMs).toFloat()
+
+                val beatMs = MusicalTimeConverter.msPerBeat(bpm, timeSigDen)
+                val measureMs = MusicalTimeConverter.msPerMeasure(bpm, timeSigNum, timeSigDen)
+                if (beatMs <= 0.0 || measureMs <= 0.0) return@Canvas
+
+                val beatPx = (beatMs * pxPerMs).toFloat()
+                val showBeatTicks = beatPx >= 4f
+                val gridStepMs = MusicalTimeConverter.msPerGridStep(bpm, gridResolution, timeSigDen)
+                val gridStepPx = if (gridStepMs > 0.0) (gridStepMs * pxPerMs).toFloat() else 0f
+                val showSubBeat = gridStepPx >= 4f && gridStepMs < beatMs
+
+                val labelStyle = TextStyle(color = labelColor, fontSize = 10.sp)
+
+                var ms = 0.0
+                var measureNumber = 1
+                while (ms <= contentMs) {
+                    val x = msToX(ms)
+                    if (x > size.width) break
+
+                    // Measure tick (full height of tick area)
+                    drawLine(
+                        color = tickColor,
+                        start = Offset(x, tickAreaTop),
+                        end = Offset(x, rulerHeightPx),
+                        strokeWidth = 1f
+                    )
+
+                    // Measure number label above the tick
+                    val label = measureNumber.toString()
+                    val measured = textMeasurer.measure(label, labelStyle)
+                    drawText(
+                        textLayoutResult = measured,
+                        topLeft = Offset(x + 3f, tickAreaTop - measured.size.height - 1f)
+                    )
+
+                    if (showBeatTicks) {
+                        for (beat in 1 until timeSigNum) {
+                            val beatX = msToX(ms + beat * beatMs)
+                            if (beatX > size.width) break
+                            drawLine(
+                                color = tickColor.copy(alpha = 0.7f),
+                                start = Offset(beatX, beatTickTop),
+                                end = Offset(beatX, rulerHeightPx),
+                                strokeWidth = 0.5f
+                            )
+                        }
+                        if (showSubBeat) {
+                            var stepMs = gridStepMs
+                            while (stepMs < measureMs - 0.5) {
+                                val frac = stepMs / beatMs
+                                val isBeat = frac - frac.toLong() < 0.01 || frac - frac.toLong() > 0.99
+                                if (!isBeat) {
+                                    val stepX = msToX(ms + stepMs)
+                                    if (stepX > size.width) break
+                                    drawLine(
+                                        color = subBeatColor,
+                                        start = Offset(stepX, subBeatTickTop),
+                                        end = Offset(stepX, rulerHeightPx),
+                                        strokeWidth = 0.5f
+                                    )
+                                }
+                                stepMs += gridStepMs
+                            }
+                        }
+                    }
+
+                    ms += measureMs
+                    measureNumber++
+                }
+
+                // Loop region: amber fill across the ruler height, endpoint
+                // bars at left/right, triangle handles flagging the bracket.
+                if (loopStartMs != null && loopEndMs != null && loopEndMs > loopStartMs) {
+                    val sX = (loopStartMs * pxPerMs).toFloat()
+                    val eX = (loopEndMs * pxPerMs).toFloat()
+                    val fillAlpha = if (isLoopEnabled) 0.18f else 0.08f
+                    val borderAlpha = if (isLoopEnabled) 0.7f else 0.35f
+                    drawRect(
+                        color = loopColor.copy(alpha = fillAlpha),
+                        topLeft = Offset(sX, 0f),
+                        size = Size(eX - sX, rulerHeightPx)
+                    )
+                    drawLine(
+                        color = loopColor.copy(alpha = borderAlpha),
+                        start = Offset(sX, 0f),
+                        end = Offset(sX, rulerHeightPx),
+                        strokeWidth = 2f
+                    )
+                    drawLine(
+                        color = loopColor.copy(alpha = borderAlpha),
+                        start = Offset(eX, 0f),
+                        end = Offset(eX, rulerHeightPx),
+                        strokeWidth = 2f
+                    )
+                    val triW = 10.dp.toPx()
+                    val triH = 8.dp.toPx()
+                    drawPath(
+                        path = androidx.compose.ui.graphics.Path().apply {
+                            moveTo(sX, 0f)
+                            lineTo(sX + triW, 0f)
+                            lineTo(sX, triH)
+                            close()
+                        },
+                        color = loopColor.copy(alpha = borderAlpha)
+                    )
+                    drawPath(
+                        path = androidx.compose.ui.graphics.Path().apply {
+                            moveTo(eX, 0f)
+                            lineTo(eX - triW, 0f)
+                            lineTo(eX, triH)
+                            close()
+                        },
+                        color = loopColor.copy(alpha = borderAlpha)
+                    )
+                }
+
+                // Selector line (cursor teal) -- always rendered, even at 0.
+                val selectorX = (selectorMs * pxPerMs).toFloat()
+                if (selectorX in 0f..size.width) {
+                    drawLine(
+                        color = selectorColor,
+                        start = Offset(selectorX, 0f),
+                        end = Offset(selectorX, rulerHeightPx),
+                        strokeWidth = 1.5f
+                    )
+                }
+
+                // Playhead line in the ruler (matches grid playhead).
+                if (isPlaying || positionMs > 0) {
+                    val playheadX = (positionMs * pxPerMs).toFloat()
+                    if (playheadX in 0f..size.width) {
+                        drawLine(
+                            color = playheadColor,
+                            start = Offset(playheadX, 0f),
+                            end = Offset(playheadX, rulerHeightPx),
+                            strokeWidth = 2f
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Velocity strip rendered below the piano roll grid.
+ *
+ * Read-only by default: bars render at each note's X position with height
+ * proportional to velocity (0..1). When [isVelocityEditMode] is latched, the
+ * bars for currently-selected notes become draggable -- drag a bar up/down
+ * to change velocity. Multi-selected notes track the same delta with
+ * independent clamping. Commits to the VM happen on release; live preview
+ * runs through local state during the drag.
+ *
+ * Scrolls horizontally in lockstep with the grid via the shared
+ * [horizontalScrollState]. The VELOC label occupies the same 48dp column
+ * the piano keys sit in above, keeping bars column-aligned with notes.
+ */
+@Composable
+private fun PianoRollVelocityStrip(
+    notes: List<MidiNoteEntity>,
+    selectedNoteIds: Set<Long>,
+    isVelocityEditMode: Boolean,
+    horizontalScrollState: ScrollState,
+    pxPerMs: Float,
+    contentMs: Long,
+    trackColor: Color,
+    onCommitVelocities: (Map<Long, Float>) -> Unit
+) {
+    val density = LocalDensity.current
+    val gridWidthDp = with(density) { (contentMs * pxPerMs).toDp() }
+    val view = LocalView.current
+
+    // Live preview during drag -- renders before the VM commits on release.
+    var previewVelocities by remember { mutableStateOf<Map<Long, Float>>(emptyMap()) }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(40.dp)
+            .background(NjSurface)
+    ) {
+        Box(
+            modifier = Modifier
+                .width(KEYS_WIDTH_DP.dp)
+                .fillMaxHeight(),
+            contentAlignment = Alignment.Center
+        ) {
+            val labelColor = if (isVelocityEditMode) {
+                NjAmber.copy(alpha = 0.85f)
+            } else {
+                NjMuted2.copy(alpha = 0.7f)
+            }
+            Text(
+                text = "VELOC",
+                fontFamily = IbmPlexMono,
+                fontSize = 9.sp,
+                color = labelColor,
+                letterSpacing = 0.5.sp
+            )
+        }
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .background(NjPanelInset)
+                .horizontalScroll(horizontalScrollState)
+        ) {
+            Canvas(
+                modifier = Modifier
+                    .width(gridWidthDp)
+                    .fillMaxHeight()
+                    .pointerInput(notes, selectedNoteIds, isVelocityEditMode, pxPerMs) {
+                        if (!isVelocityEditMode) return@pointerInput
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            val tapMs = (down.position.x / pxPerMs).toLong()
+                            // Find a SELECTED note whose bar contains the touch.
+                            val anchor = notes.firstOrNull { n ->
+                                n.id in selectedNoteIds &&
+                                    tapMs >= n.startMs &&
+                                    tapMs <= n.startMs + n.durationMs
+                            } ?: return@awaitEachGesture
+                            down.consume()
+                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+
+                            val startVelocities = selectedNoteIds.associateWith { id ->
+                                notes.find { it.id == id }?.velocity ?: 0.8f
+                            }
+                            val anchorStartVelocity = anchor.velocity
+                            val startY = down.position.y
+                            val stripHeight = size.height.coerceAtLeast(1).toFloat()
+                            var lastDelta = 0f
+                            var cursorMap: Map<Long, Float> = startVelocities
+
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull { it.id == down.id }
+                                    ?: break
+                                if (!change.pressed) {
+                                    change.consume()
+                                    break
+                                }
+                                change.consume()
+                                val deltaY = change.position.y - startY
+                                val rawDeltaVelocity = -deltaY / stripHeight
+                                if (rawDeltaVelocity != lastDelta) {
+                                    lastDelta = rawDeltaVelocity
+                                    cursorMap = startVelocities.mapValues { (_, v) ->
+                                        (v + rawDeltaVelocity).coerceIn(0f, 1f)
+                                    }
+                                    previewVelocities = cursorMap
+                                }
+                            }
+                            // Commit: only if the anchor's velocity actually changed.
+                            val anchorFinal = (anchorStartVelocity + lastDelta).coerceIn(0f, 1f)
+                            if (anchorFinal != anchorStartVelocity) {
+                                onCommitVelocities(cursorMap)
+                            }
+                            previewVelocities = emptyMap()
+                        }
+                    }
+            ) {
+                // Faint baseline so the strip reads as a continuous panel
+                // even when there are no notes.
+                drawLine(
+                    color = trackColor.copy(alpha = 0.15f),
+                    start = Offset(0f, size.height - 1f),
+                    end = Offset(size.width, size.height - 1f),
+                    strokeWidth = 1f
+                )
+
+                for (note in notes) {
+                    val barX = note.startMs * pxPerMs
+                    val barWidth = (note.durationMs * pxPerMs).coerceAtLeast(3f)
+                    val effectiveVelocity = previewVelocities[note.id] ?: note.velocity
+                    val barHeight = (effectiveVelocity * size.height).coerceAtLeast(2f)
+                    val barY = size.height - barHeight
+                    val isSelected = note.id in selectedNoteIds
+                    val color = when {
+                        isVelocityEditMode && !isSelected -> trackColor.copy(alpha = 0.25f)
+                        isSelected -> trackColor.copy(alpha = 0.95f)
+                        else -> trackColor.copy(alpha = 0.65f)
+                    }
+                    drawRect(
+                        color = color,
+                        topLeft = Offset(barX, barY),
+                        size = Size(barWidth, barHeight)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Tab bar -- four MODE buttons. Functional in phase 1; sub-panels fill in
+ *  in phases 4-6 + 10. */
+@Composable
+private fun PianoRollTabBar(
+    activeTab: PianoRollTab,
+    onTabSelect: (PianoRollTab) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(NjSurface)
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        NjButton(
+            text = "",
+            icon = Icons.Filled.ContentCut,
+            caption = "TOOLS",
+            onClick = { onTabSelect(PianoRollTab.TOOLS) },
+            isActive = activeTab == PianoRollTab.TOOLS,
+            ledColor = NjAmber,
+            modifier = Modifier.weight(1f)
+        )
+        NjButton(
+            text = "",
+            icon = Icons.Filled.MusicNote,
+            caption = "SCALE",
+            onClick = { onTabSelect(PianoRollTab.SCALE) },
+            isActive = activeTab == PianoRollTab.SCALE,
+            ledColor = NjAmber,
+            modifier = Modifier.weight(1f)
+        )
+        NjButton(
+            text = "",
+            icon = Icons.Filled.Tune,
+            caption = "EDIT",
+            onClick = { onTabSelect(PianoRollTab.EDIT) },
+            isActive = activeTab == PianoRollTab.EDIT,
+            ledColor = NjAmber,
+            modifier = Modifier.weight(1f)
+        )
+        NjButton(
+            text = "",
+            icon = Icons.Filled.Edit,
+            caption = "INSTR",
+            onClick = { onTabSelect(PianoRollTab.INSTR) },
+            isActive = activeTab == PianoRollTab.INSTR,
+            ledColor = NjAmber,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+/**
+ * Two-row sub-panel under the tab bar.
+ *
+ * Top row: per-tab controls (placeholders for TOOLS / SCALE / EDIT / INSTR
+ * until phases 4-6 + 10 fill them in).
+ *
+ * Bottom row: persistent grid resolution chips (1/2 1/4 1/8 1/16 1/32) on
+ * the left, a thin bevel separator, then the SNAP toggle on the right.
+ * Always visible regardless of active tab.
+ */
+@Composable
+private fun PianoRollSubPanel(
+    activeTab: PianoRollTab,
+    state: PianoRollState,
+    onAction: (PianoRollAction) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(NjBg)
+    ) {
+        // ── Row 1: GRID segmented strip + SNAP toggle ──
+        // Sits above the per-tab content because grid resolution is a
+        // session-level preference, not a per-tab control.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(NjPanelInset)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "GRID",
+                fontFamily = IbmPlexMono,
+                fontSize = 9.sp,
+                color = NjMuted,
+                letterSpacing = 0.5.sp
+            )
+            NjSegmentedStrip(
+                options = GRID_RESOLUTION_OPTIONS,
+                selected = state.gridResolution,
+                onSelect = { onAction(PianoRollAction.SetGridResolution(it)) },
+                label = { "1/$it" },
+                modifier = Modifier.weight(1f),
+                height = 36.dp
+            )
+            NjButton(
+                text = "",
+                icon = Icons.Filled.GridGoldenratio,
+                caption = "SNAP",
+                onClick = { onAction(PianoRollAction.ToggleSnap) },
+                isActive = state.isSnapEnabled,
+                ledColor = NjAmber,
+                modifier = Modifier.height(40.dp)
+            )
+        }
+
+        // ── Row 2: per-tab content ──
+        // Fixed height so the sub-panel doesn't jump when switching tabs.
+        // Sized to fit the tallest layout (SCALE). Shorter panels (TOOLS,
+        // EDIT, INSTR) center vertically inside this envelope.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(SUB_PANEL_CONTENT_HEIGHT)
+                .background(NjSurface)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            when (activeTab) {
+                PianoRollTab.TOOLS -> ToolsPanelContent(state, onAction)
+                PianoRollTab.SCALE -> ScalePanelContent(state, onAction)
+                PianoRollTab.EDIT -> EditPanelContent(state, onAction)
+                PianoRollTab.INSTR -> InstrPanelContent(state, onAction)
+            }
+        }
+    }
+}
+
+private val GRID_RESOLUTION_OPTIONS = listOf(4, 8, 16, 32)

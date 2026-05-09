@@ -42,6 +42,24 @@ sealed interface NoteOperation {
         var noteIds: List<Long>,
         val snapshots: List<MidiNoteEntity>
     ) : NoteOperation
+
+    /**
+     * A grouped operation -- multiple sub-operations applied as a single undo entry.
+     * Used by SPLIT (resize + place), QUANT batches, and other multi-step actions.
+     * On redo, sub-ops execute in order. On undo, sub-ops execute in reverse order
+     * with reversed semantics, so a composite of [Resize, Place] undoes as
+     * [un-Place, un-Resize].
+     */
+    data class Composite(val ops: List<NoteOperation>) : NoteOperation
+
+    /** One or more notes had their velocity changed (commit on drag release). */
+    data class VelocityBatch(val entries: List<VelocityEntry>) : NoteOperation {
+        data class VelocityEntry(
+            val noteId: Long,
+            val oldVelocity: Float,
+            val newVelocity: Float
+        )
+    }
 }
 
 /**
