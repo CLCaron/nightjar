@@ -136,6 +136,13 @@ private const val MAX_CANVAS_PX = 32768f
 /** Touch zone width for detecting resize drag on a note's right edge. */
 private val EDGE_TOUCH_ZONE = 16.dp
 
+/**
+ * How far past the visible note edge the resize zone extends into empty
+ * space. Users naturally aim at the edge and often land a few pixels past
+ * it; without grace those taps fall to the empty-cell branch and miss.
+ */
+private val EDGE_TOUCH_GRACE_OUTSIDE = 12.dp
+
 /** Fast long-press threshold in ms (matches Timeline). */
 private const val FAST_LONG_PRESS_MS = 200L
 
@@ -384,19 +391,26 @@ fun PianoRollScreen(
                             ) {
                                 val pxPerMs = PX_PER_MS * horizontalZoom * density.density
                                 val edgeZonePx = EDGE_TOUCH_ZONE.toPx()
+                                val edgeGraceOutsidePx = EDGE_TOUCH_GRACE_OUTSIDE.toPx()
 
                                 awaitEachGesture {
                                     if (isPinching) return@awaitEachGesture
                                     val down = awaitFirstDown(requireUnconsumed = false)
                                     // DON'T consume down -- lets scroll handle swipes
 
-                                    // Check both edges. For short notes both edge zones may
-                                    // overlap; tie-break by proximity to the touch X.
+                                    // Check both edges. The zone covers a strip inside the
+                                    // note plus a grace strip in empty space just outside it,
+                                    // so taps aimed at the visible edge that land a few pixels
+                                    // past the note still grab the resize handle. For short
+                                    // notes both edge zones may overlap; tie-break by
+                                    // proximity to the touch X.
                                     val rightEdgeNote = findNoteEdgeAt(
-                                        down.position, state.notes, rowHeightPx, pxPerMs, edgeZonePx
+                                        down.position, state.notes, rowHeightPx, pxPerMs,
+                                        edgeZonePx, edgeGraceOutsidePx
                                     )
                                     val leftEdgeNote = findNoteLeftEdgeAt(
-                                        down.position, state.notes, rowHeightPx, pxPerMs, edgeZonePx
+                                        down.position, state.notes, rowHeightPx, pxPerMs,
+                                        edgeZonePx, edgeGraceOutsidePx
                                     )
                                     val (edgeNote, isLeftEdge) = when {
                                         rightEdgeNote != null && leftEdgeNote != null -> {
@@ -553,27 +567,22 @@ fun PianoRollScreen(
                                         }
                                     } else {
                                         // ── EMPTY CELL ──
-                                        // Mode dispatch:
-                                        //   SELECT - drag (touch slop) → marquee, tap → clear
-                                        //   DRAW   - tap → place / clear; hold/drag → no marquee
-                                        //   ERASE  - tap → no-op
-                                        // Marquee is gated to SELECT only so DRAW never produces
-                                        // a phantom selection box when the user mis-taps a note edge.
+                                        // All modes wait on long-press so quick drags pass
+                                        // through to the parent scroll (the user can still pan
+                                        // the grid in any mode). On lift before long-press,
+                                        // the post-loop tap logic runs (place note in DRAW,
+                                        // clear selection otherwise). Only SELECT promotes a
+                                        // held press into a marquee; DRAW and ERASE stay inert
+                                        // on hold so a stray hold near a note edge can't sweep
+                                        // up a phantom selection.
                                         val mode = state.editorMode
+                                        val longPress = awaitLongPressOrCancellation(down.id)
                                         val drag: androidx.compose.ui.input.pointer.PointerInputChange?
                                         val startMarquee: Boolean
-                                        if (mode == EditorMode.SELECT) {
-                                            // Drag-from-empty marquees immediately on slop.
-                                            drag = awaitTouchSlopOrCancellation(down.id) { c, _ ->
-                                                c.consume()
-                                            }
-                                            startMarquee = drag != null
+                                        if (mode == EditorMode.SELECT && longPress != null) {
+                                            drag = longPress
+                                            startMarquee = true
                                         } else {
-                                            // DRAW or ERASE: no marquee. Wait for the press to
-                                            // resolve (lift, long-press timeout, or cancel) so
-                                            // the post-loop tap-to-place logic still runs on a
-                                            // quick tap. We discard the result.
-                                            awaitLongPressOrCancellation(down.id)
                                             drag = null
                                             startMarquee = false
                                         }
@@ -1190,18 +1199,21 @@ private fun DrawScope.drawGrid(
 /**
  * Find a note whose right-edge resize zone contains the tap.
  *
- * The edge zone is the last [edgeZonePx] pixels **inside** the note body,
- * clamped to the note's start so narrow notes stay grabbable (the whole
- * note becomes the edge zone). Tapping in empty space past the note's end
- * does not match — that previously caused phantom selections when users
- * tapped near, but outside, a note whose right edge was within 16dp.
+ * The zone is the last [edgeZonePx] pixels inside the note body plus
+ * [graceOutsidePx] pixels of empty space just past the note's end, so
+ * taps aimed at the visible edge that land a few pixels outside still
+ * match. The inside half is clamped to the note's start so narrow notes
+ * stay grabbable (the whole note becomes the edge zone). Phantom
+ * selections from outside-edge taps are no longer a concern because
+ * marquee is gated to SELECT mode.
  */
 private fun findNoteEdgeAt(
     position: Offset,
     notes: List<MidiNoteEntity>,
     rowHeightPx: Float,
     pxPerMs: Float,
-    edgeZonePx: Float
+    edgeZonePx: Float,
+    graceOutsidePx: Float
 ): MidiNoteEntity? {
     val pitch = TOTAL_NOTES - 1 - (position.y / rowHeightPx).toInt()
     return notes.find { note ->
@@ -1209,24 +1221,25 @@ private fun findNoteEdgeAt(
         val startPx = note.startMs * pxPerMs
         val endPx = (note.startMs + note.durationMs) * pxPerMs
         val edgeStart = (endPx - edgeZonePx).coerceAtLeast(startPx)
-        position.x in edgeStart..endPx
+        position.x in edgeStart..(endPx + graceOutsidePx)
     }
 }
 
 /**
  * Find a note whose LEFT-edge resize zone contains the tap.
  *
- * The edge zone is the first [edgeZonePx] pixels inside the note body,
- * clamped to the note's end so narrow notes stay grabbable. Symmetric
- * to [findNoteEdgeAt] (right edge). For very short notes both edges
- * overlap; the caller does the tie-break by proximity.
+ * Symmetric to [findNoteEdgeAt]: [edgeZonePx] inside the note's start
+ * plus [graceOutsidePx] of empty space before it. Inside half is clamped
+ * to the note's end so narrow notes stay grabbable. For very short notes
+ * both edges overlap; the caller tie-breaks by proximity.
  */
 private fun findNoteLeftEdgeAt(
     position: Offset,
     notes: List<MidiNoteEntity>,
     rowHeightPx: Float,
     pxPerMs: Float,
-    edgeZonePx: Float
+    edgeZonePx: Float,
+    graceOutsidePx: Float
 ): MidiNoteEntity? {
     val pitch = TOTAL_NOTES - 1 - (position.y / rowHeightPx).toInt()
     return notes.find { note ->
@@ -1234,7 +1247,7 @@ private fun findNoteLeftEdgeAt(
         val startPx = note.startMs * pxPerMs
         val endPx = (note.startMs + note.durationMs) * pxPerMs
         val edgeEnd = (startPx + edgeZonePx).coerceAtMost(endPx)
-        position.x in startPx..edgeEnd
+        position.x in (startPx - graceOutsidePx)..edgeEnd
     }
 }
 
