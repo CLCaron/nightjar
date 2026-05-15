@@ -3,11 +3,15 @@ package com.example.nightjar.data.repository
 import androidx.room.withTransaction
 import com.example.nightjar.data.db.IdeaTagCrossRef
 import com.example.nightjar.data.db.NightjarDatabase
+import com.example.nightjar.data.db.dao.AudioClipDao
 import com.example.nightjar.data.db.dao.IdeaDao
 import com.example.nightjar.data.db.dao.TagDao
+import com.example.nightjar.data.db.dao.TakeDao
 import com.example.nightjar.data.db.dao.TrackDao
+import com.example.nightjar.data.db.entity.AudioClipEntity
 import com.example.nightjar.data.db.entity.IdeaEntity
 import com.example.nightjar.data.db.entity.TagEntity
+import com.example.nightjar.data.db.entity.TakeEntity
 import com.example.nightjar.data.db.entity.TrackEntity
 import com.example.nightjar.data.storage.RecordingStorage
 import kotlinx.coroutines.flow.Flow
@@ -27,6 +31,8 @@ class IdeaRepository(
     private val ideaDao: IdeaDao,
     private val tagDao: TagDao,
     private val trackDao: TrackDao,
+    private val audioClipDao: AudioClipDao,
+    private val takeDao: TakeDao,
     private val storage: RecordingStorage,
     private val database: NightjarDatabase
 ) {
@@ -34,9 +40,15 @@ class IdeaRepository(
     // ── Record ──────────────────────────────────────────────────────────
 
     /**
-     * Creates an [IdeaEntity] and its first [TrackEntity] in a single transaction.
+     * Creates an [IdeaEntity] and its first [TrackEntity] with a clip + active
+     * take in a single transaction.
      *
-     * The idea is a pure metadata container; only the track references [audioFile].
+     * The idea is a pure metadata container. Audio playback in Studio and
+     * Overview reads from the clip/take layer, so the take row is what makes
+     * the recording audible — without it the file exists on disk but no
+     * playback slot is produced. The legacy [TrackEntity.audioFileName] field
+     * stays populated so the composite waveform extractor (which reads it
+     * directly) can render thumbnails.
      */
     suspend fun createIdeaWithTrack(audioFile: File, durationMs: Long): Long {
         val title = defaultTitle()
@@ -54,7 +66,22 @@ class IdeaRepository(
                 sortIndex = 0,
                 durationMs = durationMs
             )
-            trackDao.insertTrack(track)
+            val trackId = trackDao.insertTrack(track)
+
+            val clipId = audioClipDao.insertClip(AudioClipEntity(
+                trackId = trackId,
+                offsetMs = 0L,
+                displayName = "Clip 1",
+                sortIndex = 0
+            ))
+            takeDao.insertTake(TakeEntity(
+                clipId = clipId,
+                audioFileName = audioFile.name,
+                displayName = "Take 1",
+                sortIndex = 0,
+                durationMs = durationMs,
+                isActive = true
+            ))
 
             ideaId
         }
