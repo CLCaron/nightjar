@@ -557,7 +557,9 @@ class PianoRollViewModel @Inject constructor(
 
                 midiRepo.recomputeTrackDuration(trackId)
                 previewPitch(pitch)
-                _state.update { it.copy(selectedNoteIds = newIds.toSet()) }
+                // Auto-select chords for group editing; single notes stay unselected to keep tap-to-add fluid.
+                val newSelection = if (st.isChordMode) newIds.toSet() else emptySet()
+                _state.update { it.copy(selectedNoteIds = newSelection) }
             } catch (e: Exception) {
                 _effects.emit(PianoRollEffect.ShowError("Failed to add note"))
             }
