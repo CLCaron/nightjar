@@ -40,21 +40,52 @@ class StudioRepository(
     // ── Project lifecycle ───────────────────────────────────────────────
 
     /**
-     * Returns existing tracks for the idea, fixing up any zero-duration
-     * tracks left behind by the v3->v4 migration.
+     * Returns existing tracks for the idea, fixing up:
+     * 1. Tracks with unknown duration (from v3->v4 migration).
+     * 2. Legacy audio tracks that have an audioFileName but no clip/take rows.
+     *    Earlier builds of [IdeaRepository.createIdeaWithTrack] only wrote the
+     *    track row, so existing ideas captured on the Record screen had audible
+     *    files on disk but no clip/take rows for the engine to load. We backfill
+     *    a single clip + active take from the legacy track fields.
      */
     suspend fun ensureProjectInitialized(ideaId: Long): List<TrackEntity> {
         val existing = trackDao.getTracksForIdea(ideaId)
         if (existing.isEmpty()) return emptyList()
 
-        // Fix up tracks with unknown duration (from v3->v4 migration)
         var needsRefresh = false
         for (track in existing) {
-            if (track.durationMs == 0L && track.audioFileName != null) {
+            // Fix up tracks with unknown duration (from v3->v4 migration)
+            var effectiveDuration = track.durationMs
+            if (effectiveDuration == 0L && track.audioFileName != null) {
                 val file = storage.getAudioFile(track.audioFileName)
-                val duration = resolveFileDurationMs(file)
-                if (duration > 0L) {
-                    trackDao.updateDuration(track.id, duration)
+                val resolved = resolveFileDurationMs(file)
+                if (resolved > 0L) {
+                    trackDao.updateDuration(track.id, resolved)
+                    effectiveDuration = resolved
+                    needsRefresh = true
+                }
+            }
+
+            // Backfill clip + take for legacy audio tracks
+            if (track.isAudio && track.audioFileName != null && effectiveDuration > 0L) {
+                val clips = audioClipDao.getClipsForTrack(track.id)
+                if (clips.isEmpty()) {
+                    val clipId = audioClipDao.insertClip(AudioClipEntity(
+                        trackId = track.id,
+                        offsetMs = track.offsetMs,
+                        displayName = "Clip 1",
+                        sortIndex = 0
+                    ))
+                    takeDao.insertTake(TakeEntity(
+                        clipId = clipId,
+                        audioFileName = track.audioFileName,
+                        displayName = "Take 1",
+                        sortIndex = 0,
+                        durationMs = effectiveDuration,
+                        trimStartMs = track.trimStartMs,
+                        trimEndMs = track.trimEndMs,
+                        isActive = true
+                    ))
                     needsRefresh = true
                 }
             }
@@ -131,6 +162,26 @@ class StudioRepository(
 
     suspend fun renameTrack(trackId: Long, name: String) {
         trackDao.updateDisplayName(trackId, name)
+    }
+
+    /**
+     * Create a new empty audio track for the given idea. Returns the track ID.
+     *
+     * No clip or take is created — the track is a placeholder that the user
+     * fills by arming and tapping Record. Mirrors the empty-container pattern
+     * used by [addDrumTrack] and [addMidiTrack].
+     */
+    suspend fun addEmptyAudioTrack(ideaId: Long): Long {
+        val nextIndex = trackDao.getTrackCount(ideaId)
+        val track = TrackEntity(
+            ideaId = ideaId,
+            trackType = "audio",
+            audioFileName = null,
+            displayName = "Track ${nextIndex + 1}",
+            sortIndex = nextIndex,
+            durationMs = 0L
+        )
+        return trackDao.insertTrack(track)
     }
 
     /** Create a new drum track for the given idea. Returns the track ID. */

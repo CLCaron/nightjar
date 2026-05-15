@@ -235,11 +235,7 @@ class StudioViewModel @Inject constructor(
             is StudioAction.SelectNewTrackType -> {
                 _state.update { it.copy(isAddTrackDrawerOpen = false) }
                 when (action.type) {
-                    NewTrackType.AUDIO_RECORDING -> {
-                        viewModelScope.launch {
-                            _effects.emit(StudioEffect.RequestMicPermission)
-                        }
-                    }
+                    NewTrackType.AUDIO_RECORDING -> addEmptyAudioTrackAndArm()
                     NewTrackType.DRUM_SEQUENCER -> addDrumTrack()
                     NewTrackType.MIDI_INSTRUMENT -> addMidiTrack()
                 }
@@ -1670,6 +1666,27 @@ class StudioViewModel @Inject constructor(
         soundFontLoaded = true
         Log.d(TAG, "SoundFont loaded successfully")
         return true
+    }
+
+    /**
+     * Create a new empty audio track and auto-arm it. The user then taps the
+     * Record button to fill it. The track has no clip/take yet; the existing
+     * armed-track recording path ([stopRecording] case 2) creates them when
+     * the recording finishes.
+     */
+    private fun addEmptyAudioTrackAndArm() {
+        val ideaId = currentIdeaId ?: return
+        viewModelScope.launch {
+            try {
+                val trackId = studioRepo.addEmptyAudioTrack(ideaId)
+                reloadAndPrepare()
+                _state.update { it.copy(armedTrackId = trackId) }
+            } catch (e: Exception) {
+                _effects.emit(
+                    StudioEffect.ShowError(e.message ?: "Failed to add audio track.")
+                )
+            }
+        }
     }
 
     /** Create a new drum track, initialize its pattern, and observe it. */
