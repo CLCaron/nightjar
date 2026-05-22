@@ -93,6 +93,11 @@ private const val SELECTED_WINDOW_FILL_ALPHA = 0.12f
 private const val BACKGROUND_WINDOW_FILL_ALPHA = 0.06f
 /** Darken overlay for gap regions (no clip covers this timeline range). */
 private const val GAP_DARKEN_ALPHA = 0.22f
+private const val MINI_ROLL_ROW_ALPHA = 0.42f
+private const val MINI_ROLL_OCTAVE_ROW_ALPHA = 0.72f
+private const val MINI_ROLL_GRID_ALPHA = 0.34f
+private const val MINI_ROLL_BEAT_ALPHA = 0.48f
+private const val MINI_ROLL_BAR_ALPHA = 0.68f
 
 /** Hit-test result: the note and the clip it was visually hit in. */
 private data class NoteHit(
@@ -538,15 +543,8 @@ fun MiniPianoRoll(
                                 }
                             }
                     ) {
-                        drawMiniRollGrid(
+                        drawMiniRollKeyBackgrounds(
                             rowHeightPx = rowHeightPx,
-                            totalMs = totalMs,
-                            pxPerMs = pxPerMs,
-                            msPerBeat = msPerBeat,
-                            msPerMeasure = msPerMeasure,
-                            gridStepMs = gridStepMs,
-                            isSnapEnabled = isSnapEnabled,
-                            muted2Color = miniRollMuted2,
                             blackKeyBgColor = surfaceColor
                         )
 
@@ -558,6 +556,17 @@ fun MiniPianoRoll(
                             pxPerMs = pxPerMs,
                             trackColor = trackColor,
                             boundaryColor = amberBoundary
+                        )
+
+                        drawMiniRollGrid(
+                            rowHeightPx = rowHeightPx,
+                            totalMs = totalMs,
+                            pxPerMs = pxPerMs,
+                            msPerBeat = msPerBeat,
+                            msPerMeasure = msPerMeasure,
+                            gridStepMs = gridStepMs,
+                            isSnapEnabled = isSnapEnabled,
+                            muted2Color = miniRollMuted2
                         )
 
                         val bevelW = 3f
@@ -914,28 +923,20 @@ private fun DrawScope.drawMiniRollGrid(
     msPerMeasure: Double,
     gridStepMs: Double,
     isSnapEnabled: Boolean,
-    muted2Color: Color,
-    blackKeyBgColor: Color
+    muted2Color: Color
 ) {
     for (pitch in 0 until TOTAL_PITCHES) {
         val rowIdx = (TOTAL_PITCHES - 1) - pitch
         val y = rowIdx * rowHeightPx
-        val isBlack = (pitch % 12) in BLACK_KEY_INDICES
-
-        if (isBlack) {
-            drawRect(
-                color = blackKeyBgColor,
-                topLeft = Offset(0f, y),
-                size = Size(size.width, rowHeightPx)
-            )
-        }
 
         val isC = (pitch % 12) == 0
         drawLine(
-            color = muted2Color.copy(alpha = if (isC) 0.6f else 0.3f),
+            color = muted2Color.copy(
+                alpha = if (isC) MINI_ROLL_OCTAVE_ROW_ALPHA else MINI_ROLL_ROW_ALPHA
+            ),
             start = Offset(0f, y),
             end = Offset(size.width, y),
-            strokeWidth = if (isC) 1f else 0.5f
+            strokeWidth = if (isC) 1.25f else 0.75f
         )
     }
 
@@ -949,9 +950,9 @@ private fun DrawScope.drawMiniRollGrid(
             val alpha: Float
             val width: Float
             when {
-                isMeasure -> { alpha = 0.5f; width = 1.5f }
-                isBeat -> { alpha = 0.3f; width = 1f }
-                else -> { alpha = 0.2f; width = 0.5f }
+                isMeasure -> { alpha = MINI_ROLL_BAR_ALPHA; width = 1.75f }
+                isBeat -> { alpha = MINI_ROLL_BEAT_ALPHA; width = 1.25f }
+                else -> { alpha = MINI_ROLL_GRID_ALPHA; width = 0.75f }
             }
             drawLine(
                 color = muted2Color.copy(alpha = alpha),
@@ -961,6 +962,25 @@ private fun DrawScope.drawMiniRollGrid(
             )
 
             ms += if (isSnapEnabled && gridStepMs > 0) gridStepMs else msPerBeat
+        }
+    }
+}
+
+private fun DrawScope.drawMiniRollKeyBackgrounds(
+    rowHeightPx: Float,
+    blackKeyBgColor: Color
+) {
+    for (pitch in 0 until TOTAL_PITCHES) {
+        val rowIdx = (TOTAL_PITCHES - 1) - pitch
+        val y = rowIdx * rowHeightPx
+        val isBlack = (pitch % 12) in BLACK_KEY_INDICES
+
+        if (isBlack) {
+            drawRect(
+                color = blackKeyBgColor,
+                topLeft = Offset(0f, y),
+                size = Size(size.width, rowHeightPx)
+            )
         }
     }
 }

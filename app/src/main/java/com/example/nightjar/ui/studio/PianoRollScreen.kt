@@ -181,6 +181,11 @@ private data class MarqueeRect(
 
 /** Timeout for double-tap-to-delete detection. */
 private const val DOUBLE_TAP_TIMEOUT_MS = 300L
+private const val PIANO_ROLL_ROW_ALPHA = 0.42f
+private const val PIANO_ROLL_OCTAVE_ROW_ALPHA = 0.72f
+private const val PIANO_ROLL_GRID_ALPHA = 0.34f
+private const val PIANO_ROLL_BEAT_ALPHA = 0.48f
+private const val PIANO_ROLL_BAR_ALPHA = 0.68f
 
 @Composable
 fun PianoRollScreen(
@@ -1043,14 +1048,6 @@ private fun DrawScope.drawGrid(
             }
         }
 
-        // Row separator -- stronger at C notes (octave boundaries)
-        val isC = octaveIndex == 0
-        drawLine(
-            color = muted2Color.copy(alpha = if (isC) 0.6f else 0.3f),
-            start = Offset(0f, y),
-            end = Offset(size.width, y),
-            strokeWidth = if (isC) 1f else 0.5f
-        )
     }
 
     // Loop region: translucent amber fill across the full pitch range so the
@@ -1116,6 +1113,22 @@ private fun DrawScope.drawGrid(
         }
     }
 
+    // Row separators sit above clip/loop shading so every pitch cell stays readable.
+    for (note in 0 until TOTAL_NOTES) {
+        val displayNote = TOTAL_NOTES - 1 - note
+        val y = note * rowHeightPx
+        val octaveIndex = displayNote % 12
+        val isC = octaveIndex == 0
+        drawLine(
+            color = muted2Color.copy(
+                alpha = if (isC) PIANO_ROLL_OCTAVE_ROW_ALPHA else PIANO_ROLL_ROW_ALPHA
+            ),
+            start = Offset(0f, y),
+            end = Offset(size.width, y),
+            strokeWidth = if (isC) 1.25f else 0.75f
+        )
+    }
+
     // Grid lines at sub-beat resolution
     if (gridStepMs > 0.0) {
         var stepTimeMs = 0.0
@@ -1130,9 +1143,9 @@ private fun DrawScope.drawGrid(
             val alpha: Float
             val strokeWidth: Float
             when {
-                isBar -> { alpha = 0.5f; strokeWidth = 1.5f }
-                isBeat -> { alpha = 0.3f; strokeWidth = 1f }
-                else -> { alpha = 0.2f; strokeWidth = 0.5f }
+                isBar -> { alpha = PIANO_ROLL_BAR_ALPHA; strokeWidth = 1.75f }
+                isBeat -> { alpha = PIANO_ROLL_BEAT_ALPHA; strokeWidth = 1.25f }
+                else -> { alpha = PIANO_ROLL_GRID_ALPHA; strokeWidth = 0.75f }
             }
 
             drawLine(
