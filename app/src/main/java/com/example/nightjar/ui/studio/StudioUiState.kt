@@ -1,5 +1,6 @@
 package com.example.nightjar.ui.studio
 
+import android.net.Uri
 import com.example.nightjar.audio.AudioLatencyEstimator
 import com.example.nightjar.data.db.entity.DrumStepEntity
 import com.example.nightjar.data.db.entity.MidiNoteEntity
@@ -140,6 +141,56 @@ data class AudioClipTrimState(
     val previewTrimEndMs: Long
 )
 
+enum class StudioMode {
+    ARRANGE,
+    EXPLORE
+}
+
+data class IdeaSectionUiState(
+    val id: Long,
+    val displayName: String,
+    val startMs: Long,
+    val endMs: Long,
+    val colorIndex: Int = 0
+) {
+    val durationMs: Long get() = (endMs - startMs).coerceAtLeast(0L)
+}
+
+data class ExploreCandidateUiState(
+    val id: Long,
+    val segmentId: Long,
+    val displayName: String,
+    val sourceStartMs: Long,
+    val sourceEndMs: Long,
+    val isSelected: Boolean
+)
+
+data class ExploreSegmentUiState(
+    val id: Long,
+    val sketchId: Long,
+    val startMs: Long,
+    val endMs: Long,
+    val status: String,
+    val selectedCandidateId: Long?,
+    val candidates: List<ExploreCandidateUiState> = emptyList()
+) {
+    val durationMs: Long get() = (endMs - startMs).coerceAtLeast(0L)
+    val isTry: Boolean get() = status == "try"
+}
+
+data class ExploreSketchUiState(
+    val id: Long,
+    val ideaId: Long,
+    val sectionId: Long,
+    val trackId: Long,
+    val displayName: String,
+    val sectionStartMs: Long,
+    val sectionEndMs: Long,
+    val segments: List<ExploreSegmentUiState> = emptyList()
+) {
+    val sectionDurationMs: Long get() = (sectionEndMs - sectionStartMs).coerceAtLeast(0L)
+}
+
 /** UI state for the Studio (multi-track workspace) screen. */
 data class StudioUiState(
     val ideaTitle: String = "",
@@ -169,6 +220,15 @@ data class StudioUiState(
     val manualOffsetMs: Long = 0L,
     val armedTrackId: Long? = null,
     val audioClips: Map<Long, List<AudioClipUiState>> = emptyMap(),
+    val studioMode: StudioMode = StudioMode.ARRANGE,
+    val sections: List<IdeaSectionUiState> = emptyList(),
+    val selectedSectionId: Long? = null,
+    val exploreSketches: List<ExploreSketchUiState> = emptyList(),
+    val selectedExploreSketchId: Long? = null,
+    val selectedExploreSegmentId: Long? = null,
+    val exploreRegionStartMs: Long? = null,
+    val exploreRegionEndMs: Long? = null,
+    val isImportingAudio: Boolean = false,
     val audioClipDragState: AudioClipDragState? = null,
     val audioClipTrimState: AudioClipTrimState? = null,
     val renamingTrackId: Long? = null,
@@ -220,6 +280,15 @@ data class StudioUiState(
 ) {
     val hasLoopRegion: Boolean get() = loopStartMs != null && loopEndMs != null
 
+    val selectedSection: IdeaSectionUiState?
+        get() = sections.firstOrNull { it.id == selectedSectionId }
+
+    val selectedExploreSketch: ExploreSketchUiState?
+        get() = exploreSketches.firstOrNull { it.id == selectedExploreSketchId }
+
+    val selectedExploreSegment: ExploreSegmentUiState?
+        get() = selectedExploreSketch?.segments?.firstOrNull { it.id == selectedExploreSegmentId }
+
     /** Derived: the audio clip ID whose takes panel should be expanded (multi-take clips only). */
     val expandedAudioClipId: Long?
         get() {
@@ -260,6 +329,15 @@ data class StudioUiState(
                 manualOffsetMs == other.manualOffsetMs &&
                 armedTrackId == other.armedTrackId &&
                 audioClips == other.audioClips &&
+                studioMode == other.studioMode &&
+                sections == other.sections &&
+                selectedSectionId == other.selectedSectionId &&
+                exploreSketches == other.exploreSketches &&
+                selectedExploreSketchId == other.selectedExploreSketchId &&
+                selectedExploreSegmentId == other.selectedExploreSegmentId &&
+                exploreRegionStartMs == other.exploreRegionStartMs &&
+                exploreRegionEndMs == other.exploreRegionEndMs &&
+                isImportingAudio == other.isImportingAudio &&
                 audioClipDragState == other.audioClipDragState &&
                 audioClipTrimState == other.audioClipTrimState &&
                 renamingTrackId == other.renamingTrackId &&
@@ -330,6 +408,15 @@ data class StudioUiState(
         result = 31 * result + manualOffsetMs.hashCode()
         result = 31 * result + (armedTrackId?.hashCode() ?: 0)
         result = 31 * result + audioClips.hashCode()
+        result = 31 * result + studioMode.hashCode()
+        result = 31 * result + sections.hashCode()
+        result = 31 * result + (selectedSectionId?.hashCode() ?: 0)
+        result = 31 * result + exploreSketches.hashCode()
+        result = 31 * result + (selectedExploreSketchId?.hashCode() ?: 0)
+        result = 31 * result + (selectedExploreSegmentId?.hashCode() ?: 0)
+        result = 31 * result + (exploreRegionStartMs?.hashCode() ?: 0)
+        result = 31 * result + (exploreRegionEndMs?.hashCode() ?: 0)
+        result = 31 * result + isImportingAudio.hashCode()
         result = 31 * result + (audioClipDragState?.hashCode() ?: 0)
         result = 31 * result + (audioClipTrimState?.hashCode() ?: 0)
         result = 31 * result + (renamingTrackId?.hashCode() ?: 0)
@@ -380,6 +467,8 @@ sealed interface StudioAction {
     data class Load(val ideaId: Long) : StudioAction
     data object ToggleAddTrackDrawer : StudioAction
     data class SelectNewTrackType(val type: NewTrackType) : StudioAction
+    data class SetStudioMode(val mode: StudioMode) : StudioAction
+    data class ImportAudio(val uri: Uri, val trackRole: String) : StudioAction
     data object MicPermissionGranted : StudioAction
     data object StopOverdubRecording : StudioAction
     data object Play : StudioAction
@@ -421,6 +510,18 @@ sealed interface StudioAction {
     data object ToggleLoop : StudioAction
     data class UpdateLoopRegionStart(val startMs: Long) : StudioAction
     data class UpdateLoopRegionEnd(val endMs: Long) : StudioAction
+
+    // Explore sections
+    data class SaveLoopAsSection(val name: String) : StudioAction
+    data class SelectSection(val sectionId: Long) : StudioAction
+    data class CreateExploreSketchForTrack(val trackId: Long) : StudioAction
+    data class CreateExploreTrack(val trackRole: String) : StudioAction
+    data object StartExploreCapture : StudioAction
+    data class UpdateExploreRegion(val startMs: Long, val endMs: Long) : StudioAction
+    data class MarkExploreRegion(val status: String) : StudioAction
+    data object StartExploreRegionRecording : StudioAction
+    data class SelectExploreSegment(val segmentId: Long) : StudioAction
+    data class SelectExploreCandidate(val segmentId: Long, val candidateId: Long) : StudioAction
 
     // Latency setup
     data object ShowLatencySetup : StudioAction
@@ -554,6 +655,7 @@ sealed interface StudioEffect {
     data class ShowError(val message: String) : StudioEffect
     data class ShowStatus(val message: String) : StudioEffect
     data object RequestMicPermission : StudioEffect
+    data object RequestAudioImport : StudioEffect
     data class NavigateToPianoRoll(val trackId: Long, val clipId: Long) : StudioEffect
     data class NavigateToDrumEditor(val trackId: Long, val clipId: Long = 0L) : StudioEffect
     data class NavigateToInstrumentPicker(val trackId: Long) : StudioEffect
@@ -562,6 +664,7 @@ sealed interface StudioEffect {
 /** Available track types for the "Add Track" bottom sheet. */
 enum class NewTrackType(val label: String, val description: String) {
     AUDIO_RECORDING("Audio Recording", "Record with your microphone"),
+    IMPORT_AUDIO("Import Audio", "Add a WAV file as a normal track"),
     DRUM_SEQUENCER("Drum Sequencer", "Step-based drum pattern"),
     MIDI_INSTRUMENT("MIDI Instrument", "Piano, guitar, bass, synths & more")
 }

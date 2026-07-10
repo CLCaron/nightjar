@@ -6,6 +6,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import com.example.nightjar.data.db.dao.AudioClipDao
 import com.example.nightjar.data.db.dao.DrumPatternDao
+import com.example.nightjar.data.db.dao.ExploreDao
 import com.example.nightjar.data.db.dao.IdeaDao
 import com.example.nightjar.data.db.dao.MidiClipDao
 import com.example.nightjar.data.db.dao.MidiNoteDao
@@ -13,10 +14,15 @@ import com.example.nightjar.data.db.dao.TagDao
 import com.example.nightjar.data.db.dao.TakeDao
 import com.example.nightjar.data.db.dao.TrackDao
 import com.example.nightjar.data.db.entity.AudioClipEntity
+import com.example.nightjar.data.db.entity.ExploreCandidateEntity
+import com.example.nightjar.data.db.entity.ExploreCaptureEntity
+import com.example.nightjar.data.db.entity.ExploreSegmentEntity
+import com.example.nightjar.data.db.entity.ExploreSketchEntity
 import com.example.nightjar.data.db.entity.DrumClipEntity
 import com.example.nightjar.data.db.entity.DrumPatternEntity
 import com.example.nightjar.data.db.entity.DrumStepEntity
 import com.example.nightjar.data.db.entity.IdeaEntity
+import com.example.nightjar.data.db.entity.IdeaSectionEntity
 import com.example.nightjar.data.db.entity.MidiClipEntity
 import com.example.nightjar.data.db.entity.MidiNoteEntity
 import com.example.nightjar.data.db.entity.TagEntity
@@ -56,6 +62,7 @@ import com.example.nightjar.data.db.entity.TrackEntity
  *             `lengthSteps` to `drum_patterns`, back-filled as
  *             `bars * stepsPerBar`. `bars` column stays for now but is no
  *             longer read at runtime (dropped in a later cleanup).
+ * - **v15** — Explore sections/sketches and lightweight audio track roles.
  */
 @Database(
     entities = [
@@ -63,9 +70,12 @@ import com.example.nightjar.data.db.entity.TrackEntity
         TrackEntity::class, AudioClipEntity::class, TakeEntity::class,
         DrumPatternEntity::class, DrumStepEntity::class,
         DrumClipEntity::class,
-        MidiClipEntity::class, MidiNoteEntity::class
+        MidiClipEntity::class, MidiNoteEntity::class,
+        IdeaSectionEntity::class, ExploreSketchEntity::class,
+        ExploreCaptureEntity::class, ExploreSegmentEntity::class,
+        ExploreCandidateEntity::class
     ],
-    version = 14,
+    version = 15,
     exportSchema = false
 )
 abstract class NightjarDatabase : RoomDatabase() {
@@ -78,6 +88,7 @@ abstract class NightjarDatabase : RoomDatabase() {
     abstract fun drumPatternDao(): DrumPatternDao
     abstract fun midiClipDao(): MidiClipDao
     abstract fun midiNoteDao(): MidiNoteDao
+    abstract fun exploreDao(): ExploreDao
 
     companion object {
         @Volatile private var INSTANCE: NightjarDatabase? = null
@@ -605,6 +616,111 @@ abstract class NightjarDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v14 -> v15: Explore sections/sketches and audio track roles.
+         *
+         * Existing tracks are labelled `raw`; Explore keeps source captures and
+         * chosen candidates separate from normal clips so sketches stay live and
+         * non-destructive.
+         */
+        private val MIGRATION_14_15 = object : androidx.room.migration.Migration(14, 15) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE tracks ADD COLUMN trackRole TEXT NOT NULL DEFAULT 'raw'")
+
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS idea_sections (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        ideaId INTEGER NOT NULL,
+                        displayName TEXT NOT NULL,
+                        startMs INTEGER NOT NULL,
+                        endMs INTEGER NOT NULL,
+                        colorIndex INTEGER NOT NULL DEFAULT 0,
+                        sortIndex INTEGER NOT NULL DEFAULT 0,
+                        createdAtEpochMs INTEGER NOT NULL,
+                        FOREIGN KEY(ideaId) REFERENCES ideas(id) ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_idea_sections_ideaId ON idea_sections(ideaId)")
+
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS explore_sketches (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        ideaId INTEGER NOT NULL,
+                        sectionId INTEGER NOT NULL,
+                        trackId INTEGER NOT NULL,
+                        displayName TEXT NOT NULL,
+                        createdAtEpochMs INTEGER NOT NULL,
+                        updatedAtEpochMs INTEGER NOT NULL,
+                        FOREIGN KEY(ideaId) REFERENCES ideas(id) ON DELETE CASCADE,
+                        FOREIGN KEY(sectionId) REFERENCES idea_sections(id) ON DELETE CASCADE,
+                        FOREIGN KEY(trackId) REFERENCES tracks(id) ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_explore_sketches_ideaId ON explore_sketches(ideaId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_explore_sketches_sectionId ON explore_sketches(sectionId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_explore_sketches_trackId ON explore_sketches(trackId)")
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS index_explore_sketches_sectionId_trackId " +
+                        "ON explore_sketches(sectionId, trackId)"
+                )
+
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS explore_captures (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        ideaId INTEGER NOT NULL,
+                        sectionId INTEGER NOT NULL,
+                        trackId INTEGER NOT NULL,
+                        audioFileName TEXT NOT NULL,
+                        displayName TEXT NOT NULL,
+                        durationMs INTEGER NOT NULL,
+                        capturedStartMs INTEGER NOT NULL,
+                        capturedEndMs INTEGER NOT NULL,
+                        trimStartMs INTEGER NOT NULL DEFAULT 0,
+                        createdAtEpochMs INTEGER NOT NULL,
+                        FOREIGN KEY(ideaId) REFERENCES ideas(id) ON DELETE CASCADE,
+                        FOREIGN KEY(sectionId) REFERENCES idea_sections(id) ON DELETE CASCADE,
+                        FOREIGN KEY(trackId) REFERENCES tracks(id) ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_explore_captures_ideaId ON explore_captures(ideaId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_explore_captures_sectionId ON explore_captures(sectionId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_explore_captures_trackId ON explore_captures(trackId)")
+
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS explore_segments (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        sketchId INTEGER NOT NULL,
+                        startMs INTEGER NOT NULL,
+                        endMs INTEGER NOT NULL,
+                        status TEXT NOT NULL DEFAULT 'keep',
+                        selectedCandidateId INTEGER,
+                        sortIndex INTEGER NOT NULL DEFAULT 0,
+                        createdAtEpochMs INTEGER NOT NULL,
+                        FOREIGN KEY(sketchId) REFERENCES explore_sketches(id) ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_explore_segments_sketchId ON explore_segments(sketchId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_explore_segments_selectedCandidateId ON explore_segments(selectedCandidateId)")
+
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS explore_candidates (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        segmentId INTEGER NOT NULL,
+                        captureId INTEGER NOT NULL,
+                        sourceStartMs INTEGER NOT NULL,
+                        sourceEndMs INTEGER NOT NULL,
+                        displayName TEXT NOT NULL,
+                        sortIndex INTEGER NOT NULL DEFAULT 0,
+                        createdAtEpochMs INTEGER NOT NULL,
+                        FOREIGN KEY(segmentId) REFERENCES explore_segments(id) ON DELETE CASCADE,
+                        FOREIGN KEY(captureId) REFERENCES explore_captures(id) ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_explore_candidates_segmentId ON explore_candidates(segmentId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_explore_candidates_captureId ON explore_candidates(captureId)")
+            }
+        }
+
         fun getInstance(context: Context): NightjarDatabase {
             return INSTANCE ?: synchronized(this) {
                 val db = Room.databaseBuilder(
@@ -616,7 +732,7 @@ abstract class NightjarDatabase : RoomDatabase() {
                     MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
                     MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10,
                     MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
-                    MIGRATION_13_14
+                    MIGRATION_13_14, MIGRATION_14_15
                 ).build()
                 INSTANCE = db
                 db

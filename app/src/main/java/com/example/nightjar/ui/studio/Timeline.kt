@@ -172,6 +172,7 @@ fun TimelinePanel(
     soloedTrackIds: Set<Long>,
     armedTrackId: Long?,
     audioClips: Map<Long, List<AudioClipUiState>>,
+    exploreSketches: List<ExploreSketchUiState> = emptyList(),
     expandedAudioClipId: Long?,
     audioClipDragState: AudioClipDragState?,
     audioClipTrimState: AudioClipTrimState?,
@@ -266,6 +267,7 @@ fun TimelinePanel(
             val trackColor = NjTrackColors[index % NjTrackColors.size]
             val isArmed = track.id == armedTrackId
             val clips = audioClips[track.id] ?: emptyList()
+            val trackSketches = exploreSketches.filter { it.trackId == track.id }
 
             // Track row: header + scrollable lane.
             // Box wrapper clips overlay headers that extend left when retracted.
@@ -345,6 +347,7 @@ fun TimelinePanel(
                                     track = track,
                                     trackColor = trackColor,
                                     clips = clips,
+                                    sketchClips = trackSketches,
                                     msPerDp = msPerDp,
                                     timelineWidth = timelineWidthDp,
                                     laneHeight = TRACK_LANE_HEIGHT,
@@ -756,6 +759,7 @@ private fun AudioTrackLane(
     track: TrackEntity,
     trackColor: Color,
     clips: List<AudioClipUiState>,
+    sketchClips: List<ExploreSketchUiState> = emptyList(),
     msPerDp: Float,
     timelineWidth: Dp,
     laneHeight: Dp,
@@ -785,6 +789,35 @@ private fun AudioTrackLane(
         if (clips.isEmpty()) {
             // Empty audio track placeholder
             Box(Modifier.fillMaxSize())
+        }
+
+        sketchClips.forEach { sketch ->
+            val offsetDp = (sketch.sectionStartMs / msPerDp).dp
+            val widthDp = (sketch.sectionDurationMs / msPerDp).dp
+            Row(
+                modifier = Modifier
+                    .offset(x = offsetDp)
+                    .width(widthDp)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(trackColor.copy(alpha = if (effectivelyMuted) 0.20f else 0.34f))
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "SKETCH",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f),
+                    maxLines = 1
+                )
+                Spacer(Modifier.weight(1f))
+                NjButton(
+                    text = "OPEN",
+                    onClick = { onAction(StudioAction.SelectSection(sketch.sectionId)) },
+                    textColor = NjAmber
+                )
+            }
         }
 
         clips.forEach { clip ->
@@ -2384,9 +2417,9 @@ private fun AddTrackRow(
         )
     }
 
-    // Compute the pixel width of the sliding content (3 buttons + gap)
+    // Compute the pixel width of the sliding content (type buttons + gap)
     val typeButtonWidthDp = TRACK_LANE_HEIGHT // Each button is square
-    val typeButtonCount = 3
+    val typeButtonCount = 4
     val trayGapDp = 10.dp // space between type buttons and + button
     val drawerWidthDp = typeButtonWidthDp * typeButtonCount + trayGapDp
     // Extra width extending off the left screen edge so the tray
@@ -2463,6 +2496,11 @@ private fun AddTrackRow(
                     icon = Icons.Filled.Mic,
                     label = "Audio",
                     onClick = { onAction(StudioAction.SelectNewTrackType(NewTrackType.AUDIO_RECORDING)) }
+                )
+                AddTrackTypeButton(
+                    icon = Icons.Filled.ContentCopy,
+                    label = "Import",
+                    onClick = { onAction(StudioAction.SelectNewTrackType(NewTrackType.IMPORT_AUDIO)) }
                 )
                 AddTrackTypeButton(
                     icon = Icons.Filled.Piano,

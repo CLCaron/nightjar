@@ -24,6 +24,7 @@ import androidx.room.PrimaryKey
  * @property trackType     Track type: "audio", "drum", or "midi".
  * @property audioFileName Filename of the audio file (WAV) in the recordings directory.
  *                         Null for drum and MIDI tracks.
+ * @property trackRole     Lightweight audio role label. V1 uses it for defaults and labels only.
  * @property displayName   User-visible label shown in the timeline header (e.g. "Track 1").
  * @property sortIndex     Vertical ordering in the timeline (0 = topmost).
  * @property offsetMs      Horizontal offset on the timeline.
@@ -52,6 +53,7 @@ data class TrackEntity(
     val ideaId: Long,
     val trackType: String = "audio",
     val audioFileName: String? = null,
+    val trackRole: String = TrackRole.RAW,
     val displayName: String,
     val sortIndex: Int,
     val offsetMs: Long = 0L,
@@ -67,4 +69,26 @@ data class TrackEntity(
     val isAudio: Boolean get() = trackType == "audio"
     val isDrum: Boolean get() = trackType == "drum"
     val isMidi: Boolean get() = trackType == "midi"
+}
+
+/** Lightweight audio-track roles used for labels/default names in v1. */
+object TrackRole {
+    const val RAW = "raw"
+    const val BACKING = "backing"
+    const val VOCAL = "vocal"
+    const val HARMONY = "harmony"
+    const val SAMPLE = "sample"
+
+    val all: List<String> = listOf(RAW, BACKING, VOCAL, HARMONY, SAMPLE)
+
+    fun normalize(role: String): String =
+        role.lowercase().takeIf { it in all } ?: RAW
+
+    fun label(role: String): String = when (normalize(role)) {
+        BACKING -> "Backing"
+        VOCAL -> "Vocal"
+        HARMONY -> "Harmony"
+        SAMPLE -> "Sample"
+        else -> "Raw"
+    }
 }

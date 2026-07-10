@@ -1,8 +1,10 @@
 package com.example.nightjar.ui.studio
 
+import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.nightjar.audio.AudioImporter
 import com.example.nightjar.audio.AudioLatencyEstimator
 import com.example.nightjar.audio.MetronomePreferences
 import com.example.nightjar.audio.MusicalTimeConverter
@@ -11,10 +13,13 @@ import com.example.nightjar.audio.OboeAudioEngine
 import com.example.nightjar.audio.SoundFontManager
 import com.example.nightjar.audio.WavSplitter
 import com.example.nightjar.data.db.entity.AudioClipEntity
+import com.example.nightjar.data.db.entity.ExploreSegmentStatus
 import com.example.nightjar.data.db.entity.MidiNoteEntity
 import com.example.nightjar.data.db.entity.TakeEntity
+import com.example.nightjar.data.db.entity.TrackRole
 import com.example.nightjar.data.events.PulseBus
 import com.example.nightjar.data.repository.DrumRepository
+import com.example.nightjar.data.repository.ExploreRepository
 import com.example.nightjar.data.repository.MidiRepository
 import com.example.nightjar.data.repository.StudioRepository
 import com.example.nightjar.data.repository.IdeaRepository
@@ -62,8 +67,10 @@ import javax.inject.Inject
 class StudioViewModel @Inject constructor(
     private val ideaRepo: IdeaRepository,
     private val studioRepo: StudioRepository,
+    private val exploreRepo: ExploreRepository,
     private val drumRepo: DrumRepository,
     private val midiRepo: MidiRepository,
+    private val audioImporter: AudioImporter,
     private val audioEngine: OboeAudioEngine,
     private val recordingStorage: RecordingStorage,
     private val latencyEstimator: AudioLatencyEstimator,
@@ -153,6 +160,12 @@ class StudioViewModel @Inject constructor(
     private var isFirstTrackRecording: Boolean = false
     // Auto-punch-out boundary (ms) -- recording stops when playhead reaches this
     private var autoPunchOutMs: Long? = null
+    private var pendingExploreRecording: PendingExploreRecording? = null
+
+    private sealed interface PendingExploreRecording {
+        data class FullSection(val sketchId: Long) : PendingExploreRecording
+        data class Region(val segmentId: Long) : PendingExploreRecording
+    }
 
     init {
         // Load persisted settings
@@ -236,10 +249,15 @@ class StudioViewModel @Inject constructor(
                 _state.update { it.copy(isAddTrackDrawerOpen = false) }
                 when (action.type) {
                     NewTrackType.AUDIO_RECORDING -> addEmptyAudioTrackAndArm()
+                    NewTrackType.IMPORT_AUDIO -> {
+                        viewModelScope.launch { _effects.emit(StudioEffect.RequestAudioImport) }
+                    }
                     NewTrackType.DRUM_SEQUENCER -> addDrumTrack()
                     NewTrackType.MIDI_INSTRUMENT -> addMidiTrack()
                 }
             }
+            is StudioAction.SetStudioMode -> setStudioMode(action.mode)
+            is StudioAction.ImportAudio -> importAudio(action.uri, action.trackRole)
             StudioAction.MicPermissionGranted -> startRecordingAfterPermission()
             StudioAction.StopOverdubRecording -> stopRecording()
             StudioAction.Play -> {
@@ -315,6 +333,21 @@ class StudioViewModel @Inject constructor(
             StudioAction.ToggleLoop -> toggleLoop()
             is StudioAction.UpdateLoopRegionStart -> updateLoopRegionStart(action.startMs)
             is StudioAction.UpdateLoopRegionEnd -> updateLoopRegionEnd(action.endMs)
+
+            // Explore sections
+            is StudioAction.SaveLoopAsSection -> saveLoopAsSection(action.name)
+            is StudioAction.SelectSection -> selectSection(action.sectionId)
+            is StudioAction.CreateExploreSketchForTrack -> createExploreSketchForTrack(action.trackId)
+            is StudioAction.CreateExploreTrack -> createExploreTrack(action.trackRole)
+            StudioAction.StartExploreCapture -> startExploreCapture()
+            is StudioAction.UpdateExploreRegion -> updateExploreRegion(action.startMs, action.endMs)
+            is StudioAction.MarkExploreRegion -> markExploreRegion(action.status)
+            StudioAction.StartExploreRegionRecording -> startExploreRegionRecording()
+            is StudioAction.SelectExploreSegment -> selectExploreSegment(action.segmentId)
+            is StudioAction.SelectExploreCandidate -> selectExploreCandidate(
+                action.segmentId,
+                action.candidateId
+            )
 
             // Latency setup
             StudioAction.ShowLatencySetup -> {
@@ -595,6 +628,8 @@ class StudioViewModel @Inject constructor(
                 // Load audio clips for all audio tracks
                 loadAudioClips(tracks)
 
+                loadExploreState(ideaId)
+
                 loadTracksIntoEngine(tracks)
 
                 // Load drum patterns for any drum tracks
@@ -622,18 +657,49 @@ class StudioViewModel @Inject constructor(
         }
     }
 
+    private fun importAudio(uri: Uri, trackRole: String) {
+        val ideaId = currentIdeaId ?: return
+        viewModelScope.launch {
+            _state.update { it.copy(isImportingAudio = true) }
+            try {
+                val imported = audioImporter.import(uri)
+                studioRepo.addImportedAudioTrack(
+                    ideaId = ideaId,
+                    audioFile = imported.file,
+                    durationMs = imported.durationMs,
+                    trackRole = TrackRole.normalize(trackRole),
+                    offsetMs = _state.value.cursorPositionMs
+                )
+                reloadAndPrepare()
+                _effects.emit(StudioEffect.ShowStatus("Imported ${imported.displayName}"))
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to import audio."))
+            } finally {
+                _state.update { it.copy(isImportingAudio = false) }
+            }
+        }
+    }
+
     /**
      * Load tracks into the native engine using clip-based audio arrangement.
      * For each audio track, loads the active take from each unmuted clip.
      * The engine sees flat track slots (one per clip) -- no C++ changes needed.
      */
-    private fun loadTracksIntoEngine(
+    private suspend fun loadTracksIntoEngine(
         tracks: List<com.example.nightjar.data.db.entity.TrackEntity>
     ) {
         audioEngine.removeAllTracks()
         val clipsMap = _state.value.audioClips
+        val anySoloed = _state.value.soloedTrackIds.isNotEmpty()
+        val effectiveTracks = tracks.map { track ->
+            if (track.id in _state.value.soloedTrackIds || !anySoloed) {
+                track
+            } else {
+                track.copy(isMuted = true)
+            }
+        }
 
-        for (track in tracks) {
+        for (track in effectiveTracks) {
             // Drum and MIDI tracks are handled by the synth engine
             if (!track.isAudio) continue
 
@@ -653,6 +719,22 @@ class StudioViewModel @Inject constructor(
                     isMuted = effectivelyMuted
                 )
             }
+        }
+
+        val ideaId = currentIdeaId ?: return
+        val sketchSlots = exploreRepo.getPlaybackSlotsForIdea(ideaId, effectiveTracks)
+        for (slot in sketchSlots) {
+            val file = getAudioFile(slot.audioFileName)
+            audioEngine.addTrack(
+                trackId = slot.playbackId,
+                filePath = file.absolutePath,
+                durationMs = slot.durationMs,
+                offsetMs = slot.offsetMs,
+                trimStartMs = slot.trimStartMs,
+                trimEndMs = slot.trimEndMs,
+                volume = slot.volume,
+                isMuted = slot.isMuted
+            )
         }
     }
 
@@ -683,6 +765,11 @@ class StudioViewModel @Inject constructor(
         val st = _state.value
         if (st.isRecording) {
             stopRecording()
+            return
+        }
+
+        if (st.studioMode == StudioMode.EXPLORE && st.selectedExploreSketchId != null) {
+            startExploreCapture()
             return
         }
 
@@ -857,6 +944,7 @@ class StudioViewModel @Inject constructor(
         val loopResets = loopResetTimestampsMs.toList()
         val armedId = recordingArmedTrackId
         val wasFirstTrack = isFirstTrackRecording
+        val exploreRecording = pendingExploreRecording
 
         // Reset recording state
         isLoopRecording = false
@@ -864,6 +952,7 @@ class StudioViewModel @Inject constructor(
         recordingArmedTrackId = null
         isFirstTrackRecording = false
         autoPunchOutMs = null
+        pendingExploreRecording = null
 
         _state.update {
             it.copy(
@@ -892,7 +981,15 @@ class StudioViewModel @Inject constructor(
 
         viewModelScope.launch {
             try {
-                if (wasFirstTrack) {
+                if (exploreRecording != null) {
+                    saveExploreRecording(
+                        target = exploreRecording,
+                        file = file,
+                        durationMs = durationMs,
+                        trimStartMs = safeTrimStartMs,
+                        loopResetTimestampsMs = loopResets
+                    )
+                } else if (wasFirstTrack) {
                     // Case 1: Create a new track with clip + take
                     studioRepo.addTrackWithClipAndTake(
                         ideaId = ideaId,
@@ -1475,7 +1572,7 @@ class StudioViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 studioRepo.setTrackMuted(trackId, muted)
-                reloadTracks()
+                reloadAndPrepare()
                 reapplyEffectiveMute()
             } catch (e: Exception) {
                 _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to update track."))
@@ -1492,7 +1589,10 @@ class StudioViewModel @Inject constructor(
             }
             st.copy(soloedTrackIds = newSet)
         }
-        reapplyEffectiveMute()
+        viewModelScope.launch {
+            reloadAndPrepare()
+            reapplyEffectiveMute()
+        }
     }
 
     private fun reapplyEffectiveMute() {
@@ -1545,7 +1645,7 @@ class StudioViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 studioRepo.setTrackVolume(trackId, clamped)
-                reloadTracks()
+                reloadAndPrepare()
             } catch (e: Exception) {
                 _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to update volume."))
             }
@@ -1646,6 +1746,388 @@ class StudioViewModel @Inject constructor(
         if (current.isLoopEnabled) {
             audioEngine.setLoopRegion(start, clamped)
         }
+    }
+
+    // ── Explore ─────────────────────────────────────────────────────────
+
+    private fun setStudioMode(mode: StudioMode) {
+        _state.update { it.copy(studioMode = mode) }
+        if (mode == StudioMode.EXPLORE) {
+            _state.value.selectedSection?.let { applySectionLoop(it.startMs, it.endMs) }
+        }
+    }
+
+    private fun saveLoopAsSection(name: String) {
+        val ideaId = currentIdeaId ?: return
+        val st = _state.value
+        val start = st.loopStartMs
+        val end = st.loopEndMs
+        if (start == null || end == null || end <= start) {
+            viewModelScope.launch {
+                _effects.emit(StudioEffect.ShowError("Set a loop region first."))
+            }
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                val sectionId = exploreRepo.createSectionFromLoop(
+                    ideaId = ideaId,
+                    displayName = name,
+                    startMs = start,
+                    endMs = end
+                )
+                loadExploreState(
+                    ideaId = ideaId,
+                    preferredSectionId = sectionId
+                )
+                _state.update { it.copy(studioMode = StudioMode.EXPLORE) }
+                _effects.emit(StudioEffect.ShowStatus("Section saved"))
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to save section."))
+            }
+        }
+    }
+
+    private fun selectSection(sectionId: Long) {
+        val ideaId = currentIdeaId ?: return
+        viewModelScope.launch {
+            try {
+                loadExploreState(ideaId = ideaId, preferredSectionId = sectionId)
+                val section = _state.value.selectedSection
+                if (section != null) {
+                    applySectionLoop(section.startMs, section.endMs)
+                    _state.update { it.copy(studioMode = StudioMode.EXPLORE) }
+                }
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to open section."))
+            }
+        }
+    }
+
+    private fun createExploreTrack(trackRole: String) {
+        val ideaId = currentIdeaId ?: return
+        val sectionId = _state.value.selectedSectionId ?: run {
+            viewModelScope.launch { _effects.emit(StudioEffect.ShowError("Choose a section first.")) }
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val trackId = studioRepo.addEmptyAudioTrack(ideaId, trackRole)
+                reloadAndPrepare()
+                val sketchId = exploreRepo.createSketchLane(sectionId, trackId)
+                loadExploreState(
+                    ideaId = ideaId,
+                    preferredSectionId = sectionId,
+                    preferredSketchId = sketchId
+                )
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to add Explore lane."))
+            }
+        }
+    }
+
+    private fun createExploreSketchForTrack(trackId: Long) {
+        val ideaId = currentIdeaId ?: return
+        val sectionId = _state.value.selectedSectionId ?: run {
+            viewModelScope.launch { _effects.emit(StudioEffect.ShowError("Choose a section first.")) }
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val sketchId = exploreRepo.createSketchLane(sectionId, trackId)
+                loadExploreState(
+                    ideaId = ideaId,
+                    preferredSectionId = sectionId,
+                    preferredSketchId = sketchId
+                )
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to create sketch."))
+            }
+        }
+    }
+
+    private fun updateExploreRegion(startMs: Long, endMs: Long) {
+        val section = _state.value.selectedSection ?: return
+        val snappedStart = if (_state.value.isSnapEnabled) snapIfEnabled(startMs) else startMs
+        val snappedEnd = if (_state.value.isSnapEnabled) snapIfEnabled(endMs) else endMs
+        val start = snappedStart.coerceIn(section.startMs, section.endMs)
+        val end = snappedEnd.coerceIn(section.startMs, section.endMs)
+        if (end <= start) return
+        _state.update {
+            it.copy(
+                exploreRegionStartMs = start,
+                exploreRegionEndMs = end
+            )
+        }
+    }
+
+    private suspend fun loadExploreState(
+        ideaId: Long,
+        preferredSectionId: Long? = null,
+        preferredSketchId: Long? = null,
+        preferredSegmentId: Long? = null
+    ) {
+        val sectionEntities = exploreRepo.getSections(ideaId)
+        val sketchEntities = exploreRepo.getSketches(ideaId)
+        val sectionsById = sectionEntities.associateBy { it.id }
+
+        val segmentsBySketch = mutableMapOf<Long, List<com.example.nightjar.data.db.entity.ExploreSegmentEntity>>()
+        val allSegments = mutableListOf<com.example.nightjar.data.db.entity.ExploreSegmentEntity>()
+        for (sketch in sketchEntities) {
+            val segments = exploreRepo.getSegmentsForSketch(sketch.id)
+            segmentsBySketch[sketch.id] = segments
+            allSegments += segments
+        }
+
+        val candidates = exploreRepo.getCandidatesForSegments(allSegments.map { it.id })
+        val candidatesBySegment = candidates.groupBy { it.segmentId }
+
+        val sectionUi = sectionEntities.map {
+            IdeaSectionUiState(
+                id = it.id,
+                displayName = it.displayName,
+                startMs = it.startMs,
+                endMs = it.endMs,
+                colorIndex = it.colorIndex
+            )
+        }
+
+        val sketchUi = sketchEntities.mapNotNull { sketch ->
+            val section = sectionsById[sketch.sectionId] ?: return@mapNotNull null
+            ExploreSketchUiState(
+                id = sketch.id,
+                ideaId = sketch.ideaId,
+                sectionId = sketch.sectionId,
+                trackId = sketch.trackId,
+                displayName = sketch.displayName,
+                sectionStartMs = section.startMs,
+                sectionEndMs = section.endMs,
+                segments = segmentsBySketch[sketch.id].orEmpty().map { segment ->
+                    ExploreSegmentUiState(
+                        id = segment.id,
+                        sketchId = segment.sketchId,
+                        startMs = segment.startMs,
+                        endMs = segment.endMs,
+                        status = segment.status,
+                        selectedCandidateId = segment.selectedCandidateId,
+                        candidates = candidatesBySegment[segment.id].orEmpty().map { candidate ->
+                            ExploreCandidateUiState(
+                                id = candidate.id,
+                                segmentId = candidate.segmentId,
+                                displayName = candidate.displayName,
+                                sourceStartMs = candidate.sourceStartMs,
+                                sourceEndMs = candidate.sourceEndMs,
+                                isSelected = segment.selectedCandidateId == candidate.id
+                            )
+                        }
+                    )
+                }
+            )
+        }
+
+        val previous = _state.value
+        val selectedSectionId = preferredSectionId
+            ?.takeIf { id -> sectionUi.any { it.id == id } }
+            ?: previous.selectedSectionId?.takeIf { id -> sectionUi.any { it.id == id } }
+            ?: sectionUi.firstOrNull()?.id
+
+        val sectionSketches = sketchUi.filter { it.sectionId == selectedSectionId }
+        val selectedSketchId = preferredSketchId
+            ?.takeIf { id -> sectionSketches.any { it.id == id } }
+            ?: previous.selectedExploreSketchId?.takeIf { id -> sectionSketches.any { it.id == id } }
+            ?: sectionSketches.firstOrNull()?.id
+
+        val selectedSketch = sketchUi.firstOrNull { it.id == selectedSketchId }
+        val selectedSegmentId = preferredSegmentId
+            ?.takeIf { id -> selectedSketch?.segments?.any { it.id == id } == true }
+            ?: previous.selectedExploreSegmentId
+                ?.takeIf { id -> selectedSketch?.segments?.any { it.id == id } == true }
+            ?: selectedSketch?.segments?.firstOrNull { it.isTry }?.id
+            ?: selectedSketch?.segments?.firstOrNull()?.id
+
+        val selectedSegment = selectedSketch?.segments?.firstOrNull { it.id == selectedSegmentId }
+        val selectedSection = sectionUi.firstOrNull { it.id == selectedSectionId }
+        val regionStart = selectedSegment?.startMs ?: selectedSection?.startMs
+        val regionEnd = selectedSegment?.endMs ?: selectedSection?.endMs
+
+        _state.update {
+            it.copy(
+                sections = sectionUi,
+                selectedSectionId = selectedSectionId,
+                exploreSketches = sketchUi,
+                selectedExploreSketchId = selectedSketchId,
+                selectedExploreSegmentId = selectedSegmentId,
+                exploreRegionStartMs = regionStart,
+                exploreRegionEndMs = regionEnd
+            )
+        }
+    }
+
+    private fun markExploreRegion(status: String) {
+        val ideaId = currentIdeaId ?: return
+        val sketchId = _state.value.selectedExploreSketchId ?: run {
+            viewModelScope.launch { _effects.emit(StudioEffect.ShowError("Create a sketch lane first.")) }
+            return
+        }
+        val start = _state.value.exploreRegionStartMs
+        val end = _state.value.exploreRegionEndMs
+        if (start == null || end == null || end <= start) {
+            viewModelScope.launch { _effects.emit(StudioEffect.ShowError("Choose a region first.")) }
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                val segmentId = exploreRepo.markRegion(sketchId, start, end, status)
+                loadExploreState(
+                    ideaId = ideaId,
+                    preferredSectionId = _state.value.selectedSectionId,
+                    preferredSketchId = sketchId,
+                    preferredSegmentId = segmentId
+                )
+                reloadAndPrepare()
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to mark region."))
+            }
+        }
+    }
+
+    private fun selectExploreSegment(segmentId: Long) {
+        val segment = _state.value.selectedExploreSketch
+            ?.segments
+            ?.firstOrNull { it.id == segmentId }
+            ?: return
+        _state.update {
+            it.copy(
+                selectedExploreSegmentId = segment.id,
+                exploreRegionStartMs = segment.startMs,
+                exploreRegionEndMs = segment.endMs
+            )
+        }
+    }
+
+    private fun selectExploreCandidate(segmentId: Long, candidateId: Long) {
+        val ideaId = currentIdeaId ?: return
+        viewModelScope.launch {
+            try {
+                exploreRepo.selectCandidate(segmentId, candidateId)
+                loadExploreState(
+                    ideaId = ideaId,
+                    preferredSectionId = _state.value.selectedSectionId,
+                    preferredSketchId = _state.value.selectedExploreSketchId,
+                    preferredSegmentId = segmentId
+                )
+                reloadAndPrepare()
+            } catch (e: Exception) {
+                _effects.emit(StudioEffect.ShowError(e.message ?: "Failed to select pass."))
+            }
+        }
+    }
+
+    private fun startExploreCapture() {
+        val sketch = _state.value.selectedExploreSketch ?: run {
+            viewModelScope.launch { _effects.emit(StudioEffect.ShowError("Create a sketch lane first.")) }
+            return
+        }
+        applySectionLoop(sketch.sectionStartMs, sketch.sectionEndMs)
+        setCursorPosition(sketch.sectionStartMs)
+        audioEngine.seekTo(sketch.sectionStartMs)
+        pendingExploreRecording = PendingExploreRecording.FullSection(sketch.id)
+        recordingArmedTrackId = sketch.trackId
+        isFirstTrackRecording = false
+        viewModelScope.launch { _effects.emit(StudioEffect.RequestMicPermission) }
+    }
+
+    private fun startExploreRegionRecording() {
+        val segment = _state.value.selectedExploreSegment ?: run {
+            viewModelScope.launch { _effects.emit(StudioEffect.ShowError("Mark a TRY region first.")) }
+            return
+        }
+        applySectionLoop(segment.startMs, segment.endMs)
+        setCursorPosition(segment.startMs)
+        audioEngine.seekTo(segment.startMs)
+        pendingExploreRecording = PendingExploreRecording.Region(segment.id)
+        recordingArmedTrackId = _state.value.selectedExploreSketch?.trackId
+        isFirstTrackRecording = false
+        viewModelScope.launch { _effects.emit(StudioEffect.RequestMicPermission) }
+    }
+
+    private suspend fun saveExploreRecording(
+        target: PendingExploreRecording,
+        file: File,
+        durationMs: Long,
+        trimStartMs: Long,
+        loopResetTimestampsMs: List<Long>
+    ) {
+        when (target) {
+            is PendingExploreRecording.FullSection -> {
+                val segmentId = exploreRepo.seedFullSectionCapture(
+                    sketchId = target.sketchId,
+                    audioFile = file,
+                    durationMs = durationMs,
+                    trimStartMs = trimStartMs
+                )
+                loadExploreState(
+                    ideaId = currentIdeaId ?: return,
+                    preferredSketchId = target.sketchId,
+                    preferredSegmentId = segmentId
+                )
+                _effects.emit(StudioEffect.ShowStatus("Scratch captured"))
+            }
+            is PendingExploreRecording.Region -> {
+                val outputDir = file.parentFile ?: return
+                val splitFiles = if (loopResetTimestampsMs.isNotEmpty()) {
+                    withContext(Dispatchers.IO) {
+                        WavSplitter.split(
+                            sourceFile = file,
+                            splitPointsMs = loopResetTimestampsMs,
+                            outputDir = outputDir,
+                            namePrefix = file.nameWithoutExtension + "_explore"
+                        )
+                    }
+                } else {
+                    emptyList()
+                }
+
+                val candidates = splitFiles.ifEmpty { listOf(file) }
+                for ((index, candidateFile) in candidates.withIndex()) {
+                    val candidateDuration = if (candidateFile == file) {
+                        durationMs
+                    } else {
+                        getFileDurationMs(candidateFile)
+                    }
+                    val candidateTrim = if (index == 0) trimStartMs else 0L
+                    exploreRepo.addCandidateForSegment(
+                        segmentId = target.segmentId,
+                        audioFile = candidateFile,
+                        durationMs = candidateDuration,
+                        trimStartMs = candidateTrim,
+                        select = true
+                    )
+                }
+                if (splitFiles.isNotEmpty()) {
+                    withContext(Dispatchers.IO) { file.delete() }
+                }
+                loadExploreState(
+                    ideaId = currentIdeaId ?: return,
+                    preferredSegmentId = target.segmentId
+                )
+                _effects.emit(StudioEffect.ShowStatus("Pass captured"))
+            }
+        }
+    }
+
+    private fun applySectionLoop(startMs: Long, endMs: Long) {
+        _state.update {
+            it.copy(
+                loopStartMs = startMs,
+                loopEndMs = endMs,
+                isLoopEnabled = true,
+                cursorPositionMs = startMs
+            )
+        }
+        audioEngine.setLoopRegion(startMs, endMs)
     }
 
     // ── Drum sequencer ─────────────────────────────────────────────────
@@ -2805,6 +3287,7 @@ class StudioViewModel @Inject constructor(
         val tracks = studioRepo.getTracks(ideaId)
         _state.update { it.copy(tracks = tracks) }
         loadAudioClips(tracks)
+        loadExploreState(ideaId)
         loadTracksIntoEngine(tracks)
 
         // Clamp loop region if total duration changed

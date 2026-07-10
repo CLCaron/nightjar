@@ -13,6 +13,7 @@ import com.example.nightjar.data.db.entity.IdeaEntity
 import com.example.nightjar.data.db.entity.TagEntity
 import com.example.nightjar.data.db.entity.TakeEntity
 import com.example.nightjar.data.db.entity.TrackEntity
+import com.example.nightjar.data.db.entity.TrackRole
 import com.example.nightjar.data.storage.RecordingStorage
 import kotlinx.coroutines.flow.Flow
 import java.io.File
@@ -50,8 +51,13 @@ class IdeaRepository(
      * stays populated so the composite waveform extractor (which reads it
      * directly) can render thumbnails.
      */
-    suspend fun createIdeaWithTrack(audioFile: File, durationMs: Long): Long {
+    suspend fun createIdeaWithTrack(
+        audioFile: File,
+        durationMs: Long,
+        trackRole: String = TrackRole.RAW
+    ): Long {
         val title = defaultTitle()
+        val role = TrackRole.normalize(trackRole)
         return database.withTransaction {
             val idea = IdeaEntity(
                 title = title,
@@ -62,7 +68,8 @@ class IdeaRepository(
             val track = TrackEntity(
                 ideaId = ideaId,
                 audioFileName = audioFile.name,
-                displayName = "Track 1",
+                trackRole = role,
+                displayName = if (role == TrackRole.RAW) "Track 1" else "${TrackRole.label(role)} 1",
                 sortIndex = 0,
                 durationMs = durationMs
             )

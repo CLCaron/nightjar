@@ -1,8 +1,10 @@
 package com.example.nightjar.ui.studio
 
 import com.example.nightjar.audio.AudioLatencyEstimator
+import com.example.nightjar.data.db.entity.TrackRole
 import com.example.nightjar.ui.components.NjButton
 import android.Manifest
+import android.net.Uri
 import android.content.pm.PackageManager
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -22,12 +24,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -91,6 +95,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.flow.collectLatest
+import kotlin.math.roundToLong
 
 /**
  * Studio screen — multi-track DAW-like workspace.
@@ -266,6 +271,14 @@ fun StudioScreen(
         }
     }
 
+    var pendingImportUri by remember { mutableStateOf<Uri?>(null) }
+    var showSectionNameDialog by remember { mutableStateOf(false) }
+    val audioImportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) pendingImportUri = uri
+    }
+
     // Intercept system back so empty-idea cleanup runs via the ViewModel.
     BackHandler { vm.onAction(StudioAction.NavigateBack) }
 
@@ -285,6 +298,11 @@ fun StudioScreen(
                     } else {
                         permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                     }
+                }
+                is StudioEffect.RequestAudioImport -> {
+                    audioImportLauncher.launch(
+                        arrayOf("audio/wav", "audio/x-wav", "audio/*")
+                    )
                 }
                 is StudioEffect.NavigateToPianoRoll -> {
                     onOpenPianoRoll(effect.trackId, effect.clipId)
@@ -369,6 +387,19 @@ fun StudioScreen(
                     }
                 )
 
+                StudioModeSelector(
+                    mode = state.studioMode,
+                    onAction = vm::onAction
+                )
+
+                if (state.studioMode == StudioMode.EXPLORE) {
+                    ExplorePanel(
+                        state = state,
+                        onAction = vm::onAction,
+                        onSaveSection = { showSectionNameDialog = true }
+                    )
+                }
+
                 androidx.compose.runtime.CompositionLocalProvider(
                     LocalAudioClipLinkage provides state.audioClipLinkage,
                     LocalMidiClipLinkage provides state.midiClipLinkage,
@@ -404,6 +435,7 @@ fun StudioScreen(
                     soloedTrackIds = state.soloedTrackIds,
                     armedTrackId = state.armedTrackId,
                     audioClips = state.audioClips,
+                    exploreSketches = state.exploreSketches,
                     expandedAudioClipId = state.expandedAudioClipId,
                     audioClipDragState = state.audioClipDragState,
                     audioClipTrimState = state.audioClipTrimState,
@@ -555,6 +587,28 @@ fun StudioScreen(
         )
     }
 
+    if (showSectionNameDialog) {
+        RenameDialog(
+            title = "Save section",
+            currentName = "Chorus",
+            onConfirm = { name ->
+                showSectionNameDialog = false
+                vm.onAction(StudioAction.SaveLoopAsSection(name))
+            },
+            onDismiss = { showSectionNameDialog = false }
+        )
+    }
+
+    pendingImportUri?.let { uri ->
+        AudioImportRoleDialog(
+            onRoleSelected = { role ->
+                pendingImportUri = null
+                vm.onAction(StudioAction.ImportAudio(uri, role))
+            },
+            onDismiss = { pendingImportUri = null }
+        )
+    }
+
     if (state.showLatencySetupDialog) {
         LatencySetupDialog(
             diagnostics = state.latencyDiagnostics,
@@ -631,6 +685,373 @@ fun StudioScreen(
         )
     }
 }
+
+@Composable
+private fun StudioModeSelector(
+    mode: StudioMode,
+    onAction: (StudioAction) -> Unit
+) {
+    NjRecessedPanel(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            NjButton(
+                text = "ARRANGE",
+                onClick = { onAction(StudioAction.SetStudioMode(StudioMode.ARRANGE)) },
+                isActive = mode == StudioMode.ARRANGE,
+                ledColor = NjCursorTeal,
+                modifier = Modifier.weight(1f)
+            )
+            NjButton(
+                text = "EXPLORE",
+                onClick = { onAction(StudioAction.SetStudioMode(StudioMode.EXPLORE)) },
+                isActive = mode == StudioMode.EXPLORE,
+                ledColor = NjAmber,
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun ExplorePanel(
+    state: StudioUiState,
+    onAction: (StudioAction) -> Unit,
+    onSaveSection: () -> Unit
+) {
+    NjRecessedPanel(modifier = Modifier.fillMaxWidth()) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            ExploreSectionStrip(
+                state = state,
+                onAction = onAction,
+                onSaveSection = onSaveSection
+            )
+
+            val section = state.selectedSection
+            if (section == null) {
+                Text(
+                    text = "Set a loop and save it as a section.",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = NjMuted
+                )
+                return@Column
+            }
+
+            ExploreLaneChooser(state = state, onAction = onAction)
+
+            val sketch = state.selectedExploreSketch
+            if (sketch == null) {
+                Text(
+                    text = "Choose or create a sketch lane.",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = NjMuted
+                )
+                return@Column
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = sketch.displayName,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.86f),
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                NjButton(
+                    text = if (state.isRecording) "STOP" else "CAPTURE",
+                    onClick = {
+                        if (state.isRecording) onAction(StudioAction.StopRecording)
+                        else onAction(StudioAction.StartExploreCapture)
+                    },
+                    isActive = state.isRecording,
+                    ledColor = NjRecordCoral
+                )
+            }
+
+            ExploreRegionSlider(state = state, onAction = onAction)
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                NjButton(
+                    text = "KEEP",
+                    icon = Icons.Filled.Check,
+                    onClick = {
+                        onAction(StudioAction.MarkExploreRegion(ExploreSegmentStatusKeep))
+                    },
+                    textColor = NjLedGreen,
+                    modifier = Modifier.weight(1f)
+                )
+                NjButton(
+                    text = "TRY",
+                    onClick = {
+                        onAction(StudioAction.MarkExploreRegion(ExploreSegmentStatusTry))
+                    },
+                    textColor = NjAmber,
+                    modifier = Modifier.weight(1f)
+                )
+                NjButton(
+                    text = "EXPLORE",
+                    icon = Icons.Filled.FiberManualRecord,
+                    onClick = {
+                        if (state.isRecording) onAction(StudioAction.StopRecording)
+                        else onAction(StudioAction.StartExploreRegionRecording)
+                    },
+                    isActive = state.isRecording,
+                    ledColor = NjRecordCoral,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            ExploreSegmentList(
+                sketch = sketch,
+                selectedSegmentId = state.selectedExploreSegmentId,
+                onAction = onAction
+            )
+        }
+    }
+}
+
+@Composable
+private fun ExploreSectionStrip(
+    state: StudioUiState,
+    onAction: (StudioAction) -> Unit,
+    onSaveSection: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        NjButton(
+            text = "SAVE SECTION",
+            onClick = onSaveSection,
+            isActive = state.hasLoopRegion,
+            ledColor = NjAmber
+        )
+        state.sections.forEach { section ->
+            NjButton(
+                text = section.displayName.uppercase(),
+                onClick = { onAction(StudioAction.SelectSection(section.id)) },
+                isActive = section.id == state.selectedSectionId,
+                ledColor = NjCursorTeal
+            )
+        }
+    }
+}
+
+@Composable
+private fun ExploreLaneChooser(
+    state: StudioUiState,
+    onAction: (StudioAction) -> Unit
+) {
+    val selectedSketchId = state.selectedExploreSketchId
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            NjButton(
+                text = "VOCAL",
+                onClick = { onAction(StudioAction.CreateExploreTrack(TrackRole.VOCAL)) },
+                textColor = NjRecordCoral
+            )
+            NjButton(
+                text = "HARMONY",
+                onClick = { onAction(StudioAction.CreateExploreTrack(TrackRole.HARMONY)) },
+                textColor = NjLedGreen
+            )
+            state.exploreSketches
+                .filter { it.sectionId == state.selectedSectionId }
+                .forEach { sketch ->
+                    NjButton(
+                        text = sketch.displayName.uppercase(),
+                        onClick = { onAction(StudioAction.CreateExploreSketchForTrack(sketch.trackId)) },
+                        isActive = sketch.id == selectedSketchId,
+                        ledColor = NjAmber
+                    )
+                }
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            state.tracks
+                .filter { it.isAudio }
+                .forEach { track ->
+                    NjButton(
+                        text = track.displayName.uppercase(),
+                        onClick = { onAction(StudioAction.CreateExploreSketchForTrack(track.id)) },
+                        isActive = state.selectedExploreSketch?.trackId == track.id,
+                        ledColor = NjCursorTeal
+                    )
+                }
+        }
+    }
+}
+
+@Composable
+private fun ExploreRegionSlider(
+    state: StudioUiState,
+    onAction: (StudioAction) -> Unit
+) {
+    val section = state.selectedSection ?: return
+    val start = (state.exploreRegionStartMs ?: section.startMs)
+        .coerceIn(section.startMs, section.endMs)
+    val end = (state.exploreRegionEndMs ?: section.endMs)
+        .coerceIn(section.startMs, section.endMs)
+        .coerceAtLeast(start + 1L)
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = formatExploreTime(start),
+                style = MaterialTheme.typography.labelSmall,
+                color = NjMuted2
+            )
+            Text(
+                text = formatExploreTime(end),
+                style = MaterialTheme.typography.labelSmall,
+                color = NjMuted2
+            )
+        }
+        RangeSlider(
+            value = start.toFloat()..end.toFloat(),
+            onValueChange = { range ->
+                onAction(
+                    StudioAction.UpdateExploreRegion(
+                        range.start.roundToLong(),
+                        range.endInclusive.roundToLong()
+                    )
+                )
+            },
+            valueRange = section.startMs.toFloat()..section.endMs.toFloat(),
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+private fun ExploreSegmentList(
+    sketch: ExploreSketchUiState,
+    selectedSegmentId: Long?,
+    onAction: (StudioAction) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        sketch.segments.forEach { segment ->
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    NjButton(
+                        text = if (segment.isTry) "TRY" else "KEEP",
+                        onClick = { onAction(StudioAction.SelectExploreSegment(segment.id)) },
+                        isActive = segment.id == selectedSegmentId,
+                        ledColor = if (segment.isTry) NjAmber else NjLedGreen
+                    )
+                    Text(
+                        text = "${formatExploreTime(segment.startMs)} - ${formatExploreTime(segment.endMs)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                if (segment.candidates.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        segment.candidates.forEach { candidate ->
+                            NjButton(
+                                text = candidate.displayName.uppercase(),
+                                onClick = {
+                                    onAction(
+                                        StudioAction.SelectExploreCandidate(
+                                            segment.id,
+                                            candidate.id
+                                        )
+                                    )
+                                },
+                                isActive = candidate.isSelected,
+                                ledColor = NjCursorTeal
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AudioImportRoleDialog(
+    onRoleSelected: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add audio as...") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(
+                    TrackRole.BACKING,
+                    TrackRole.VOCAL,
+                    TrackRole.HARMONY,
+                    TrackRole.SAMPLE,
+                    TrackRole.RAW
+                ).forEach { role ->
+                    NjButton(
+                        text = TrackRole.label(role).uppercase(),
+                        onClick = { onRoleSelected(role) },
+                        modifier = Modifier.fillMaxWidth(),
+                        ledColor = NjAmber
+                    )
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+private fun formatExploreTime(ms: Long): String {
+    val totalSeconds = ms / 1000L
+    val minutes = totalSeconds / 60L
+    val seconds = totalSeconds % 60L
+    val tenths = (ms % 1000L) / 100L
+    return "%d:%02d.%d".format(minutes, seconds, tenths)
+}
+
+private const val ExploreSegmentStatusKeep = "keep"
+private const val ExploreSegmentStatusTry = "try"
 
 @Composable
 private fun TransportAndControls(

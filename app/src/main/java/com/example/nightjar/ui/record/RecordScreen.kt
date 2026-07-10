@@ -59,6 +59,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
@@ -145,6 +146,12 @@ fun RecordScreen(
         hasMicPermission = granted
     }
 
+    val audioImportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) vm.onAction(RecordAction.ImportAudio(uri))
+    }
+
     LaunchedEffect(Unit) {
         vm.effects.collectLatest { effect ->
             when (effect) {
@@ -154,6 +161,11 @@ fun RecordScreen(
                     snackbarHostState.showSnackbar(
                         message = effect.message,
                         withDismissAction = true
+                    )
+                }
+                is RecordEffect.RequestAudioImport -> {
+                    audioImportLauncher.launch(
+                        arrayOf("audio/wav", "audio/x-wav", "audio/*")
                     )
                 }
             }
@@ -210,18 +222,28 @@ fun RecordScreen(
                         ledColor = NjRecordCoral,
                         modifier = Modifier.heightIn(min = 48.dp)
                     )
+
+                    Spacer(Modifier.height(10.dp))
+
+                    NjButton(
+                        text = "Import Audio",
+                        onClick = { vm.onAction(RecordAction.RequestAudioImport) },
+                        textColor = NjRecordCoral,
+                        modifier = Modifier.heightIn(min = 48.dp)
+                    )
                 }
             } else {
                 val postRecording = state.postRecording
                 val isSaving = !state.isRecording && postRecording == null &&
                     state.liveAmplitudes.isNotEmpty()
-                val isBusy = state.isRecording || isSaving
+                val isBusy = state.isRecording || isSaving || state.isImportingAudio
                 val waveformColor = NjTrackColors[0].copy(alpha = 0.65f)
                 val writeSunk = isBusy || postRecording != null
 
                 val lcdText = when {
                     state.isCountingIn -> "COUNT IN"
                     state.isRecording -> "RECORDING"
+                    state.isImportingAudio -> "IMPORT"
                     isSaving -> "SAVING"
                     postRecording != null -> "SAVED"
                     else -> "RECORD"
@@ -242,6 +264,7 @@ fun RecordScreen(
                         },
                         onGoToOverview = { vm.onAction(RecordAction.GoToOverview) },
                         onWrite = { vm.onAction(RecordAction.CreateWriteIdea) },
+                        onImport = { vm.onAction(RecordAction.RequestAudioImport) },
                         onStudio = {
                             if (postRecording != null) vm.onAction(RecordAction.GoToStudio)
                             else vm.onAction(RecordAction.CreateStudioIdea)
@@ -267,6 +290,7 @@ fun RecordScreen(
                         },
                         onGoToOverview = { vm.onAction(RecordAction.GoToOverview) },
                         onWrite = { vm.onAction(RecordAction.CreateWriteIdea) },
+                        onImport = { vm.onAction(RecordAction.RequestAudioImport) },
                         onStudio = {
                             if (postRecording != null) vm.onAction(RecordAction.GoToStudio)
                             else vm.onAction(RecordAction.CreateStudioIdea)
@@ -345,6 +369,7 @@ private fun PortraitRecordLayout(
     onRecord: () -> Unit,
     onGoToOverview: () -> Unit,
     onWrite: () -> Unit,
+    onImport: () -> Unit,
     onStudio: () -> Unit,
     onLibrary: () -> Unit,
     onSettings: () -> Unit,
@@ -437,6 +462,14 @@ private fun PortraitRecordLayout(
                         modifier = Modifier.weight(1f)
                     )
                     FeatureButton(
+                        icon = Icons.Filled.ContentCopy,
+                        label = "Import",
+                        accentColor = NjRecordCoral,
+                        onClick = onImport,
+                        enabled = !isBusy,
+                        modifier = Modifier.weight(1f)
+                    )
+                    FeatureButton(
                         icon = Icons.Filled.Tune,
                         label = "Studio",
                         accentColor = NjAmber,
@@ -495,6 +528,7 @@ private fun LandscapeRecordLayout(
     onRecord: () -> Unit,
     onGoToOverview: () -> Unit,
     onWrite: () -> Unit,
+    onImport: () -> Unit,
     onStudio: () -> Unit,
     onLibrary: () -> Unit,
     onSettings: () -> Unit,
@@ -570,6 +604,15 @@ private fun LandscapeRecordLayout(
                         accentColor = NjStarlight,
                         onClick = onWrite,
                         enabled = !writeSunk,
+                        minHeight = 68.dp,
+                        modifier = Modifier.weight(1f)
+                    )
+                    FeatureButton(
+                        icon = Icons.Filled.ContentCopy,
+                        label = "Import",
+                        accentColor = NjRecordCoral,
+                        onClick = onImport,
+                        enabled = !isBusy,
                         minHeight = 68.dp,
                         modifier = Modifier.weight(1f)
                     )

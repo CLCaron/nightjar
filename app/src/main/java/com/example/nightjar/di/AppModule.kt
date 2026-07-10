@@ -1,9 +1,11 @@
 package com.example.nightjar.di
 
 import android.content.Context
+import com.example.nightjar.audio.AudioImporter
 import com.example.nightjar.data.db.NightjarDatabase
 import com.example.nightjar.data.db.dao.AudioClipDao
 import com.example.nightjar.data.db.dao.DrumPatternDao
+import com.example.nightjar.data.db.dao.ExploreDao
 import com.example.nightjar.data.db.dao.IdeaDao
 import com.example.nightjar.data.db.dao.MidiClipDao
 import com.example.nightjar.data.db.dao.MidiNoteDao
@@ -12,6 +14,7 @@ import com.example.nightjar.data.db.dao.TakeDao
 import com.example.nightjar.data.db.dao.TrackDao
 import com.example.nightjar.data.events.PulseBus
 import com.example.nightjar.data.repository.DrumRepository
+import com.example.nightjar.data.repository.ExploreRepository
 import com.example.nightjar.data.repository.MidiRepository
 import com.example.nightjar.data.repository.StudioRepository
 import com.example.nightjar.data.repository.IdeaRepository
@@ -67,6 +70,16 @@ abstract class AppModule {
         fun provideAudioClipDao(db: NightjarDatabase): AudioClipDao = db.audioClipDao()
 
         @Provides
+        fun provideExploreDao(db: NightjarDatabase): ExploreDao = db.exploreDao()
+
+        @Provides
+        @Singleton
+        fun provideAudioImporter(
+            @ApplicationContext context: Context,
+            storage: RecordingStorage
+        ): AudioImporter = AudioImporter(context, storage)
+
+        @Provides
         @Singleton
         fun provideStudioRepository(
             trackDao: TrackDao,
@@ -77,6 +90,19 @@ abstract class AppModule {
             pulseBus: PulseBus
         ): StudioRepository = StudioRepository(
             trackDao, audioClipDao, takeDao, storage, database, pulseBus
+        )
+
+        @Provides
+        @Singleton
+        fun provideExploreRepository(
+            exploreDao: ExploreDao,
+            trackDao: TrackDao,
+            audioClipDao: AudioClipDao,
+            takeDao: TakeDao,
+            storage: RecordingStorage,
+            database: NightjarDatabase
+        ): ExploreRepository = ExploreRepository(
+            exploreDao, trackDao, audioClipDao, takeDao, storage, database
         )
 
         @Provides

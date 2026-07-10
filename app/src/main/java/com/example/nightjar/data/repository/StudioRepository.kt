@@ -9,6 +9,7 @@ import com.example.nightjar.data.db.dao.TrackDao
 import com.example.nightjar.data.db.entity.AudioClipEntity
 import com.example.nightjar.data.db.entity.TakeEntity
 import com.example.nightjar.data.db.entity.TrackEntity
+import com.example.nightjar.data.db.entity.TrackRole
 import com.example.nightjar.data.events.PulseBus
 import com.example.nightjar.data.storage.RecordingStorage
 import com.example.nightjar.ui.studio.ClipLinkage
@@ -104,13 +105,16 @@ class StudioRepository(
         audioFile: File,
         durationMs: Long,
         offsetMs: Long = 0L,
-        trimStartMs: Long = 0L
+        trimStartMs: Long = 0L,
+        trackRole: String = TrackRole.RAW
     ): Long {
         val nextIndex = trackDao.getTrackCount(ideaId)
+        val role = TrackRole.normalize(trackRole)
         val track = TrackEntity(
             ideaId = ideaId,
             audioFileName = audioFile.name,
-            displayName = "Track ${nextIndex + 1}",
+            trackRole = role,
+            displayName = defaultAudioTrackName(role, nextIndex),
             sortIndex = nextIndex,
             durationMs = durationMs,
             offsetMs = offsetMs,
@@ -171,18 +175,39 @@ class StudioRepository(
      * fills by arming and tapping Record. Mirrors the empty-container pattern
      * used by [addDrumTrack] and [addMidiTrack].
      */
-    suspend fun addEmptyAudioTrack(ideaId: Long): Long {
+    suspend fun addEmptyAudioTrack(
+        ideaId: Long,
+        trackRole: String = TrackRole.RAW
+    ): Long {
         val nextIndex = trackDao.getTrackCount(ideaId)
+        val role = TrackRole.normalize(trackRole)
         val track = TrackEntity(
             ideaId = ideaId,
             trackType = "audio",
             audioFileName = null,
-            displayName = "Track ${nextIndex + 1}",
+            trackRole = role,
+            displayName = defaultAudioTrackName(role, nextIndex),
             sortIndex = nextIndex,
             durationMs = 0L
         )
         return trackDao.insertTrack(track)
     }
+
+    /** Import audio into the current idea as a normal audio track/clip/take. */
+    suspend fun addImportedAudioTrack(
+        ideaId: Long,
+        audioFile: File,
+        durationMs: Long,
+        trackRole: String,
+        offsetMs: Long = 0L
+    ): Long = addTrack(
+        ideaId = ideaId,
+        audioFile = audioFile,
+        durationMs = durationMs,
+        offsetMs = offsetMs,
+        trimStartMs = 0L,
+        trackRole = trackRole
+    )
 
     /** Create a new drum track for the given idea. Returns the track ID. */
     suspend fun addDrumTrack(ideaId: Long): Long {
@@ -232,6 +257,10 @@ class StudioRepository(
 
     suspend fun setTrackVolume(trackId: Long, volume: Float) {
         trackDao.updateVolume(trackId, volume)
+    }
+
+    suspend fun setTrackRole(trackId: Long, role: String) {
+        trackDao.updateRole(trackId, TrackRole.normalize(role))
     }
 
     // ── Reads ────────────────────────────────────────────────────────────
@@ -710,6 +739,17 @@ class StudioRepository(
             0L
         } finally {
             retriever.release()
+        }
+    }
+
+    private fun defaultAudioTrackName(role: String, index: Int): String {
+        val suffix = index + 1
+        return when (TrackRole.normalize(role)) {
+            TrackRole.BACKING -> "Backing $suffix"
+            TrackRole.VOCAL -> "Vocal $suffix"
+            TrackRole.HARMONY -> "Harmony $suffix"
+            TrackRole.SAMPLE -> "Sample $suffix"
+            else -> "Track $suffix"
         }
     }
 }

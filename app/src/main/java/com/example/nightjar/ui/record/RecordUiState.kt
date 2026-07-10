@@ -1,5 +1,6 @@
 package com.example.nightjar.ui.record
 
+import android.net.Uri
 import java.io.File
 
 /** Snapshot of a just-captured recording, held until the user navigates away. */
@@ -20,7 +21,8 @@ data class RecordUiState(
     val countInBars: Int = 0,
     val isCountingIn: Boolean = false,
     val lastBeatFrame: Long = -1L,
-    val isMetronomeSettingsOpen: Boolean = false
+    val isMetronomeSettingsOpen: Boolean = false,
+    val isImportingAudio: Boolean = false
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -35,7 +37,8 @@ data class RecordUiState(
                 countInBars == other.countInBars &&
                 isCountingIn == other.isCountingIn &&
                 lastBeatFrame == other.lastBeatFrame &&
-                isMetronomeSettingsOpen == other.isMetronomeSettingsOpen
+                isMetronomeSettingsOpen == other.isMetronomeSettingsOpen &&
+                isImportingAudio == other.isImportingAudio
     }
 
     override fun hashCode(): Int {
@@ -50,6 +53,7 @@ data class RecordUiState(
         result = 31 * result + isCountingIn.hashCode()
         result = 31 * result + lastBeatFrame.hashCode()
         result = 31 * result + isMetronomeSettingsOpen.hashCode()
+        result = 31 * result + isImportingAudio.hashCode()
         return result
     }
 }
@@ -68,6 +72,8 @@ sealed interface RecordAction {
     data object CreateWriteIdea : RecordAction
     /** Create an empty idea and open Studio directly. */
     data object CreateStudioIdea : RecordAction
+    data object RequestAudioImport : RecordAction
+    data class ImportAudio(val uri: Uri) : RecordAction
     /** Toggle metronome on/off. */
     data object ToggleMetronome : RecordAction
     /** Set metronome volume (0.0-1.0). */
@@ -87,4 +93,5 @@ sealed interface RecordEffect {
     data class OpenOverview(val ideaId: Long) : RecordEffect
     data class OpenStudio(val ideaId: Long) : RecordEffect
     data class ShowError(val message: String) : RecordEffect
+    data object RequestAudioImport : RecordEffect
 }

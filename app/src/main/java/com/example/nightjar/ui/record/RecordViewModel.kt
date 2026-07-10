@@ -2,6 +2,7 @@ package com.example.nightjar.ui.record
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.nightjar.audio.AudioImporter
 import com.example.nightjar.audio.MetronomePreferences
 import com.example.nightjar.audio.OboeAudioEngine
 import com.example.nightjar.audio.SoundFontManager
@@ -32,6 +33,7 @@ import kotlin.coroutines.cancellation.CancellationException
 @HiltViewModel
 class RecordViewModel @Inject constructor(
     private val audioEngine: OboeAudioEngine,
+    private val audioImporter: AudioImporter,
     private val recordingStorage: RecordingStorage,
     private val repo: IdeaRepository,
     private val metronomePrefs: MetronomePreferences,
@@ -73,6 +75,10 @@ class RecordViewModel @Inject constructor(
             RecordAction.GoToStudio -> goToStudio()
             RecordAction.CreateWriteIdea -> createWriteIdea()
             RecordAction.CreateStudioIdea -> createStudioIdea()
+            RecordAction.RequestAudioImport -> {
+                viewModelScope.launch { _effects.emit(RecordEffect.RequestAudioImport) }
+            }
+            is RecordAction.ImportAudio -> importAudio(action.uri)
             RecordAction.ToggleMetronome -> toggleMetronome()
             is RecordAction.SetMetronomeVolume -> setMetronomeVolume(action.volume)
             is RecordAction.SetMetronomeBpm -> setMetronomeBpm(action.bpm)
@@ -314,6 +320,28 @@ class RecordViewModel @Inject constructor(
     }
 
     // ── Metronome ─────────────────────────────────────────────────────────
+
+    private fun importAudio(uri: android.net.Uri) {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(isImportingAudio = true, errorMessage = null)
+            try {
+                val imported = audioImporter.import(uri)
+                val ideaId = repo.createIdeaWithTrack(imported.file, imported.durationMs)
+                _state.value = _state.value.copy(
+                    isImportingAudio = false,
+                    liveAmplitudes = FloatArray(0),
+                    postRecording = PostRecordingState(
+                        ideaId = ideaId,
+                        audioFile = imported.file
+                    )
+                )
+            } catch (e: Exception) {
+                val msg = e.message ?: "Failed to import audio."
+                _state.value = _state.value.copy(isImportingAudio = false, errorMessage = msg)
+                _effects.emit(RecordEffect.ShowError(msg))
+            }
+        }
+    }
 
     private fun toggleMetronome() {
         val newEnabled = !_state.value.isMetronomeEnabled
