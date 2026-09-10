@@ -10,7 +10,9 @@ data class PostRecordingState(
 
 /** UI state for the Record screen. */
 data class RecordUiState(
+    val capture: com.example.nightjar.audio.CaptureState = com.example.nightjar.audio.CaptureState(),
     val isRecording: Boolean = false,
+    val isSaving: Boolean = false,
     val liveAmplitudes: FloatArray = FloatArray(0),
     val postRecording: PostRecordingState? = null,
     val errorMessage: String? = null,
@@ -25,7 +27,8 @@ data class RecordUiState(
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is RecordUiState) return false
-        return isRecording == other.isRecording &&
+        return capture == other.capture && isRecording == other.isRecording &&
+                isSaving == other.isSaving &&
                 liveAmplitudes.contentEquals(other.liveAmplitudes) &&
                 postRecording == other.postRecording &&
                 errorMessage == other.errorMessage &&
@@ -39,7 +42,8 @@ data class RecordUiState(
     }
 
     override fun hashCode(): Int {
-        var result = isRecording.hashCode()
+        var result = 31 * capture.hashCode() + isRecording.hashCode()
+        result = 31 * result + isSaving.hashCode()
         result = 31 * result + liveAmplitudes.contentHashCode()
         result = 31 * result + (postRecording?.hashCode() ?: 0)
         result = 31 * result + (errorMessage?.hashCode() ?: 0)
@@ -56,10 +60,12 @@ data class RecordUiState(
 
 /** User-initiated actions on the Record screen. */
 sealed interface RecordAction {
+    data object NewIdea : RecordAction
+    data object PlayTake : RecordAction
+    data object LeaveScreen : RecordAction
+    data class SelectTake(val id: Long) : RecordAction
     data object StartRecording : RecordAction
     data object StopAndSave : RecordAction
-    /** Gracefully save if the app is backgrounded mid-recording. */
-    data object StopForBackground : RecordAction
     /** Navigate to Overview for the captured idea. */
     data object GoToOverview : RecordAction
     /** Navigate to Studio for the captured idea. */

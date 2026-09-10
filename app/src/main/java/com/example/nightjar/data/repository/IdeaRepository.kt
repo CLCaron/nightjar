@@ -19,6 +19,10 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.example.nightjar.audio.CaptureAudio
+
+data class CaptureGroup(val ideaId: Long, val clipId: Long)
+data class SavedCaptureBatch(val group: CaptureGroup, val takes: List<TakeEntity>)
 
 /**
  * Central repository for idea lifecycle operations.
@@ -38,6 +42,35 @@ class IdeaRepository(
 ) {
 
     // ── Record ──────────────────────────────────────────────────────────
+
+    /** One atomic batch; subsequent intervals append without changing the chosen take. */
+    suspend fun saveCaptureBatch(group: CaptureGroup?, audio: List<CaptureAudio>): SavedCaptureBatch {
+        require(audio.isNotEmpty())
+        return database.withTransaction {
+            val target = if (group == null) {
+                val ideaId = ideaDao.insertIdea(IdeaEntity(title = defaultTitle(), createdAtEpochMs = System.currentTimeMillis()))
+                val first = audio.first()
+                val trackId = trackDao.insertTrack(TrackEntity(ideaId = ideaId,
+                    audioFileName = first.file.name, displayName = "Track 1", sortIndex = 0, durationMs = first.durationMs))
+                CaptureGroup(ideaId, audioClipDao.insertClip(AudioClipEntity(trackId = trackId,
+                    offsetMs = 0L, displayName = "Clip 1", sortIndex = 0)))
+            } else {
+                val clip = requireNotNull(audioClipDao.getClipById(group.clipId)) { "The capture clip no longer exists." }
+                val track = requireNotNull(trackDao.getTrackById(clip.trackId))
+                require(track.ideaId == group.ideaId) { "The capture group has changed." }
+                group
+            }
+            val existing = takeDao.getTakesForClip(target.clipId)
+            val firstIndex = (existing.maxOfOrNull { it.sortIndex } ?: -1) + 1
+            val takes = audio.mapIndexed { index, part ->
+                val take = TakeEntity(clipId = target.clipId, audioFileName = part.file.name,
+                    displayName = "Take ${firstIndex + index + 1}", sortIndex = firstIndex + index,
+                    durationMs = part.durationMs, isActive = existing.isEmpty() && index == 0)
+                take.copy(id = takeDao.insertTake(take))
+            }
+            SavedCaptureBatch(target, takes)
+        }
+    }
 
     /**
      * Creates an [IdeaEntity] and its first [TrackEntity] with a clip + active

@@ -19,7 +19,8 @@ class RecordingStorage(private val context: Context) {
 
     fun createRecordingFile(prefix: String = "nightjar", extension: String = "wav"): File {
         val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-        return File(recordingsDir(), "${prefix}_${ts}.${extension}")
+        // Reserve the path atomically so rapid attempts cannot overwrite earlier audio.
+        return File.createTempFile("${prefix}_${ts}_", ".${extension}", recordingsDir())
     }
 
     fun getAudioFile(fileName: String): File =

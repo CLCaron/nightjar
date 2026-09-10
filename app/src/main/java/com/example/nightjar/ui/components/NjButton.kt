@@ -90,12 +90,13 @@ fun NjButton(
     activeGlow: Boolean = true,
     ledScale: Float = 1f,
     shape: Shape = RoundedCornerShape(2.dp),
-    caption: String? = null
+    caption: String? = null,
+    enabled: Boolean = true
 ) {
     if (ledColor != null) {
-        ToggleModeButton(text, onClick, modifier, icon, isActive, ledColor, activeGlow, ledScale, shape, textColor, caption)
+        ToggleModeButton(text, onClick, modifier.graphicsLayer(alpha = if (enabled) 1f else 0.45f), icon, isActive, ledColor, activeGlow, ledScale, shape, textColor, caption, enabled)
     } else {
-        MomentaryModeButton(text, onClick, modifier, icon, isActive, activeAccent, textColor, shape, caption)
+        MomentaryModeButton(text, onClick, modifier.graphicsLayer(alpha = if (enabled) 1f else 0.45f), icon, isActive, activeAccent, textColor, shape, caption, enabled)
     }
 }
 
@@ -182,7 +183,8 @@ private fun ToggleModeButton(
     ledScale: Float,
     shape: Shape,
     inactiveTextColor: Color? = null,
-    caption: String? = null
+    caption: String? = null,
+    enabled: Boolean = true
 ) {
     val toggleState = rememberMechanicalToggleState(isActive)
     val depth by toggleState.depth
@@ -275,6 +277,7 @@ private fun ToggleModeButton(
                 }
             }
             .clickable(
+                enabled = enabled,
                 interactionSource = toggleState.interactionSource,
                 indication = null,
                 onClick = onClick
@@ -335,7 +338,8 @@ private fun MomentaryModeButton(
     activeAccent: Color,
     textColor: Color?,
     shape: Shape,
-    caption: String? = null
+    caption: String? = null,
+    enabled: Boolean = true
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedWithMinDuration()
@@ -442,6 +446,7 @@ private fun MomentaryModeButton(
                 }
             }
             .clickable(
+                enabled = enabled,
                 interactionSource = interactionSource,
                 indication = null,
                 onClick = onClick

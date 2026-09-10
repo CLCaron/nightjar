@@ -24,6 +24,7 @@ import com.example.nightjar.ui.theme.NjSurface
 import com.example.nightjar.ui.theme.NjTrackColors
 import android.content.res.Configuration
 import android.Manifest
+import android.os.Build
 import android.content.pm.PackageManager
 import android.view.HapticFeedbackConstants
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -36,6 +37,9 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -59,6 +63,9 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
@@ -93,6 +100,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Dp
@@ -100,9 +109,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.nightjar.ui.theme.NjAmber
 import kotlin.math.cos
 import kotlin.math.sin
@@ -126,11 +132,9 @@ fun RecordScreen(
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
 
     val vm: RecordViewModel = hiltViewModel()
     val state by vm.state.collectAsState()
-    val isRecording by rememberUpdatedState(state.isRecording)
 
     var hasMicPermission by remember {
         mutableStateOf(
@@ -145,6 +149,34 @@ fun RecordScreen(
         hasMicPermission = granted
     }
 
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) {
+        // Notification denial must not block microphone capture.
+        vm.onAction(RecordAction.StartRecording)
+    }
+    val startCapture = {
+        if (!state.isSaving) {
+            if (Build.VERSION.SDK_INT >= 33 &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+                PackageManager.PERMISSION_GRANTED
+            ) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                vm.onAction(RecordAction.StartRecording)
+            }
+        }
+    }
+
+    DisposableEffect(vm) { onDispose { vm.onAction(RecordAction.LeaveScreen) } }
+
+    LaunchedEffect(state.errorMessage) {
+        state.errorMessage?.let { message ->
+            snackbarHostState.showSnackbar(message, withDismissAction = true,
+                duration = androidx.compose.material3.SnackbarDuration.Indefinite)
+        }
+    }
+
     LaunchedEffect(Unit) {
         vm.effects.collectLatest { effect ->
             when (effect) {
@@ -157,20 +189,6 @@ fun RecordScreen(
                     )
                 }
             }
-        }
-    }
-
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP && isRecording) {
-                vm.onAction(RecordAction.StopForBackground)
-            }
-        }
-
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-            if (state.isRecording) vm.onAction(RecordAction.StopForBackground)
         }
     }
 
@@ -213,17 +231,18 @@ fun RecordScreen(
                 }
             } else {
                 val postRecording = state.postRecording
-                val isSaving = !state.isRecording && postRecording == null &&
-                    state.liveAmplitudes.isNotEmpty()
+                val isSaving = state.isSaving
                 val isBusy = state.isRecording || isSaving
                 val waveformColor = NjTrackColors[0].copy(alpha = 0.65f)
                 val writeSunk = isBusy || postRecording != null
 
                 val lcdText = when {
                     state.isCountingIn -> "COUNT IN"
-                    state.isRecording -> "RECORDING"
+                    state.isRecording -> "TAKE ${state.capture.takeNumber} • REC"
                     isSaving -> "SAVING"
-                    postRecording != null -> "SAVED"
+                    state.capture.playing -> "PLAYING TAKE ${state.capture.takes.find { it.id == state.capture.selectedTakeId }?.sortIndex?.plus(1)}"
+                    state.capture.pendingSave -> "SAVE NEEDS RETRY"
+                    postRecording != null -> "${state.capture.takes.size} TAKES SAVED"
                     else -> "RECORD"
                 }
 
@@ -237,8 +256,8 @@ fun RecordScreen(
                         isBusy = isBusy,
                         writeSunk = writeSunk,
                         onRecord = {
-                            if (!state.isRecording) vm.onAction(RecordAction.StartRecording)
-                            else vm.onAction(RecordAction.StopAndSave)
+                            if (!state.isRecording) startCapture()
+                            else vm.onAction(RecordAction.StartRecording)
                         },
                         onGoToOverview = { vm.onAction(RecordAction.GoToOverview) },
                         onWrite = { vm.onAction(RecordAction.CreateWriteIdea) },
@@ -246,7 +265,7 @@ fun RecordScreen(
                             if (postRecording != null) vm.onAction(RecordAction.GoToStudio)
                             else vm.onAction(RecordAction.CreateStudioIdea)
                         },
-                        onLibrary = onOpenLibrary,
+                        onLibrary = { vm.onAction(RecordAction.LeaveScreen); onOpenLibrary() },
                         onSettings = onOpenSettings,
                         onAction = { vm.onAction(it) },
                         metronomeState = state,
@@ -262,8 +281,8 @@ fun RecordScreen(
                         isBusy = isBusy,
                         writeSunk = writeSunk,
                         onRecord = {
-                            if (!state.isRecording) vm.onAction(RecordAction.StartRecording)
-                            else vm.onAction(RecordAction.StopAndSave)
+                            if (!state.isRecording) startCapture()
+                            else vm.onAction(RecordAction.StartRecording)
                         },
                         onGoToOverview = { vm.onAction(RecordAction.GoToOverview) },
                         onWrite = { vm.onAction(RecordAction.CreateWriteIdea) },
@@ -271,7 +290,7 @@ fun RecordScreen(
                             if (postRecording != null) vm.onAction(RecordAction.GoToStudio)
                             else vm.onAction(RecordAction.CreateStudioIdea)
                         },
-                        onLibrary = onOpenLibrary,
+                        onLibrary = { vm.onAction(RecordAction.LeaveScreen); onOpenLibrary() },
                         onSettings = onOpenSettings,
                         onAction = { vm.onAction(it) },
                         metronomeState = state,
@@ -334,6 +353,38 @@ private fun RecordScreenBackground() {
 }
 
 @Composable
+private fun CaptureTransport(state: RecordUiState, onAction: (RecordAction) -> Unit) {
+    val capture = state.capture
+    val idle = !capture.busy && !capture.pendingSave
+    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        NjButton(text = "Play", icon = Icons.Filled.PlayArrow, caption = "PLAY",
+            onClick = { onAction(RecordAction.PlayTake) }, isActive = capture.playing,
+            enabled = idle && capture.takes.any { it.id == capture.selectedTakeId && it.durationMs > 0 },
+            modifier = Modifier.weight(1f))
+        NjButton(text = "Stop", icon = Icons.Filled.Stop, caption = "STOP", ledColor = NjRecordCoral,
+            onClick = { onAction(RecordAction.StopAndSave) }, isActive = capture.recording || capture.playing,
+            enabled = capture.recording || capture.playing, modifier = Modifier.weight(1f))
+        NjButton(text = "New Idea", icon = Icons.Filled.Add, caption = "NEW IDEA",
+            onClick = { onAction(RecordAction.NewIdea) }, enabled = idle && capture.ideaId != null,
+            modifier = Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun CaptureTakeShelf(state: RecordUiState, onAction: (RecordAction) -> Unit) {
+    val scroll = rememberScrollState()
+    LaunchedEffect(state.capture.takes.size, scroll.maxValue) { scroll.animateScrollTo(scroll.maxValue) }
+    Row(Modifier.fillMaxWidth().height(48.dp).horizontalScroll(scroll),
+        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        state.capture.takes.forEach { take ->
+            NjButton(text = take.displayName, onClick = { onAction(RecordAction.SelectTake(take.id)) },
+                isActive = take.id == state.capture.selectedTakeId, ledColor = NjAmber,
+                enabled = !state.capture.busy && !state.capture.pendingSave)
+        }
+    }
+}
+
+@Composable
 private fun PortraitRecordLayout(
     isRecording: Boolean,
     lcdText: String,
@@ -356,7 +407,7 @@ private fun PortraitRecordLayout(
         // Main content -- nudged slightly below center so Record
         // button doesn't feel too high with the taller feature buttons.
         Column(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().padding(bottom = 88.dp).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(0.dp, Alignment.CenterVertically),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -410,10 +461,13 @@ private fun PortraitRecordLayout(
 
             HardwareRecordButton(
                 isRecording = isRecording,
+                enabled = !metronomeState.isSaving && !metronomeState.isCountingIn,
                 onClick = onRecord
             )
 
-            Spacer(Modifier.height(14.dp))
+            Text("RECORD", fontFamily = IbmPlexMono, fontSize = 10.sp, color = NjMuted)
+            CaptureTransport(metronomeState, onAction)
+            CaptureTakeShelf(metronomeState, onAction)
 
             WaveformSection(
                 postRecording = postRecording,
@@ -451,7 +505,8 @@ private fun PortraitRecordLayout(
 
             NjButton(
                 text = "Library",
-                onClick = onLibrary
+                onClick = onLibrary,
+                enabled = !isBusy
             )
         }
 
@@ -511,10 +566,14 @@ private fun LandscapeRecordLayout(
             modifier = Modifier.weight(1f).fillMaxSize(),
             contentAlignment = Alignment.Center
         ) {
-            HardwareRecordButton(
-                isRecording = isRecording,
-                onClick = onRecord
-            )
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                HardwareRecordButton(
+                    isRecording = isRecording,
+                    enabled = !metronomeState.isSaving && !metronomeState.isCountingIn,
+                    onClick = onRecord
+                )
+                Text("RECORD", fontFamily = IbmPlexMono, fontSize = 10.sp, color = NjMuted)
+            }
 
             Row(
                 modifier = Modifier
@@ -544,13 +603,15 @@ private fun LandscapeRecordLayout(
 
         // Right: LCD + Waveform + Action buttons
         Column(
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             StatusLcd(lcdText)
+            CaptureTransport(metronomeState, onAction)
+            CaptureTakeShelf(metronomeState, onAction)
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(6.dp))
 
             WaveformSection(
                 postRecording = postRecording,
@@ -589,7 +650,8 @@ private fun LandscapeRecordLayout(
 
             NjButton(
                 text = "Library",
-                onClick = onLibrary
+                onClick = onLibrary,
+                enabled = !isBusy
             )
         }
     }
@@ -645,6 +707,7 @@ private fun WaveformSection(
 @Composable
 private fun HardwareRecordButton(
     isRecording: Boolean,
+    enabled: Boolean = true,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -719,7 +782,9 @@ private fun HardwareRecordButton(
     Box(
         modifier = modifier
             .size(92.dp)
+            .semantics { contentDescription = "Record" }
             .clickable(
+                enabled = enabled,
                 interactionSource = toggleState.interactionSource,
                 indication = null,
                 role = Role.Button,

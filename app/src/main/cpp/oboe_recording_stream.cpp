@@ -10,9 +10,7 @@ namespace nightjar {
 OboeRecordingStream::OboeRecordingStream() = default;
 
 OboeRecordingStream::~OboeRecordingStream() {
-    if (active_.load(std::memory_order_acquire)) {
-        stop();
-    }
+    stop();
 }
 
 bool OboeRecordingStream::start(const std::string& filePath) {
@@ -20,6 +18,10 @@ bool OboeRecordingStream::start(const std::string& filePath) {
         LOGE("OboeRecordingStream: already recording");
         return false;
     }
+
+    // An error callback can mark the input inactive while its writer still needs
+    // draining. Finish that file before reusing the ring buffer or writer.
+    if (stream_) stop();
 
     // Reset state
     ringBuffer_.reset();
@@ -102,7 +104,7 @@ void OboeRecordingStream::openWriteGate() {
 }
 
 int64_t OboeRecordingStream::stop() {
-    if (!active_.load(std::memory_order_acquire)) {
+    if (!active_.load(std::memory_order_acquire) && !stream_) {
         return -1;
     }
 
@@ -110,8 +112,10 @@ int64_t OboeRecordingStream::stop() {
 
     // Stop the Oboe stream (callbacks will stop)
     if (stream_) {
-        stream_->requestStop();
-        stream_->close();
+        if (stream_->getState() != oboe::StreamState::Closed) {
+            stream_->requestStop();
+            stream_->close();
+        }
         stream_.reset();
     }
 
