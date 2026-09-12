@@ -77,4 +77,59 @@ class RecordViewModelTest {
         assertNull(vm.state.value.postRecording)
         store.clear()
     }
+    @Test fun `opening Write while listening does not stop or restart audio`() = runTest(dispatcher) {
+        captureState.value = CaptureState(phase = CapturePhase.SAVED, ideaId = 42L, playing = true)
+        val document = mockk<com.example.nightjar.data.repository.NotesSession.Document>(relaxed = true)
+        every { document.state } returns MutableStateFlow(com.example.nightjar.data.repository.NotesState(ideaId = 42L, text = "lyrics", ready = true))
+        every { session.writingDocument() } returns document
+        val store = ViewModelStore()
+        val vm = viewModel(); store.put("record", vm); runCurrent()
+        vm.onAction(RecordAction.CreateWriteIdea); runCurrent()
+        assertTrue(vm.state.value.isWriting)
+        assertEquals("lyrics", vm.state.value.words.text)
+        assertTrue(vm.state.value.capture.playing)
+        verify(exactly = 0) { session.stopAudition() }
+        verify(exactly = 0) { engine.pause() }
+        vm.onAction(RecordAction.WordsChanged("next line"))
+        verify { document.edit("next line") }
+        store.clear()
+    }
+
+    @Test fun `record and Write dismiss tempo drawer without changing settings`() = runTest(dispatcher) {
+        every { prefs.isEnabled } returns true
+        every { prefs.volume } returns 0.45f
+        every { prefs.countInBars } returns 2
+        val document = mockk<com.example.nightjar.data.repository.NotesSession.Document>(relaxed = true)
+        every { document.state } returns MutableStateFlow(
+            com.example.nightjar.data.repository.NotesState(ready = true)
+        )
+        every { session.writingDocument() } returns document
+        val store = ViewModelStore()
+        val vm = viewModel(); store.put("record", vm); runCurrent()
+
+        vm.onAction(RecordAction.ToggleTempoDrawer)
+        assertTrue(vm.state.value.isTempoDrawerOpen)
+        vm.onAction(RecordAction.CreateWriteIdea)
+        assertFalse(vm.state.value.isTempoDrawerOpen)
+        assertTrue(vm.state.value.isMetronomeEnabled)
+        assertEquals(0.45f, vm.state.value.metronomeVolume)
+        assertEquals(2, vm.state.value.countInBars)
+
+        vm.onAction(RecordAction.ShowSound)
+        vm.onAction(RecordAction.ToggleTempoDrawer)
+        vm.onAction(RecordAction.StartRecording)
+        assertFalse(vm.state.value.isTempoDrawerOpen)
+        verify { session.start(match { it.metronome && it.volume == 0.45f && it.countInBars == 2 }) }
+        store.clear()
+    }
+
+    @Test fun `tempo drawer has an explicit dismiss action`() = runTest(dispatcher) {
+        val store = ViewModelStore()
+        val vm = viewModel(); store.put("record", vm); runCurrent()
+        vm.onAction(RecordAction.ToggleTempoDrawer)
+        vm.onAction(RecordAction.DismissTempoDrawer)
+        assertFalse(vm.state.value.isTempoDrawerOpen)
+        store.clear()
+    }
+
 }

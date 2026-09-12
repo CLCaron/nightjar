@@ -5,6 +5,10 @@ import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 
+// Focused writing surface; spatial Canvas remains a separate feature.
+val NjWritingPaper = Color(0xFFE8DDC8)
+val NjWritingInk = Color(0xFF302A25)
+
 // ── Nightjar theme-varying color palette ────────────────────────────────
 
 /**

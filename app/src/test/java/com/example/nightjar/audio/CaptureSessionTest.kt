@@ -29,6 +29,7 @@ class CaptureSessionTest {
     private val foreground = mockk<CaptureForeground>(relaxed = true)
     private val file = File("retained.wav")
     private val writer = mockk<CaptureTakeWriter>()
+    private val notes = mockk<com.example.nightjar.data.repository.NotesSession>(relaxed = true)
     private val batch = SavedCaptureBatch(CaptureGroup(42L, 7L), listOf(TakeEntity(id = 1L,
         clipId = 7L, audioFileName = file.name, displayName = "Take 1", sortIndex = 0, durationMs = 2500L)))
     private lateinit var capture: CaptureSession
@@ -46,7 +47,7 @@ class CaptureSessionTest {
         coEvery { repo.saveCaptureBatch(any(), any()) } returns batch
         every { storage.getAudioFile(any()) } answers { File(firstArg<String>()) }
         coEvery { writer.write(any(), any()) } returns listOf(CaptureAudio(file, 2500L))
-        capture = CaptureSession(engine, storage, repo, font, foreground, writer)
+        capture = CaptureSession(engine, storage, repo, font, foreground, writer, notes)
     }
 
     @After fun cleanup() { unmockkAll() }
@@ -252,6 +253,30 @@ class CaptureSessionTest {
         verifyOrder { engine.pause(); engine.removeAllTracks(); engine.startRecording(any()) }
         assertFalse(capture.state.value.playing)
         capture.stop(); advanceUntilIdle()
+    }
+
+    @Test fun `text creation and audio finalization share one Idea even when creation is delayed`() = runTest(dispatcher) {
+        val draftStorage = mockk<com.example.nightjar.data.storage.NotesDraftStorage>(relaxed = true)
+        val realNotes = com.example.nightjar.data.repository.NotesSession(repo, draftStorage)
+        val created = CompletableDeferred<Long>()
+        coEvery { repo.createEmptyIdea() } coAnswers { created.await() }
+        coEvery { repo.saveNotesRevision(any(), any(), any()) } returns Unit
+        coEvery { repo.saveCaptureBatchForIdea(42L, null, any()) } returns batch
+        capture = CaptureSession(engine, storage, repo, font, foreground, writer, realNotes)
+        val words = capture.writingDocument()
+        words.edit("before the melody")
+        begin(); runCurrent()
+        assertTrue(capture.state.value.recording)
+        assertFalse(capture.canStartNewIdea())
+        capture.stop(); runCurrent()
+        assertEquals(CapturePhase.SAVING, capture.state.value.phase)
+        created.complete(42L); advanceUntilIdle()
+        assertEquals(42L, capture.state.value.ideaId)
+        assertEquals(42L, words.state.value.ideaId)
+        coVerify(exactly = 1) { repo.createEmptyIdea() }
+        coVerify(exactly = 1) { repo.saveCaptureBatchForIdea(42L, null, any()) }
+        coVerify(exactly = 0) { repo.saveCaptureBatch(any(), any()) }
+        assertTrue(words.state.value.safeToLeaveIdea)
     }
 
 }

@@ -9,6 +9,9 @@ data class OverviewUiState(
     val tags: List<TagEntity> = emptyList(),
     val titleDraft: String = "",
     val notesDraft: String = "",
+    val notesReady: Boolean = false,
+    val notesPending: Boolean = false,
+    val notesError: String? = null,
     val errorMessage: String? = null,
     val compositeWaveform: FloatArray? = null,
     val hasTracks: Boolean = false
@@ -17,7 +20,7 @@ data class OverviewUiState(
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is OverviewUiState) return false
-        return idea == other.idea &&
+        return notesReady == other.notesReady && notesPending == other.notesPending && notesError == other.notesError && idea == other.idea &&
             tags == other.tags &&
             titleDraft == other.titleDraft &&
             notesDraft == other.notesDraft &&
@@ -27,7 +30,8 @@ data class OverviewUiState(
     }
 
     override fun hashCode(): Int {
-        var result = idea?.hashCode() ?: 0
+        var result = 31 * (31 * notesReady.hashCode() + notesPending.hashCode()) + (notesError?.hashCode() ?: 0)
+        result = 31 * result + (idea?.hashCode() ?: 0)
         result = 31 * result + tags.hashCode()
         result = 31 * result + titleDraft.hashCode()
         result = 31 * result + notesDraft.hashCode()
@@ -43,6 +47,7 @@ sealed interface OverviewAction {
     data class Load(val ideaId: Long) : OverviewAction
     data class TitleChanged(val value: String) : OverviewAction
     data class NotesChanged(val value: String) : OverviewAction
+    data object RetryNotes : OverviewAction
     data object ToggleFavorite : OverviewAction
     data class AddTagsFromInput(val raw: String) : OverviewAction
     data class RemoveTag(val tagId: Long) : OverviewAction

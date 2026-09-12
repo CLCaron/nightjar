@@ -40,6 +40,8 @@ class RecordViewModel @Inject constructor(
 
     // Tap tempo tracking
     private val tapTimestamps = mutableListOf<Long>()
+    private var wordsJob: kotlinx.coroutines.Job? = null
+    private var document: com.example.nightjar.data.repository.NotesSession.Document? = null
 
     init {
         // Load persisted metronome settings
@@ -66,9 +68,24 @@ class RecordViewModel @Inject constructor(
 
     fun onAction(action: RecordAction) {
         when (action) {
-            RecordAction.NewIdea -> capture.clearCompleted()
+            RecordAction.NewIdea -> {
+                if (capture.canStartNewIdea()) {
+                    capture.clearCompleted()
+                    wordsJob?.cancel()
+                    document = null
+                    _state.value = _state.value.copy(isWriting = false,
+                        words = com.example.nightjar.data.repository.NotesState(ready = true),
+                        isTempoDrawerOpen = false)
+                }
+            }
+            RecordAction.ShowSound -> _state.value = _state.value.copy(isWriting = false)
+            is RecordAction.WordsChanged -> document?.edit(action.value)
+            RecordAction.RetryWords -> document?.retry()
             RecordAction.PlayTake -> capture.playSelected()
-            RecordAction.LeaveScreen -> capture.stopAudition()
+            RecordAction.LeaveScreen -> {
+                _state.value = _state.value.copy(isTempoDrawerOpen = false)
+                capture.stopAudition()
+            }
             is RecordAction.SelectTake -> capture.selectTake(action.id)
             RecordAction.StartRecording -> startRecording()
             RecordAction.StopAndSave -> capture.stop()
@@ -80,17 +97,20 @@ class RecordViewModel @Inject constructor(
             is RecordAction.SetMetronomeVolume -> setMetronomeVolume(action.volume)
             is RecordAction.SetMetronomeBpm -> setMetronomeBpm(action.bpm)
             is RecordAction.SetCountInBars -> setCountInBars(action.bars)
-            RecordAction.ToggleMetronomeSettings -> {
+            RecordAction.ToggleTempoDrawer -> {
                 _state.value = _state.value.copy(
-                    isMetronomeSettingsOpen = !_state.value.isMetronomeSettingsOpen
+                    isTempoDrawerOpen = !_state.value.isTempoDrawerOpen
                 )
             }
+            RecordAction.DismissTempoDrawer ->
+                _state.value = _state.value.copy(isTempoDrawerOpen = false)
             RecordAction.TapTempo -> tapTempo()
         }
     }
 
     fun startRecording() {
         val current = _state.value
+        _state.value = current.copy(isWriting = false, isTempoDrawerOpen = false)
         capture.start(CaptureOptions(
             metronome = current.isMetronomeEnabled,
             volume = current.metronomeVolume,
@@ -106,24 +126,26 @@ class RecordViewModel @Inject constructor(
     }
 
     private fun goToStudio() {
-        val post = _state.value.postRecording ?: return
+        val ideaId = capture.state.value.ideaId ?: return
         capture.stopAudition()
-        viewModelScope.launch { _effects.emit(RecordEffect.OpenStudio(post.ideaId)) }
+        viewModelScope.launch { _effects.emit(RecordEffect.OpenStudio(ideaId)) }
     }
 
     private fun createWriteIdea() {
-        viewModelScope.launch {
-            try {
-                val ideaId = repo.createEmptyIdea()
-                _effects.emit(RecordEffect.OpenOverview(ideaId))
-            } catch (e: Exception) {
-                val msg = e.message ?: "Failed to create idea."
-                _effects.emit(RecordEffect.ShowError(msg))
-            }
+        if (capture.state.value.busy || capture.state.value.pendingSave) return
+        val next = capture.writingDocument()
+        _state.value = _state.value.copy(isWriting = true, isTempoDrawerOpen = false,
+            writingFocusRequest = _state.value.writingFocusRequest + 1, words = next.state.value)
+        if (document === next) return
+        document = next
+        wordsJob?.cancel()
+        wordsJob = viewModelScope.launch {
+            next.state.collect { words -> _state.value = _state.value.copy(words = words) }
         }
     }
 
     private fun createStudioIdea() {
+        if (capture.state.value.ideaId != null) { goToStudio(); return }
         viewModelScope.launch {
             try {
                 val ideaId = repo.createEmptyIdea()

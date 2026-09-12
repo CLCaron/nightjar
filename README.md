@@ -12,8 +12,8 @@ Named after a nocturnal songbird, this app is designed around late-night creativ
 
 Open the app. You're already on the capture screen. Three ways to start:
 
-- **Record** -- tap the hardware-style record button, sing your melody, tap again. Done. Live waveform while you record, preview when you stop.
-- **Write** -- got a lyric, a chord progression, a half-formed thought? Capture it as text. No audio needed.
+- **Record** -- tap Record to start, press it again for another take, and press Stop to save. Keep trying within one idea, then listen back to any saved take.
+- **Write** -- got a lyric, a chord progression, a half-formed thought? Write in the capture screen, including while listening to saved takes. Words and recordings stay in the same idea, with shared notes in Overview and visible save status. Recording returns to Sound for now.
 - **Studio** -- want to sketch something layered from scratch? Jump straight into the multi-track workspace.
 
 Every capture becomes an **idea** -- a container you can come back to later, title, tag, annotate, and build on.

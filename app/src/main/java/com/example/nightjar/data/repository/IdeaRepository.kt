@@ -45,13 +45,24 @@ class IdeaRepository(
 
     /** One atomic batch; subsequent intervals append without changing the chosen take. */
     suspend fun saveCaptureBatch(group: CaptureGroup?, audio: List<CaptureAudio>): SavedCaptureBatch {
+        return persistCaptureBatch(group, audio, null)
+    }
+
+    suspend fun saveCaptureBatchForIdea(ideaId: Long, group: CaptureGroup?, audio: List<CaptureAudio>): SavedCaptureBatch {
+        require(group == null || group.ideaId == ideaId)
+        return persistCaptureBatch(group, audio, ideaId)
+    }
+
+    private suspend fun persistCaptureBatch(group: CaptureGroup?, audio: List<CaptureAudio>, existingIdeaId: Long?): SavedCaptureBatch {
         require(audio.isNotEmpty())
         return database.withTransaction {
             val target = if (group == null) {
-                val ideaId = ideaDao.insertIdea(IdeaEntity(title = defaultTitle(), createdAtEpochMs = System.currentTimeMillis()))
+                val ideaId = existingIdeaId?.also { requireNotNull(ideaDao.getIdeaById(it)) { "This Idea no longer exists." } }
+                    ?: ideaDao.insertIdea(IdeaEntity(title = defaultTitle(), createdAtEpochMs = System.currentTimeMillis()))
                 val first = audio.first()
+                val trackIndex = (trackDao.getTracksForIdea(ideaId).maxOfOrNull { it.sortIndex } ?: -1) + 1
                 val trackId = trackDao.insertTrack(TrackEntity(ideaId = ideaId,
-                    audioFileName = first.file.name, displayName = "Track 1", sortIndex = 0, durationMs = first.durationMs))
+                    audioFileName = first.file.name, displayName = "Track ${trackIndex + 1}", sortIndex = trackIndex, durationMs = first.durationMs))
                 CaptureGroup(ideaId, audioClipDao.insertClip(AudioClipEntity(trackId = trackId,
                     offsetMs = 0L, displayName = "Clip 1", sortIndex = 0)))
             } else {
@@ -147,6 +158,15 @@ class IdeaRepository(
 
     suspend fun updateNotes(id: Long, notes: String) =
         ideaDao.updateNotes(id, notes)
+
+    /** Reject stale recovery rather than overwrite a newer note from another writer. */
+    suspend fun saveNotesRevision(id: Long, expected: String, text: String) = database.withTransaction {
+        val idea = requireNotNull(ideaDao.getIdeaById(id)) { "This Idea no longer exists. Your draft is retained." }
+        check(idea.notes == expected || idea.notes == text) {
+            "This Idea's notes changed elsewhere. Your draft is retained; retry will not overwrite newer text."
+        }
+        ideaDao.updateNotes(id, text)
+    }
 
     suspend fun updateFavorite(id: Long, isFavorite: Boolean) =
         ideaDao.updateFavorite(id, isFavorite)

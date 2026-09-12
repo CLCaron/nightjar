@@ -3,6 +3,9 @@ package com.example.nightjar.audio
 import android.util.Log
 import com.example.nightjar.data.repository.IdeaRepository
 import com.example.nightjar.data.repository.CaptureGroup
+import com.example.nightjar.data.repository.NotesSession
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
 import com.example.nightjar.data.db.entity.TakeEntity
 import com.example.nightjar.data.storage.RecordingStorage
 import java.io.File
@@ -59,7 +62,8 @@ class CaptureSession @Inject constructor(
     private val repo: IdeaRepository,
     private val soundFont: SoundFontManager,
     private val foreground: CaptureForeground,
-    private val takeWriter: CaptureTakeWriter
+    private val takeWriter: CaptureTakeWriter,
+    private val notes: NotesSession
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val mutableState = MutableStateFlow(CaptureState())
@@ -74,6 +78,25 @@ class CaptureSession @Inject constructor(
     private val boundaries = mutableListOf<Long>()
     private var prepared: List<CaptureAudio>? = null
     private var auditionJob: Job? = null
+    private var writing: NotesSession.Document? = null
+    private var ideaCreation: Deferred<Long>? = null
+
+    fun writingDocument(): NotesSession.Document {
+        return writing ?: (state.value.ideaId?.let { notes.open(it) }
+            ?: notes.create { ensureIdeaId() }).also { writing = it }
+    }
+
+    private suspend fun ensureIdeaId(): Long {
+        state.value.ideaId?.let { return it }
+        val creation = ideaCreation ?: scope.async(start = CoroutineStart.LAZY) {
+            repo.createEmptyIdea().also { id -> mutableState.value = state.value.copy(ideaId = id) }
+        }.also { ideaCreation = it; it.start() }
+        return try { creation.await() } finally { if (creation.isCompleted) ideaCreation = null }
+    }
+
+    fun canStartNewIdea(): Boolean = !state.value.busy && !state.value.pendingSave &&
+        ideaCreation?.isActive != true && (writing?.state?.value?.safeToLeaveIdea != false)
+
 
     fun selectTake(id: Long) {
         if (state.value.busy || state.value.pendingSave) return
@@ -260,8 +283,12 @@ class CaptureSession @Inject constructor(
             // Retry native finalization if a previous stop failed before it returned a duration.
             if (ownsInput) { durationMs = engine.stopRecording(); ownsInput = false }
             val parts = prepared ?: takeWriter.write(file, boundaries.toList()).also { prepared = it }
-            val saved = repo.saveCaptureBatch(group, parts)
+            // Text creation may still be finishing when the microphone is stopped.
+            val ideaId = ideaCreation?.await() ?: state.value.ideaId
+            val saved = if (ideaId == null || group != null) repo.saveCaptureBatch(group, parts)
+                else repo.saveCaptureBatchForIdea(ideaId, group, parts)
             group = saved.group
+            writing?.attachIdea(saved.group.ideaId)
             val newest = saved.takes.last()
             durationMs = 0
             prepared = null
@@ -282,9 +309,10 @@ class CaptureSession @Inject constructor(
     }
 
     fun clearCompleted() {
-        if (!state.value.busy && !state.value.pendingSave) {
+        if (canStartNewIdea()) {
             stopAudition()
             group = null
+            writing = null
             mutableState.value = CaptureState()
         }
     }
