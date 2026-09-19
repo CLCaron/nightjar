@@ -10,6 +10,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,6 +45,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,6 +54,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
@@ -90,7 +95,11 @@ import com.example.nightjar.ui.components.NjRecessedPanel
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalConfiguration
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 /**
  * Studio screen — multi-track DAW-like workspace.
@@ -135,6 +144,8 @@ fun StudioScreen(
     val currentIsRecording by rememberUpdatedState(state.isRecording)
 
     val scrollState = rememberScrollState()
+    val zoomScope = rememberCoroutineScope()
+    val configuration = LocalConfiguration.current
     var transportOffsetPx by remember { mutableFloatStateOf(0f) }
     var rulerOffsetPx by remember { mutableFloatStateOf(0f) }
     var isScrubbing by remember { mutableStateOf(false) }
@@ -143,6 +154,10 @@ fun StudioScreen(
     // Horizontal scroll for the timeline ruler + track lanes. Hoisted so the
     // pinned ruler overlay can share it with the in-flow ruler/tracks.
     val timelineHScrollState = rememberScrollState()
+    var timelineMsPerDp by remember(ideaId) { mutableFloatStateOf(DEFAULT_TIMELINE_MS_PER_DP) }
+    var trackLaneHeightDp by remember(ideaId) { mutableFloatStateOf(DEFAULT_TRACK_LANE_HEIGHT_DP) }
+    var horizontalZoomScrollJob by remember { mutableStateOf<Job?>(null) }
+    var verticalZoomScrollJob by remember { mutableStateOf<Job?>(null) }
 
     // Playhead auto-follow state — owned here so the pinned ruler overlay can
     // render the same follow-line as the in-flow ruler.
@@ -155,10 +170,10 @@ fun StudioScreen(
     // tracks can be dragged out beyond their current end. Both the in-flow and
     // pinned rulers must use the same width to keep horizontal scroll in sync.
     val timelineWidthDp = remember(
-        state.totalDurationMs, state.cursorPositionMs, state.msPerDp
+        state.totalDurationMs, state.cursorPositionMs, timelineMsPerDp
     ) {
-        val contentDp = (state.totalDurationMs / state.msPerDp).dp
-        val cursorDp = (state.cursorPositionMs / state.msPerDp).dp
+        val contentDp = (state.totalDurationMs / timelineMsPerDp).dp
+        val cursorDp = (state.cursorPositionMs / timelineMsPerDp).dp
         maxOf(contentDp, cursorDp) + 600.dp
     }
 
@@ -214,7 +229,7 @@ fun StudioScreen(
                 if (!isFollowEligible) break
 
                 val playheadPx = with(density) {
-                    (currentPositionMs / state.msPerDp).dp.toPx()
+                    (currentPositionMs / timelineMsPerDp).dp.toPx()
                 }.toInt()
                 val viewportStart = timelineHScrollState.value
                 val targetOffset = timelineHScrollState.viewportSize / 4
@@ -253,6 +268,65 @@ fun StudioScreen(
         isFollowEligible = false
         isFollowActive = false
     }
+
+    val fitTimeline: () -> Unit = {
+        onDisengageFollow()
+        val viewportDp = with(density) { timelineHScrollState.viewportSize.toDp().value }
+        val durationMs = maxOf(state.totalDurationMs, state.cursorPositionMs).coerceAtLeast(1L)
+        if (viewportDp > FIT_HORIZONTAL_PADDING_DP) {
+            timelineMsPerDp = (durationMs / (viewportDp - FIT_HORIZONTAL_PADDING_DP))
+                .toFloat().coerceIn(MIN_TIMELINE_MS_PER_DP, MAX_TIMELINE_MS_PER_DP)
+        }
+        val availableTrackDp = (configuration.screenHeightDp - FIT_FIXED_UI_HEIGHT_DP)
+            .coerceAtLeast(MIN_TRACK_LANE_HEIGHT_DP.toInt())
+        trackLaneHeightDp = if (state.tracks.isEmpty()) DEFAULT_TRACK_LANE_HEIGHT_DP else {
+            (availableTrackDp.toFloat() / state.tracks.size)
+                .coerceIn(MIN_TRACK_LANE_HEIGHT_DP, DEFAULT_TRACK_LANE_HEIGHT_DP)
+        }
+        horizontalZoomScrollJob?.cancel()
+        horizontalZoomScrollJob = zoomScope.launch {
+            androidx.compose.runtime.withFrameNanos { }
+            timelineHScrollState.scrollTo(0)
+        }
+    }
+
+    val zoomHandler by rememberUpdatedState(
+        newValue = { scaleX: Float, scaleY: Float, centroidX: Float, centroidY: Float ->
+            onDisengageFollow()
+            val oldMsPerDp = timelineMsPerDp
+            val newMsPerDp = (oldMsPerDp / scaleX)
+                .coerceIn(MIN_TIMELINE_MS_PER_DP, MAX_TIMELINE_MS_PER_DP)
+            val oldLaneHeight = trackLaneHeightDp
+            val newLaneHeight = (oldLaneHeight * scaleY)
+                .coerceIn(MIN_TRACK_LANE_HEIGHT_DP, MAX_TRACK_LANE_HEIGHT_DP)
+
+            if (newMsPerDp != oldMsPerDp) {
+                val laneCentroidX = (centroidX - with(density) { columnWidth.toPx() })
+                    .coerceAtLeast(0f)
+                val target = ((laneCentroidX + timelineHScrollState.value) *
+                    (oldMsPerDp / newMsPerDp) - laneCentroidX).toInt().coerceAtLeast(0)
+                timelineMsPerDp = newMsPerDp
+                horizontalZoomScrollJob?.cancel()
+                horizontalZoomScrollJob = zoomScope.launch {
+                    androidx.compose.runtime.withFrameNanos { }
+                    timelineHScrollState.scrollTo(target.coerceAtMost(timelineHScrollState.maxValue))
+                }
+            }
+
+            if (newLaneHeight != oldLaneHeight) {
+                val rulerPx = with(density) { 28.dp.toPx() }
+                val laneCentroidY = (centroidY - rulerPx).coerceAtLeast(0f)
+                val delta = laneCentroidY * (newLaneHeight / oldLaneHeight - 1f)
+                trackLaneHeightDp = newLaneHeight
+                verticalZoomScrollJob?.cancel()
+                verticalZoomScrollJob = zoomScope.launch {
+                    androidx.compose.runtime.withFrameNanos { }
+                    scrollState.scrollTo((scrollState.value + delta.toInt())
+                        .coerceIn(0, scrollState.maxValue))
+                }
+            }
+        }
+    )
 
     // Position used for cursor/playhead rendering — reflects scrubbing in real
     // time, then snaps back to the playback position when the gesture ends.
@@ -338,11 +412,18 @@ fun StudioScreen(
                     onBack = { vm.onAction(StudioAction.NavigateBack) },
                     showDivider = false,
                     trailing = {
-                        NjButton(
-                            text = "Setup",
-                            onClick = { vm.onAction(StudioAction.ShowLatencySetup) },
-                            textColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
-                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            NjButton(
+                                text = "Fit",
+                                onClick = fitTimeline,
+                                textColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                            )
+                            NjButton(
+                                text = "Setup",
+                                onClick = { vm.onAction(StudioAction.ShowLatencySetup) },
+                                textColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+                            )
+                        }
                     }
                 )
 
@@ -385,7 +466,7 @@ fun StudioScreen(
                     globalPositionMs = displayPositionMs,
                     cursorPositionMs = state.cursorPositionMs,
                     totalDurationMs = state.totalDurationMs,
-                    msPerDp = state.msPerDp,
+                    msPerDp = timelineMsPerDp,
                     isPlaying = state.isPlaying,
                     isRecording = state.isRecording,
                     isAddTrackDrawerOpen = state.isAddTrackDrawerOpen,
@@ -433,12 +514,19 @@ fun StudioScreen(
                     isFollowActive = isFollowActive,
                     followLineXPx = followLineXPx,
                     onDisengageFollow = onDisengageFollow,
+                    trackLaneHeight = trackLaneHeightDp.dp,
                     // The ruler row is the first child of TimelinePanel's column,
                     // so TimelinePanel's Y position in the scroll column is also
                     // the ruler's Y position.
-                    modifier = Modifier.onGloballyPositioned { coords ->
-                        rulerOffsetPx = coords.positionInParent().y
-                    }
+                    modifier = Modifier
+                        .pointerInput(Unit) {
+                            detectTimelinePinchZoom { scaleX, scaleY, centroidX, centroidY ->
+                                zoomHandler(scaleX, scaleY, centroidX, centroidY)
+                            }
+                        }
+                        .onGloballyPositioned { coords ->
+                            rulerOffsetPx = coords.positionInParent().y
+                        }
                 )
                 } // CompositionLocalProvider
 
@@ -487,7 +575,7 @@ fun StudioScreen(
                                 totalDurationMs = state.totalDurationMs,
                                 cursorPositionMs = state.cursorPositionMs,
                                 globalPositionMs = displayPositionMs,
-                                msPerDp = state.msPerDp,
+                                msPerDp = timelineMsPerDp,
                                 bpm = state.bpm,
                                 timeSignatureNumerator = state.timeSignatureNumerator,
                                 timeSignatureDenominator = state.timeSignatureDenominator,
@@ -1555,4 +1643,100 @@ private val TIME_SIGNATURE_PRESETS = listOf(
 )
 
 private val GRID_RESOLUTION_PRESETS = listOf(4, 8, 16, 32)
+
+private const val DEFAULT_TIMELINE_MS_PER_DP = 10f
+private const val MIN_TIMELINE_MS_PER_DP = 1f
+private const val MAX_TIMELINE_MS_PER_DP = 2000f
+private const val DEFAULT_TRACK_LANE_HEIGHT_DP = 56f
+private const val MIN_TRACK_LANE_HEIGHT_DP = 44f
+private const val MAX_TRACK_LANE_HEIGHT_DP = 88f
+private const val FIT_HORIZONTAL_PADDING_DP = 24f
+private const val FIT_FIXED_UI_HEIGHT_DP = 300
+
+/**
+ * Intercepts only two-finger gestures so one-finger timeline scrubbing,
+ * scrolling, clip dragging, and trimming retain their existing behavior.
+ * Horizontal and vertical spans are measured independently.
+ */
+private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.detectTimelinePinchZoom(
+    onZoom: (scaleX: Float, scaleY: Float, centroidX: Float, centroidY: Float) -> Unit
+) {
+    val softThresholdPx = 48.dp.toPx()
+    awaitEachGesture {
+        awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+        var firstId: PointerId? = null
+        var secondId: PointerId? = null
+        var initialSpanX = 1f
+        var initialSpanY = 1f
+        var previousSpanX = 1f
+        var previousSpanY = 1f
+        var initialSignX = 1f
+        var initialSignY = 1f
+        var pinching = false
+        var crossedX = false
+        var crossedY = false
+
+        while (true) {
+            val event = awaitPointerEvent(pass = PointerEventPass.Initial)
+            val pressed = event.changes.filter { it.pressed }
+            if (pressed.isEmpty()) break
+
+            if (pressed.size >= 2) {
+                if (!pinching) {
+                    pinching = true
+                    firstId = pressed[0].id
+                    secondId = pressed[1].id
+                    val delta = pressed[0].position - pressed[1].position
+                    initialSignX = if (delta.x >= 0f) 1f else -1f
+                    initialSignY = if (delta.y >= 0f) 1f else -1f
+                    initialSpanX = abs(delta.x).coerceAtLeast(1f)
+                    initialSpanY = abs(delta.y).coerceAtLeast(1f)
+                    previousSpanX = initialSpanX
+                    previousSpanY = initialSpanY
+                    event.changes.forEach { it.consume() }
+                    continue
+                }
+
+                val first = pressed.find { it.id == firstId }
+                val second = pressed.find { it.id == secondId }
+                if (first == null || second == null) break
+                val signedX = first.position.x - second.position.x
+                val signedY = first.position.y - second.position.y
+                val nowCrossedX = signedX * initialSignX < 0f
+                val nowCrossedY = signedY * initialSignY < 0f
+                if (crossedX && !nowCrossedX) previousSpanX = abs(signedX).coerceAtLeast(1f)
+                if (crossedY && !nowCrossedY) previousSpanY = abs(signedY).coerceAtLeast(1f)
+                crossedX = nowCrossedX
+                crossedY = nowCrossedY
+
+                val spanX = if (crossedX) previousSpanX else abs(signedX).coerceAtLeast(1f)
+                val spanY = if (crossedY) previousSpanY else abs(signedY).coerceAtLeast(1f)
+                val dampX = (initialSpanX / softThresholdPx).coerceIn(0f, 1f)
+                val dampY = (initialSpanY / softThresholdPx).coerceIn(0f, 1f)
+                val scaleX = 1f + (spanX / previousSpanX - 1f) * dampX
+                val scaleY = 1f + (spanY / previousSpanY - 1f) * dampY
+
+                if (abs(scaleX - 1f) > 0.005f || abs(scaleY - 1f) > 0.005f) {
+                    onZoom(
+                        scaleX,
+                        scaleY,
+                        (first.position.x + second.position.x) / 2f,
+                        (first.position.y + second.position.y) / 2f
+                    )
+                    if (!crossedX) previousSpanX = spanX
+                    if (!crossedY) previousSpanY = spanY
+                }
+                event.changes.forEach { it.consume() }
+            } else if (pinching) {
+                event.changes.forEach { it.consume() }
+                while (true) {
+                    val drain = awaitPointerEvent(pass = PointerEventPass.Initial)
+                    drain.changes.forEach { it.consume() }
+                    if (drain.changes.none { it.pressed }) break
+                }
+                break
+            }
+        }
+    }
+}
 

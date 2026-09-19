@@ -10,7 +10,12 @@ data class PostRecordingState(
 
 /** UI state for the Record screen. */
 data class RecordUiState(
+    val capture: com.example.nightjar.audio.CaptureState = com.example.nightjar.audio.CaptureState(),
+    val isWriting: Boolean = false,
+    val writingFocusRequest: Int = 0,
+    val words: com.example.nightjar.data.repository.NotesState = com.example.nightjar.data.repository.NotesState(ready = true),
     val isRecording: Boolean = false,
+    val isSaving: Boolean = false,
     val liveAmplitudes: FloatArray = FloatArray(0),
     val postRecording: PostRecordingState? = null,
     val errorMessage: String? = null,
@@ -20,12 +25,13 @@ data class RecordUiState(
     val countInBars: Int = 0,
     val isCountingIn: Boolean = false,
     val lastBeatFrame: Long = -1L,
-    val isMetronomeSettingsOpen: Boolean = false
+    val isTempoDrawerOpen: Boolean = false
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is RecordUiState) return false
-        return isRecording == other.isRecording &&
+        return writingFocusRequest == other.writingFocusRequest && isWriting == other.isWriting && words == other.words && capture == other.capture && isRecording == other.isRecording &&
+                isSaving == other.isSaving &&
                 liveAmplitudes.contentEquals(other.liveAmplitudes) &&
                 postRecording == other.postRecording &&
                 errorMessage == other.errorMessage &&
@@ -35,11 +41,14 @@ data class RecordUiState(
                 countInBars == other.countInBars &&
                 isCountingIn == other.isCountingIn &&
                 lastBeatFrame == other.lastBeatFrame &&
-                isMetronomeSettingsOpen == other.isMetronomeSettingsOpen
+                isTempoDrawerOpen == other.isTempoDrawerOpen
     }
 
     override fun hashCode(): Int {
-        var result = isRecording.hashCode()
+        var result = 31 * (31 * capture.hashCode() + isWriting.hashCode()) + words.hashCode()
+        result = 31 * result + writingFocusRequest.hashCode()
+        result = 31 * result + isRecording.hashCode()
+        result = 31 * result + isSaving.hashCode()
         result = 31 * result + liveAmplitudes.contentHashCode()
         result = 31 * result + (postRecording?.hashCode() ?: 0)
         result = 31 * result + (errorMessage?.hashCode() ?: 0)
@@ -49,17 +58,22 @@ data class RecordUiState(
         result = 31 * result + countInBars.hashCode()
         result = 31 * result + isCountingIn.hashCode()
         result = 31 * result + lastBeatFrame.hashCode()
-        result = 31 * result + isMetronomeSettingsOpen.hashCode()
+        result = 31 * result + isTempoDrawerOpen.hashCode()
         return result
     }
 }
 
 /** User-initiated actions on the Record screen. */
 sealed interface RecordAction {
+    data object ShowSound : RecordAction
+    data class WordsChanged(val value: String) : RecordAction
+    data object RetryWords : RecordAction
+    data object NewIdea : RecordAction
+    data object PlayTake : RecordAction
+    data object LeaveScreen : RecordAction
+    data class SelectTake(val id: Long) : RecordAction
     data object StartRecording : RecordAction
     data object StopAndSave : RecordAction
-    /** Gracefully save if the app is backgrounded mid-recording. */
-    data object StopForBackground : RecordAction
     /** Navigate to Overview for the captured idea. */
     data object GoToOverview : RecordAction
     /** Navigate to Studio for the captured idea. */
@@ -76,8 +90,10 @@ sealed interface RecordAction {
     data class SetMetronomeBpm(val bpm: Double) : RecordAction
     /** Set count-in bars (0/1/2/4). */
     data class SetCountInBars(val bars: Int) : RecordAction
-    /** Toggle metronome settings drawer. */
-    data object ToggleMetronomeSettings : RecordAction
+    /** Open or close the Capture tempo drawer. */
+    data object ToggleTempoDrawer : RecordAction
+    /** Close the Capture tempo drawer without changing tempo settings. */
+    data object DismissTempoDrawer : RecordAction
     /** Tap tempo. */
     data object TapTempo : RecordAction
 }

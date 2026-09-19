@@ -348,12 +348,18 @@ fun OverviewScreen(
             NjSectionTitle("Notes")
             NjTextField(
                 value = notesDraft,
+                enabled = state.notesReady,
                 onValueChange = { vm.onAction(OverviewAction.NotesChanged(it)) },
                 label = "Notes",
                 placeholder = "Lyrics? Chords? Vibe?",
                 minLines = 6,
                 maxLines = 12
             )
+
+            Text(if (state.notesError != null) state.notesError!! else if (state.notesPending) "Saving words" else if (state.notesReady) "Words saved" else "Loading words",
+                style = MaterialTheme.typography.bodySmall)
+            NjButton(text = "Retry", caption = "SAVE WORDS", enabled = state.notesError != null,
+                onClick = { vm.onAction(OverviewAction.RetryNotes) })
 
             NjSectionTitle("Tags")
             if (tags.isEmpty()) {

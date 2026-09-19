@@ -1,3 +1,11 @@
 <resources>
     <string name="app_name">Nightjar</string>
+    <string name="capture_notification_channel">Active recording</string>
+    <string name="capture_notification_title">Nightjar recording</string>
+    <string name="capture_notification_text">Recording stays active with the screen off.</string>
+    <string name="capture_stop">Stop</string>
+    <string name="capture_notification_starting">Starting recording</string>
+    <string name="capture_notification_count_in">Counting in</string>
+    <string name="capture_notification_saving">Saving recording</string>
+    <string name="capture_notification_finishing">Finishing your idea.</string>
 </resources>

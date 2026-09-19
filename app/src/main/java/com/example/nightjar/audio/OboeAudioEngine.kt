@@ -41,6 +41,7 @@ class OboeAudioEngine @Inject constructor() {
     // ── Lifecycle ──────────────────────────────────────────────────────────
 
     fun initialize(): Boolean {
+        nativeLibraryLoaded
         val result = nativeInit()
         Log.d(TAG, "initialize() → $result")
         return result
@@ -434,7 +435,9 @@ class OboeAudioEngine @Inject constructor() {
     companion object {
         private const val TAG = "OboeAudioEngine"
 
-        init {
+        // Load at the documented Application initialization boundary. Merely
+        // referencing the facade (for example in a JVM unit test) needs no NDK.
+        private val nativeLibraryLoaded: Unit by lazy {
             System.loadLibrary("nightjar-audio")
         }
     }

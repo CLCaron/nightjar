@@ -26,15 +26,15 @@ import javax.inject.Inject
  *
  * Manages editing of a single idea's metadata (title, notes, tags, favorite)
  * and multi-track playback via [OboeAudioEngine].
- * Title and notes changes are debounced (600 ms) to avoid excessive writes.
- * Pending saves are flushed when the screen is disposed.
+ * Title changes are debounced; notes use the shared, journaled NotesSession writer.
  */
 @HiltViewModel
 class OverviewViewModel @Inject constructor(
     private val repo: IdeaRepository,
     private val studioRepo: StudioRepository,
     private val audioEngine: OboeAudioEngine,
-    private val recordingStorage: RecordingStorage
+    private val recordingStorage: RecordingStorage,
+    private val notesSession: com.example.nightjar.data.repository.NotesSession
 ) : ViewModel() {
 
     private var currentIdeaId: Long? = null
@@ -49,7 +49,8 @@ class OverviewViewModel @Inject constructor(
     val totalDurationMs: StateFlow<Long> = audioEngine.totalDurationMs
 
     private var titleSaveJob: Job? = null
-    private var notesSaveJob: Job? = null
+    private var notesObserver: Job? = null
+    private var notesDocument: com.example.nightjar.data.repository.NotesSession.Document? = null
     private var tickJob: Job? = null
 
     init {
@@ -73,6 +74,7 @@ class OverviewViewModel @Inject constructor(
             is OverviewAction.TitleChanged -> onTitleChange(action.value)
             is OverviewAction.NotesChanged -> onNotesChange(action.value)
             OverviewAction.ToggleFavorite -> toggleFavorite()
+            OverviewAction.RetryNotes -> notesDocument?.retry()
             is OverviewAction.AddTagsFromInput -> addTagsFromInput(action.raw)
             is OverviewAction.RemoveTag -> removeTag(action.tagId)
             OverviewAction.NavigateBack -> navigateBack()
@@ -107,6 +109,15 @@ class OverviewViewModel @Inject constructor(
                     )
                 }
 
+                notesObserver?.cancel()
+                val document = notesSession.open(ideaId)
+                notesDocument = document
+                notesObserver = viewModelScope.launch {
+                    document.state.collect { notes ->
+                        _state.update { it.copy(notesDraft = notes.text, notesReady = notes.ready,
+                            notesPending = notes.pending, notesError = notes.error) }
+                    }
+                }
                 refreshTags()
 
                 val tracks = studioRepo.ensureProjectInitialized(ideaId)
@@ -132,16 +143,18 @@ class OverviewViewModel @Inject constructor(
 
         // Cancel pending debounce jobs -- we'll handle saves inline.
         titleSaveJob?.cancel()
-        notesSaveJob?.cancel()
+
 
         viewModelScope.launch {
-            // Flush any pending edits first so the DB reflects final state.
+            // The shared writer survives this screen; do not delete a text-first Idea while a draft is pending.
+            if (notesDocument?.flush() == false) return@launch
             val idea = _state.value.idea
             if (idea != null) {
                 try {
                     repo.updateTitle(idea.id, _state.value.titleDraft)
-                    repo.updateNotes(idea.id, _state.value.notesDraft)
-                } catch (_: Exception) { /* best effort */ }
+                } catch (e: Exception) {
+                    android.util.Log.e("OverviewViewModel", "Could not save title before leaving", e)
+                }
             }
 
             // Delete the idea if the user never added meaningful content.
@@ -202,8 +215,7 @@ class OverviewViewModel @Inject constructor(
     }
 
     private fun onNotesChange(value: String) {
-        _state.update { it.copy(notesDraft = value)}
-        scheduleNotesSave()
+        notesDocument?.edit(value)
     }
 
     private fun scheduleTitleSave() {
@@ -218,24 +230,6 @@ class OverviewViewModel @Inject constructor(
                 _state.update { it.copy(idea = idea.copy(title = finalTitle)) }
             } catch (e: Exception) {
                 val msg = e.message ?: "Failed to save title."
-                _state.update { it.copy(errorMessage = msg) }
-                _effects.emit(OverviewEffect.ShowError(msg))
-            }
-        }
-    }
-
-    private fun scheduleNotesSave() {
-        val idea = _state.value.idea ?: return
-        notesSaveJob?.cancel()
-
-        notesSaveJob = viewModelScope.launch {
-            delay(600)
-            try {
-                val notes = _state.value.notesDraft
-                repo.updateNotes(idea.id, notes)
-                _state.update { it.copy(idea = idea.copy(notes = notes)) }
-            } catch (e: Exception) {
-                val msg = e.message ?: "Failed to save notes."
                 _state.update { it.copy(errorMessage = msg) }
                 _effects.emit(OverviewEffect.ShowError(msg))
             }
@@ -306,17 +300,17 @@ class OverviewViewModel @Inject constructor(
     }
 
     private fun flushPendingSaves() {
+        notesDocument?.retry()
         titleSaveJob?.cancel()
-        notesSaveJob?.cancel()
+
 
         val idea = _state.value.idea ?: return
 
         viewModelScope.launch {
             try {
                 repo.updateTitle(idea.id, _state.value.titleDraft)
-                repo.updateNotes(idea.id, _state.value.notesDraft)
-            } catch (_: Exception) {
-                // ignore on dispose
+            } catch (e: Exception) {
+                android.util.Log.e("OverviewViewModel", "Could not flush title", e)
             }
         }
     }

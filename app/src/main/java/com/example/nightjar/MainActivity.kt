@@ -5,6 +5,8 @@ import com.example.nightjar.ui.library.LibraryScreen
 import com.example.nightjar.ui.overview.OverviewScreen
 import com.example.nightjar.ui.settings.SettingsScreen
 import android.os.Bundle
+import android.content.Intent
+import com.example.nightjar.audio.CaptureService
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -33,9 +35,17 @@ import javax.inject.Inject
 class MainActivity : ComponentActivity() {
 
     @Inject lateinit var themePrefs: ThemePreferences
+    private var captureRequest by mutableIntStateOf(0)
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.action == CaptureService.OPEN) captureRequest++
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (intent.action == CaptureService.OPEN) captureRequest++
         val initialDark = themePrefs.themeKey != ThemePreferences.LEMON_CAKE
         enableEdgeToEdge(
             statusBarStyle = if (initialDark) SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
@@ -67,6 +77,7 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     NightjarApp(
+                        captureRequest = captureRequest,
                         onThemeChanged = { themeKey = it }
                     )
                 }
@@ -89,8 +100,17 @@ private object Routes {
 
 /** Top-level navigation graph: Record -> Library -> Overview -> Studio. */
 @Composable
-fun NightjarApp(onThemeChanged: (String) -> Unit) {
+fun NightjarApp(onThemeChanged: (String) -> Unit, captureRequest: Int = 0) {
     val navController = rememberNavController()
+
+    LaunchedEffect(captureRequest) {
+        if (captureRequest > 0) {
+            navController.navigate(Routes.RECORD) {
+                popUpTo(Routes.RECORD) { inclusive = false }
+                launchSingleTop = true
+            }
+        }
+    }
 
     NavHost(navController = navController, startDestination = Routes.RECORD) {
         composable(Routes.RECORD) {

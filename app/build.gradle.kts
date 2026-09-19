@@ -9,6 +9,8 @@ plugins {
 android {
     namespace = "com.example.nightjar"
     compileSdk = 36
+    // Device verification can explicitly target the isolated app instead of the original package.
+    testBuildType = providers.gradleProperty("nightjar.testBuildType").orElse("debug").get()
 
     defaultConfig {
         applicationId = "com.example.nightjar"
@@ -37,6 +39,12 @@ android {
     }
 
     buildTypes {
+        create("captureTest") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".capturetest"
+            versionNameSuffix = "-capture-test"
+            matchingFallbacks += listOf("debug")
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(

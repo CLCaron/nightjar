@@ -1,237 +1,135 @@
 package com.example.nightjar.ui.record
 
-import app.cash.turbine.test
+import androidx.lifecycle.ViewModelStore
+import com.example.nightjar.audio.CapturePhase
+import com.example.nightjar.audio.CaptureSession
+import com.example.nightjar.audio.CaptureState
+import com.example.nightjar.audio.MetronomePreferences
 import com.example.nightjar.audio.OboeAudioEngine
 import com.example.nightjar.data.repository.IdeaRepository
-import com.example.nightjar.data.storage.RecordingStorage
 import com.example.nightjar.util.MainDispatcherRule
-import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import java.io.File
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
-import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
+import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class RecordViewModelTest {
-    private val testDispatcher = StandardTestDispatcher()
+    private val dispatcher = StandardTestDispatcher()
+    @get:Rule val main = MainDispatcherRule(dispatcher)
+    private val engine = mockk<OboeAudioEngine>(relaxed = true)
+    private val repo = mockk<IdeaRepository>(relaxed = true)
+    private val prefs = mockk<MetronomePreferences>(relaxed = true)
+    private val session = mockk<CaptureSession>(relaxed = true)
+    private val captureState = MutableStateFlow(CaptureState())
 
-    @get:Rule
-    val mainDispatcherRule = MainDispatcherRule(testDispatcher)
-
-    private fun mockAudioEngine(
-        startResult: Boolean = true,
-        awaitResult: Boolean = true,
-        stopDurationMs: Long = 3000L
-    ): OboeAudioEngine {
-        val engine = mockk<OboeAudioEngine>(relaxed = true)
-        every { engine.startRecording(any()) } returns startResult
-        coEvery { engine.awaitFirstBuffer(any()) } returns awaitResult
-        every { engine.stopRecording() } returns stopDurationMs
-        every { engine.isRecordingActive() } returns false
-        every { engine.getLatestPeakAmplitude() } returns 0f
-        return engine
+    private fun viewModel(): RecordViewModel {
+        every { session.state } returns captureState
+        return RecordViewModel(engine, repo, prefs, session)
     }
 
-    @Test
-    fun `start recording updates state`() = runTest(testDispatcher.scheduler) {
-        val engine = mockAudioEngine()
-        val storage = mockk<RecordingStorage>()
-        val repo = mockk<IdeaRepository>()
-        val file = File("nightjar_20260218_120000.wav")
-        every { storage.createRecordingFile(any(), any()) } returns file
-
-        val viewModel = RecordViewModel(engine, storage, repo)
-        viewModel.startRecording()
-
-        assertTrue(viewModel.state.value.isRecording)
-
-        advanceUntilIdle()
-
-        assertTrue(viewModel.state.value.isRecording)
-        assertEquals(null, viewModel.state.value.errorMessage)
-        verify { engine.startRecording(file.absolutePath) }
+    @Test fun `clearing screen does not stop the app owned recording`() = runTest(dispatcher) {
+        captureState.value = CaptureState(phase = CapturePhase.RECORDING)
+        val store = ViewModelStore()
+        val first = viewModel()
+        store.put("record", first)
+        runCurrent()
+        assertTrue(first.state.value.isRecording)
+        store.clear()
+        verify(exactly = 0) { session.stop(any()) }
+        verify(exactly = 0) { engine.stopRecording() }
+        val restored = viewModel()
+        store.put("record", restored)
+        runCurrent()
+        assertTrue(restored.state.value.isRecording)
+        store.clear()
     }
 
-    @Test
-    fun `start recording handles errors`() = runTest(testDispatcher.scheduler) {
-        val engine = mockAudioEngine(startResult = false)
-        val storage = mockk<RecordingStorage>()
-        val repo = mockk<IdeaRepository>()
-        val file = File("nightjar_20260218_120000.wav")
-        every { storage.createRecordingFile(any(), any()) } returns file
-
-        val viewModel = RecordViewModel(engine, storage, repo)
-        viewModel.startRecording()
-        advanceUntilIdle()
-
-        assertFalse(viewModel.state.value.isRecording)
-        assertEquals("Failed to start recording.", viewModel.state.value.errorMessage)
-    }
-
-    @Test
-    fun `stop and save enters post-recording state`() = runTest(testDispatcher.scheduler) {
-        val engine = mockAudioEngine(stopDurationMs = 3000L)
-        val storage = mockk<RecordingStorage>()
-        val repo = mockk<IdeaRepository>()
-        val file = File("nightjar_20260218_120000.wav")
-        every { storage.createRecordingFile(any(), any()) } returns file
-        coEvery { repo.createIdeaWithTrack(file, 3000L) } returns 42L
-
-        val viewModel = RecordViewModel(engine, storage, repo)
-
-        // Start recording first so recordingFile is set
-        viewModel.startRecording()
-        advanceUntilIdle()
-
-        // Now stop
-        viewModel.onAction(RecordAction.StopAndSave)
-        advanceUntilIdle()
-
-        assertFalse(viewModel.state.value.isRecording)
-        val post = viewModel.state.value.postRecording
-        assertNotNull(post)
-        assertEquals(42L, post!!.ideaId)
-        assertEquals(file, post.audioFile)
-    }
-
-    @Test
-    fun `stop and save handles engine errors`() = runTest(testDispatcher.scheduler) {
-        val engine = mockk<OboeAudioEngine>(relaxed = true)
-        every { engine.stopRecording() } throws IllegalStateException("stop failed")
-        val storage = mockk<RecordingStorage>()
-        val repo = mockk<IdeaRepository>()
-
-        val viewModel = RecordViewModel(engine, storage, repo)
-
-        viewModel.effects.test {
-            viewModel.onAction(RecordAction.StopAndSave)
-            advanceUntilIdle()
-            val effect = awaitItem()
-            assertTrue(effect is RecordEffect.ShowError)
-            assertEquals("stop failed", (effect as RecordEffect.ShowError).message)
-            cancelAndIgnoreRemainingEvents()
-        }
-
-        assertEquals("stop failed", viewModel.state.value.errorMessage)
-    }
-
-    @Test
-    fun `stop for background creates idea and enters post-recording`() = runTest(testDispatcher.scheduler) {
-        val engine = mockAudioEngine(stopDurationMs = 1000L)
-        val storage = mockk<RecordingStorage>()
-        val repo = mockk<IdeaRepository>()
-        val file = File("nightjar_20260218_120000.wav")
-        every { storage.createRecordingFile(any(), any()) } returns file
-        coEvery { repo.createIdeaWithTrack(file, 1000L) } returns 99L
-
-        val viewModel = RecordViewModel(engine, storage, repo)
-        viewModel.startRecording()
-        advanceUntilIdle()
-        viewModel.onAction(RecordAction.StopForBackground)
-        advanceUntilIdle()
-
-        assertFalse(viewModel.state.value.isRecording)
-        val post = viewModel.state.value.postRecording
-        assertNotNull(post)
-        assertEquals(99L, post!!.ideaId)
-        assertEquals(file, post.audioFile)
-        verify { engine.stopRecording() }
-    }
-
-    @Test
-    fun `GoToOverview emits OpenOverview and clears post-recording`() = runTest(testDispatcher.scheduler) {
-        val engine = mockAudioEngine(stopDurationMs = 2000L)
-        val storage = mockk<RecordingStorage>()
-        val repo = mockk<IdeaRepository>()
+    @Test fun `returning after notification stop shows the saved idea`() = runTest(dispatcher) {
         val file = File("saved.wav")
-        every { storage.createRecordingFile(any(), any()) } returns file
-        coEvery { repo.createIdeaWithTrack(file, 2000L) } returns 7L
-
-        val viewModel = RecordViewModel(engine, storage, repo)
-
-        // Start and stop to enter post-recording state
-        viewModel.startRecording()
-        advanceUntilIdle()
-        viewModel.onAction(RecordAction.StopAndSave)
-        advanceUntilIdle()
-        assertNotNull(viewModel.state.value.postRecording)
-
-        // Navigate to overview
-        viewModel.effects.test {
-            viewModel.onAction(RecordAction.GoToOverview)
-            advanceUntilIdle()
-            val effect = awaitItem()
-            assertTrue(effect is RecordEffect.OpenOverview)
-            assertEquals(7L, (effect as RecordEffect.OpenOverview).ideaId)
-            cancelAndIgnoreRemainingEvents()
-        }
-
-        assertNull(viewModel.state.value.postRecording)
+        captureState.value = CaptureState(phase = CapturePhase.SAVED, ideaId = 42L, file = file)
+        val store = ViewModelStore()
+        val vm = viewModel()
+        store.put("record", vm)
+        runCurrent()
+        assertFalse(vm.state.value.isRecording)
+        assertEquals(42L, vm.state.value.postRecording?.ideaId)
+        assertEquals(file, vm.state.value.postRecording?.audioFile)
+        store.clear()
     }
 
-    @Test
-    fun `GoToStudio emits OpenStudio and clears post-recording`() = runTest(testDispatcher.scheduler) {
-        val engine = mockAudioEngine(stopDurationMs = 2000L)
-        val storage = mockk<RecordingStorage>()
-        val repo = mockk<IdeaRepository>()
-        val file = File("saved.wav")
-        every { storage.createRecordingFile(any(), any()) } returns file
-        coEvery { repo.createIdeaWithTrack(file, 2000L) } returns 7L
-
-        val viewModel = RecordViewModel(engine, storage, repo)
-
-        // Start and stop to enter post-recording state
-        viewModel.startRecording()
-        advanceUntilIdle()
-        viewModel.onAction(RecordAction.StopAndSave)
-        advanceUntilIdle()
-        assertNotNull(viewModel.state.value.postRecording)
-
-        // Navigate to studio
-        viewModel.effects.test {
-            viewModel.onAction(RecordAction.GoToStudio)
-            advanceUntilIdle()
-            val effect = awaitItem()
-            assertTrue(effect is RecordEffect.OpenStudio)
-            assertEquals(7L, (effect as RecordEffect.OpenStudio).ideaId)
-            cancelAndIgnoreRemainingEvents()
-        }
-
-        assertNull(viewModel.state.value.postRecording)
+    @Test fun `saving status is explicit even without waveform samples`() = runTest(dispatcher) {
+        val store = ViewModelStore()
+        val vm = viewModel()
+        store.put("record", vm)
+        captureState.value = CaptureState(phase = CapturePhase.SAVING)
+        runCurrent()
+        assertTrue(vm.state.value.isSaving)
+        assertFalse(vm.state.value.isRecording)
+        assertNull(vm.state.value.postRecording)
+        store.clear()
+    }
+    @Test fun `opening Write while listening does not stop or restart audio`() = runTest(dispatcher) {
+        captureState.value = CaptureState(phase = CapturePhase.SAVED, ideaId = 42L, playing = true)
+        val document = mockk<com.example.nightjar.data.repository.NotesSession.Document>(relaxed = true)
+        every { document.state } returns MutableStateFlow(com.example.nightjar.data.repository.NotesState(ideaId = 42L, text = "lyrics", ready = true))
+        every { session.writingDocument() } returns document
+        val store = ViewModelStore()
+        val vm = viewModel(); store.put("record", vm); runCurrent()
+        vm.onAction(RecordAction.CreateWriteIdea); runCurrent()
+        assertTrue(vm.state.value.isWriting)
+        assertEquals("lyrics", vm.state.value.words.text)
+        assertTrue(vm.state.value.capture.playing)
+        verify(exactly = 0) { session.stopAudition() }
+        verify(exactly = 0) { engine.pause() }
+        vm.onAction(RecordAction.WordsChanged("next line"))
+        verify { document.edit("next line") }
+        store.clear()
     }
 
-    @Test
-    fun `StartRecording clears post-recording state`() = runTest(testDispatcher.scheduler) {
-        val engine = mockAudioEngine(stopDurationMs = 2000L)
-        val storage = mockk<RecordingStorage>()
-        val repo = mockk<IdeaRepository>()
-        val file = File("saved.wav")
-        every { storage.createRecordingFile(any(), any()) } returns file
-        coEvery { repo.createIdeaWithTrack(file, 2000L) } returns 7L
+    @Test fun `record and Write dismiss tempo drawer without changing settings`() = runTest(dispatcher) {
+        every { prefs.isEnabled } returns true
+        every { prefs.volume } returns 0.45f
+        every { prefs.countInBars } returns 2
+        val document = mockk<com.example.nightjar.data.repository.NotesSession.Document>(relaxed = true)
+        every { document.state } returns MutableStateFlow(
+            com.example.nightjar.data.repository.NotesState(ready = true)
+        )
+        every { session.writingDocument() } returns document
+        val store = ViewModelStore()
+        val vm = viewModel(); store.put("record", vm); runCurrent()
 
-        val viewModel = RecordViewModel(engine, storage, repo)
+        vm.onAction(RecordAction.ToggleTempoDrawer)
+        assertTrue(vm.state.value.isTempoDrawerOpen)
+        vm.onAction(RecordAction.CreateWriteIdea)
+        assertFalse(vm.state.value.isTempoDrawerOpen)
+        assertTrue(vm.state.value.isMetronomeEnabled)
+        assertEquals(0.45f, vm.state.value.metronomeVolume)
+        assertEquals(2, vm.state.value.countInBars)
 
-        // Start and stop to enter post-recording state
-        viewModel.startRecording()
-        advanceUntilIdle()
-        viewModel.onAction(RecordAction.StopAndSave)
-        advanceUntilIdle()
-        assertNotNull(viewModel.state.value.postRecording)
-
-        // Start new recording — should clear post-recording
-        viewModel.onAction(RecordAction.StartRecording)
-        assertTrue(viewModel.state.value.isRecording)
-        assertNull(viewModel.state.value.postRecording)
+        vm.onAction(RecordAction.ShowSound)
+        vm.onAction(RecordAction.ToggleTempoDrawer)
+        vm.onAction(RecordAction.StartRecording)
+        assertFalse(vm.state.value.isTempoDrawerOpen)
+        verify { session.start(match { it.metronome && it.volume == 0.45f && it.countInBars == 2 }) }
+        store.clear()
     }
+
+    @Test fun `tempo drawer has an explicit dismiss action`() = runTest(dispatcher) {
+        val store = ViewModelStore()
+        val vm = viewModel(); store.put("record", vm); runCurrent()
+        vm.onAction(RecordAction.ToggleTempoDrawer)
+        vm.onAction(RecordAction.DismissTempoDrawer)
+        assertFalse(vm.state.value.isTempoDrawerOpen)
+        store.clear()
+    }
+
 }

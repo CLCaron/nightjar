@@ -197,6 +197,7 @@ fun TimelinePanel(
     isFollowActive: Boolean,
     followLineXPx: Float,
     onDisengageFollow: () -> Unit,
+    trackLaneHeight: Dp = TRACK_LANE_HEIGHT,
     modifier: Modifier = Modifier
 ) {
     // Drawer animation specs
@@ -273,7 +274,7 @@ fun TimelinePanel(
             Row(Modifier.fillMaxWidth()) {
                 TrackHeader(
                     track = track,
-                    height = TRACK_LANE_HEIGHT,
+                    height = trackLaneHeight,
                     headerWidth = columnWidth,
                     isExpanded = track.id in expandedTrackIds,
                     isCollapsed = track.id in collapsedHeaderTrackIds,
@@ -300,7 +301,7 @@ fun TimelinePanel(
                                 timeSignatureDenominator = timeSignatureDenominator,
                                 gridResolution = gridResolution,
                                 timelineWidth = timelineWidthDp,
-                                laneHeight = TRACK_LANE_HEIGHT
+                                laneHeight = trackLaneHeight
                             )
                         }
                         when {
@@ -315,7 +316,7 @@ fun TimelinePanel(
                                     clipDragState = clipDragState,
                                     expandedClipState = expandedClipState,
                                     timelineWidth = timelineWidthDp,
-                                    laneHeight = TRACK_LANE_HEIGHT,
+                                    laneHeight = trackLaneHeight,
                                     effectivelyMuted = effectivelyMuted,
                                     onAction = onAction,
                                     timeSignatureNumerator = timeSignatureNumerator,
@@ -333,7 +334,7 @@ fun TimelinePanel(
                                     expandedClipState = expandedClipState,
                                     bpm = bpm,
                                     timelineWidth = timelineWidthDp,
-                                    laneHeight = TRACK_LANE_HEIGHT,
+                                    laneHeight = trackLaneHeight,
                                     effectivelyMuted = effectivelyMuted,
                                     onAction = onAction,
                                     timeSignatureNumerator = timeSignatureNumerator,
@@ -347,7 +348,7 @@ fun TimelinePanel(
                                     clips = clips,
                                     msPerDp = msPerDp,
                                     timelineWidth = timelineWidthDp,
-                                    laneHeight = TRACK_LANE_HEIGHT,
+                                    laneHeight = trackLaneHeight,
                                     audioClipDragState = audioClipDragState,
                                     audioClipTrimState = audioClipTrimState,
                                     expandedClipState = expandedClipState,
@@ -364,7 +365,7 @@ fun TimelinePanel(
                                 loopEndMs = loopEndMs,
                                 isLoopEnabled = isLoopEnabled,
                                 msPerDp = msPerDp,
-                                height = TRACK_LANE_HEIGHT,
+                                height = trackLaneHeight,
                                 showHandles = false
                             )
                         }
@@ -373,13 +374,13 @@ fun TimelinePanel(
                             CursorSegment(
                                 cursorPositionMs = cursorPositionMs,
                                 msPerDp = msPerDp,
-                                height = TRACK_LANE_HEIGHT,
+                                height = trackLaneHeight,
                                 showTriangle = false
                             )
                             PlayheadSegment(
                                 globalPositionMs = globalPositionMs,
                                 msPerDp = msPerDp,
-                                height = TRACK_LANE_HEIGHT
+                                height = trackLaneHeight
                             )
                         }
                     }
