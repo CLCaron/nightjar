@@ -87,7 +87,6 @@ internal fun CaptureWritingWorkspace(
         state.isSaving -> "SAVING AUDIO"
         capture.pendingSave -> "AUDIO SAVE NEEDS RETRY"
         state.words.error != null -> "WORDS NEED SAVE RETRY"
-        state.words.pending -> "SAVING WORDS"
         capture.playing -> "PLAYING TAKE ${capture.takes.find { it.id == capture.selectedTakeId }?.sortIndex?.plus(1)}"
         capture.ideaId != null -> "IDEA ${capture.ideaId} / ${capture.takes.size} TAKES"
         else -> "NIGHTJAR"
@@ -126,12 +125,10 @@ private fun CaptureWordsEditor(state: RecordUiState, editor: TextFieldValue, edi
     val saveStatus: @Composable () -> Unit = {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(when {
-                state.words.error != null -> state.words.error
+                state.words.error != null -> "WORDS NEED SAVE RETRY"
                 !state.words.ready -> "Loading words"
-                state.words.pending -> "Saving words"
-                state.words.ideaId != null -> "Words saved"
-                else -> "Words"
-            } ?: "Words", color = NjMuted, fontFamily = IbmPlexMono, fontSize = 11.sp,
+                else -> "WORDS"
+            }, color = NjMuted, fontFamily = IbmPlexMono, fontSize = 11.sp,
                 modifier = Modifier.weight(1f))
             NjButton(text = "Retry", caption = "SAVE WORDS", enabled = state.words.error != null,
                 onClick = { onAction(RecordAction.RetryWords) })
@@ -254,7 +251,7 @@ private fun CaptureNavigationDock(state: RecordUiState, onAction: (RecordAction)
     onLibrary: () -> Unit, onSettings: () -> Unit) {
     val capture = state.capture
     Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        NjButton(text = "Studio", enabled = !capture.busy && !capture.pendingSave && state.words.safeToLeaveIdea,
+        NjButton(text = "Studio", enabled = !capture.busy && !capture.pendingSave,
             onClick = { onAction(RecordAction.CreateStudioIdea) }, modifier = Modifier.weight(1f))
         NjButton(text = "Library", enabled = !capture.busy, onClick = onLibrary, modifier = Modifier.weight(1f))
         NjButton(text = "Settings", onClick = onSettings, modifier = Modifier.weight(1f))
@@ -289,7 +286,7 @@ private fun CaptureWorkspaceModes(state: RecordUiState, onAction: (RecordAction)
             enabled = !state.capture.busy && !state.capture.pendingSave,
             onClick = { onAction(RecordAction.CreateWriteIdea) }, modifier = Modifier.weight(1f))
         NjButton(text = "New Idea", enabled = !state.capture.busy && !state.capture.pendingSave &&
-            state.words.safeToLeaveIdea && (state.capture.ideaId != null || state.words.text.isNotEmpty()),
+            (state.capture.ideaId != null || state.words.text.isNotEmpty()),
             onClick = { onAction(RecordAction.NewIdea) }, modifier = Modifier.weight(1f))
     }
 }

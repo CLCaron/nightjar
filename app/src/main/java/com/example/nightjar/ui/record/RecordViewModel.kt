@@ -41,6 +41,7 @@ class RecordViewModel @Inject constructor(
     // Tap tempo tracking
     private val tapTimestamps = mutableListOf<Long>()
     private var wordsJob: kotlinx.coroutines.Job? = null
+    private var leaveIdeaJob: kotlinx.coroutines.Job? = null
     private var document: com.example.nightjar.data.repository.NotesSession.Document? = null
 
     init {
@@ -68,16 +69,7 @@ class RecordViewModel @Inject constructor(
 
     fun onAction(action: RecordAction) {
         when (action) {
-            RecordAction.NewIdea -> {
-                if (capture.canStartNewIdea()) {
-                    capture.clearCompleted()
-                    wordsJob?.cancel()
-                    document = null
-                    _state.value = _state.value.copy(isWriting = false,
-                        words = com.example.nightjar.data.repository.NotesState(ready = true),
-                        isTempoDrawerOpen = false)
-                }
-            }
+            RecordAction.NewIdea -> startNewIdea()
             RecordAction.ShowSound -> _state.value = _state.value.copy(isWriting = false)
             is RecordAction.WordsChanged -> document?.edit(action.value)
             RecordAction.RetryWords -> document?.retry()
@@ -145,15 +137,47 @@ class RecordViewModel @Inject constructor(
     }
 
     private fun createStudioIdea() {
-        if (capture.state.value.ideaId != null) { goToStudio(); return }
-        viewModelScope.launch {
+        if (capture.state.value.busy || capture.state.value.pendingSave || leaveIdeaJob?.isActive == true) return
+        leaveIdeaJob = viewModelScope.launch {
             try {
+                if (document?.flush() == false) {
+                    _effects.emit(RecordEffect.ShowError(
+                        document?.state?.value?.error ?: "Words are still being saved. Try again."
+                    ))
+                    return@launch
+                }
+                capture.state.value.ideaId?.let { ideaId ->
+                    capture.stopAudition()
+                    _effects.emit(RecordEffect.OpenStudio(ideaId))
+                    return@launch
+                }
                 val ideaId = repo.createEmptyIdea()
                 _effects.emit(RecordEffect.OpenStudio(ideaId))
             } catch (e: Exception) {
                 val msg = e.message ?: "Failed to create idea."
                 _effects.emit(RecordEffect.ShowError(msg))
             }
+        }
+    }
+
+    private fun startNewIdea() {
+        if (capture.state.value.busy || capture.state.value.pendingSave || leaveIdeaJob?.isActive == true) return
+        leaveIdeaJob = viewModelScope.launch {
+            if (document?.flush() == false) {
+                _effects.emit(RecordEffect.ShowError(
+                    document?.state?.value?.error ?: "Words are still being saved. Try again."
+                ))
+                return@launch
+            }
+            if (!capture.canStartNewIdea()) return@launch
+            capture.clearCompleted()
+            wordsJob?.cancel()
+            document = null
+            _state.value = _state.value.copy(
+                isWriting = false,
+                words = com.example.nightjar.data.repository.NotesState(ready = true),
+                isTempoDrawerOpen = false
+            )
         }
     }
 
