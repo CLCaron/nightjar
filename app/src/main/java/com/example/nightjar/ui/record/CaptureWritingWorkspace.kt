@@ -87,7 +87,7 @@ internal fun CaptureWritingWorkspace(
         state.isSaving -> "SAVING AUDIO"
         capture.pendingSave -> "AUDIO SAVE NEEDS RETRY"
         state.words.error != null -> "WORDS NEED SAVE RETRY"
-        capture.playing -> "PLAYING TAKE ${capture.takes.find { it.id == capture.selectedTakeId }?.sortIndex?.plus(1)}"
+        capture.playing -> "PLAYING LOOP"
         capture.ideaId != null -> "IDEA ${capture.ideaId} / ${capture.takes.size} TAKES"
         else -> "NIGHTJAR"
     }
@@ -101,20 +101,40 @@ internal fun CaptureWritingWorkspace(
                 CaptureWorkspaceModes(state, onAction, Modifier.fillMaxWidth())
             }
             Column(Modifier.weight(0.58f).fillMaxHeight()) {
-                CaptureTakeShelf(state, onAction)
+                CaptureLatchStrip(state, onAction)
+                CaptureGroupStrip(state, onAction)
                 if (state.isWriting) CaptureWordsEditor(state, editor, edit, focus, wordsScroll, onAction, Modifier.weight(1f), compact = true)
                 else CaptureSoundPanel(state, onAction, onLibrary, onSettings, Modifier.weight(1f), compact = true)
             }
         }
     } else {
         Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-            StatusLcd(status)
-            CaptureWritingTransport(state, onRecord, onAction, Modifier.fillMaxWidth())
+            CaptureWorkspaceHeader(state, status, onAction)
             CaptureWorkspaceModes(state, onAction, Modifier.fillMaxWidth())
-            CaptureTakeShelf(state, onAction)
+            CaptureGroupStrip(state, onAction)
+            CaptureLatchStrip(state, onAction)
             if (state.isWriting) CaptureWordsEditor(state, editor, edit, focus, wordsScroll, onAction, Modifier.weight(1f))
             else CaptureSoundPanel(state, onAction, onLibrary, onSettings, Modifier.weight(1f))
+            CaptureWritingTransport(state, onRecord, onAction, Modifier.fillMaxWidth())
+            CaptureNavigationDock(state, onAction, onLibrary, onSettings)
         }
+    }
+}
+
+@Composable
+private fun CaptureWorkspaceHeader(state: RecordUiState, status: String, onAction: (RecordAction) -> Unit) {
+    Row(Modifier.fillMaxWidth().height(72.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("NIGHTJAR  /  IDEA", color = NjMuted, fontFamily = IbmPlexMono, fontSize = 10.sp)
+            Text(state.capture.ideaTitle ?: "New Idea", color = NjStarlight,
+                style = MaterialTheme.typography.titleMedium, maxLines = 1)
+            Text(status, color = NjRecordCoral, fontFamily = IbmPlexMono, fontSize = 9.sp, maxLines = 1)
+        }
+        CaptureTempoModule(state, onAction, Modifier.width(62.dp).height(56.dp))
+        NjButton(text = "New", caption = "NEW IDEA",
+            enabled = !state.capture.busy && !state.capture.pendingSave &&
+                (state.capture.ideaId != null || state.words.text.isNotEmpty()),
+            onClick = { onAction(RecordAction.NewIdea) })
     }
 }
 
@@ -161,10 +181,11 @@ private fun CaptureSoundPanel(state: RecordUiState, onAction: (RecordAction) -> 
     onLibrary: () -> Unit, onSettings: () -> Unit, modifier: Modifier, compact: Boolean = false) {
     Column(modifier.fillMaxWidth()) {
         CaptureMeterRow(state, onAction, if (compact) 72.dp else 96.dp)
-        BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
+        if (state.isTempoDrawerOpen) BoxWithConstraints(Modifier.fillMaxWidth().heightIn(max = 230.dp)) {
             CaptureTempoDrawerSlot(state, onAction, maxHeight)
         }
-        CaptureNavigationDock(state, onAction, onLibrary, onSettings)
+        CaptureTakeShelf(state, onAction, Modifier.weight(1f))
+        if (compact) CaptureNavigationDock(state, onAction, onLibrary, onSettings)
     }
 }
 
@@ -183,11 +204,9 @@ private fun CaptureTempoDrawerSlot(state: RecordUiState, onAction: (RecordAction
 
 @Composable
 private fun CaptureMeterRow(state: RecordUiState, onAction: (RecordAction) -> Unit, height: androidx.compose.ui.unit.Dp) {
-    Row(Modifier.fillMaxWidth().height(height), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        WaveformSection(state.postRecording, state.liveAmplitudes, NjTrackColors[0],
-            { onAction(RecordAction.GoToOverview) }, Modifier.weight(1f).fillMaxHeight())
-        CaptureTempoModule(state, onAction, Modifier.width(88.dp).fillMaxHeight())
-    }
+    WaveformSection(state.postRecording, state.liveAmplitudes, NjTrackColors[0],
+        { state.capture.takes.lastOrNull()?.let { onAction(RecordAction.SelectTake(it.id)) } },
+        Modifier.fillMaxWidth().height(height))
 }
 
 @Composable
@@ -265,7 +284,7 @@ private fun CaptureWritingTransport(state: RecordUiState, onRecord: () -> Unit,
     Row(modifier.height(if (compact) 72.dp else 112.dp), horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically) {
         NjButton(text = "Play", icon = Icons.Filled.PlayArrow, caption = "PLAY", isActive = capture.playing,
-            enabled = !capture.busy && !capture.pendingSave && capture.takes.any { it.id == capture.selectedTakeId && it.durationMs > 0 },
+            enabled = !capture.busy && !capture.pendingSave && capture.groups.any { it.latchedTakeId != null },
             onClick = { onAction(RecordAction.PlayTake) })
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             HardwareRecordButton(state.isRecording, enabled = !state.isSaving && !state.isCountingIn, onClick = onRecord,
@@ -285,8 +304,5 @@ private fun CaptureWorkspaceModes(state: RecordUiState, onAction: (RecordAction)
         NjButton(text = "Write", isActive = state.isWriting,
             enabled = !state.capture.busy && !state.capture.pendingSave,
             onClick = { onAction(RecordAction.CreateWriteIdea) }, modifier = Modifier.weight(1f))
-        NjButton(text = "New Idea", enabled = !state.capture.busy && !state.capture.pendingSave &&
-            (state.capture.ideaId != null || state.words.text.isNotEmpty()),
-            onClick = { onAction(RecordAction.NewIdea) }, modifier = Modifier.weight(1f))
     }
 }

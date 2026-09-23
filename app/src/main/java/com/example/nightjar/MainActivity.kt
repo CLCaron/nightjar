@@ -125,6 +125,17 @@ fun NightjarApp(onThemeChanged: (String) -> Unit, captureRequest: Int = 0) {
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) }
             )
         }
+        composable(
+            route = "${Routes.RECORD}/{ideaId}",
+            arguments = listOf(navArgument("ideaId") { type = NavType.LongType })
+        ) { entry ->
+            val ideaId = entry.arguments?.getLong("ideaId") ?: -1L
+            RecordScreen(ideaId = ideaId,
+                onOpenLibrary = { navController.navigate(Routes.LIBRARY) },
+                onOpenOverview = { id -> navController.navigate("${Routes.OVERVIEW}/$id") },
+                onOpenStudio = { id -> navController.navigate("${Routes.STUDIO}/$id") },
+                onOpenSettings = { navController.navigate(Routes.SETTINGS) })
+        }
         composable(Routes.LIBRARY) {
             LibraryScreen(
                 onBack = { navController.popBackStack() },
@@ -141,6 +152,7 @@ fun NightjarApp(onThemeChanged: (String) -> Unit, captureRequest: Int = 0) {
             OverviewScreen(
                 ideaId = ideaId,
                 onBack = { navController.popBackStack() },
+                onOpenRecord = { id -> navController.navigate("${Routes.RECORD}/$id") },
                 onOpenStudio = { id ->
                     navController.navigate("${Routes.STUDIO}/$id")
                 }

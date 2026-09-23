@@ -119,6 +119,7 @@ import androidx.compose.foundation.layout.imePadding
  */
 @Composable
 fun RecordScreen(
+    ideaId: Long? = null,
     onOpenLibrary: () -> Unit,
     onOpenOverview: (Long) -> Unit,
     onOpenStudio: (Long) -> Unit,
@@ -129,6 +130,7 @@ fun RecordScreen(
 
     val vm: RecordViewModel = hiltViewModel()
     val state by vm.state.collectAsState()
+    LaunchedEffect(ideaId) { ideaId?.let(vm::openIdea) }
 
     val uiScope = androidx.compose.runtime.rememberCoroutineScope()
     val notificationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
@@ -239,17 +241,108 @@ private fun RecordScreenBackground() {
 }
 
 @Composable
-internal fun CaptureTakeShelf(state: RecordUiState, onAction: (RecordAction) -> Unit) {
-    if (state.capture.takes.isEmpty()) return
+internal fun CaptureLatchStrip(state: RecordUiState, onAction: (RecordAction) -> Unit) {
+    val selected = state.capture.groups.filter { it.latchedTakeId != null }
+    Row(Modifier.fillMaxWidth().height(44.dp).horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+        Text("PLAYBACK", color = NjMuted, fontFamily = IbmPlexMono, fontSize = 9.sp)
+        if (selected.isEmpty()) {
+            Text("NOTHING LATCHED", color = NjMuted2, fontFamily = IbmPlexMono, fontSize = 9.sp)
+        } else selected.forEach { group ->
+            NjButton(text = group.displayName, caption = if (state.capture.playing) "PLAYING" else "LATCHED",
+                isActive = true, ledColor = NjAmber, enabled = !state.capture.busy && !state.capture.playing,
+                onClick = { onAction(RecordAction.UnlatchGroup(group.id)) })
+        }
+    }
+}
 
-    val scroll = rememberScrollState()
-    LaunchedEffect(state.capture.takes.size, scroll.maxValue) { scroll.animateScrollTo(scroll.maxValue) }
-    Row(Modifier.fillMaxWidth().height(48.dp).horizontalScroll(scroll),
-        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        state.capture.takes.forEach { take ->
-            NjButton(text = take.displayName, onClick = { onAction(RecordAction.SelectTake(take.id)) },
-                isActive = take.id == state.capture.selectedTakeId, ledColor = NjAmber,
-                enabled = !state.capture.busy && !state.capture.pendingSave)
+@Composable
+internal fun CaptureGroupStrip(state: RecordUiState, onAction: (RecordAction) -> Unit) {
+    val capture = state.capture
+    var renaming by remember { mutableStateOf<com.example.nightjar.data.db.entity.CaptureGroupEntity?>(null) }
+    var name by remember { mutableStateOf("") }
+    Row(Modifier.fillMaxWidth().height(56.dp).horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+        Text("RECORD TO", color = NjMuted, fontFamily = IbmPlexMono, fontSize = 9.sp)
+        if (capture.groups.isEmpty()) {
+            NjButton(text = "Original Idea", caption = "GROUP", isActive = true,
+                ledColor = NjTrackColors[0], onClick = {})
+        }
+        capture.groups.forEach { group ->
+            NjButton(text = group.displayName, caption = "GROUP", isActive = group.id == capture.openGroupId,
+                ledColor = NjTrackColors[group.sortIndex % NjTrackColors.size],
+                enabled = !capture.busy && !capture.playing,
+                onClick = { onAction(RecordAction.OpenGroup(group.id)) })
+        }
+        NjButton(text = "+", caption = "NEW GROUP", enabled = !capture.busy && !capture.playing,
+            onClick = { onAction(RecordAction.CreateGroup) })
+        val open = capture.groups.find { it.id == capture.openGroupId }
+        NjButton(text = "Name", caption = "RENAME", enabled = open != null && !capture.busy,
+            onClick = { renaming = open; name = open?.displayName.orEmpty() })
+        NjButton(text = if (open?.inStudio == true) "Added" else "Add", caption = "TO STUDIO",
+            enabled = open != null && open.inStudio.not() && !capture.busy,
+            onClick = { open?.let { onAction(RecordAction.AddGroupToStudio(it.id)) } })
+    }
+    renaming?.let { target ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { renaming = null },
+            title = { Text("Name this group") },
+            text = { androidx.compose.material3.OutlinedTextField(value = name,
+                onValueChange = { name = it.take(40) }, singleLine = true, label = { Text("Group name") }) },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = {
+                if (name.isNotBlank()) onAction(RecordAction.RenameGroup(target.id, name))
+                renaming = null
+            }) { Text("Save") } },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { renaming = null }) { Text("Cancel") } }
+        )
+    }
+}
+
+@Composable
+internal fun CaptureTakeShelf(state: RecordUiState, onAction: (RecordAction) -> Unit,
+    modifier: Modifier = Modifier) {
+    val open = state.capture.groups.find { it.id == state.capture.openGroupId }
+    Column(modifier.fillMaxWidth()) {
+        Text("${(open?.displayName ?: "ORIGINAL IDEA").uppercase()} TAKES  /  ${state.capture.takes.size + state.capture.pendingTakeWaveforms.size}",
+            color = NjMuted, fontFamily = IbmPlexMono, fontSize = 9.sp,
+            modifier = Modifier.padding(vertical = 7.dp))
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (state.capture.takes.isEmpty() && state.capture.pendingTakeWaveforms.isEmpty()) {
+            Text("Press Record to capture a take in this group.", color = NjMuted,
+                style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(12.dp))
+        }
+        state.capture.pendingTakeWaveforms.indices.reversed().forEach { index ->
+            val waveform = state.capture.pendingTakeWaveforms[index]
+            Column(Modifier.fillMaxWidth().height(82.dp)
+                .clip(RoundedCornerShape(5.dp)).background(NjPanelInset).padding(7.dp),
+                verticalArrangement = Arrangement.SpaceBetween) {
+                Text("TAKE ${state.capture.takes.size + index + 1}", color = NjMuted,
+                    fontFamily = IbmPlexMono, fontSize = 9.sp)
+                NjLiveWaveform(amplitudes = waveform.toFloatArray(), modifier = Modifier.fillMaxWidth(),
+                    height = 37.dp, barColor = NjTrackColors[0])
+                Text("FINALIZES ON STOP", color = NjMuted2, fontFamily = IbmPlexMono, fontSize = 8.sp)
+            }
+        }
+        state.capture.takes.asReversed().forEach { take ->
+            val latched = state.capture.groups.any { it.latchedTakeId == take.id }
+            Column(Modifier.fillMaxWidth().height(82.dp)
+                .clip(RoundedCornerShape(5.dp))
+                .background(if (latched) NjPanelInset else RaisedBodyColor)
+                .clickable(enabled = !state.capture.busy && !state.capture.playing && !state.capture.pendingSave) {
+                    onAction(RecordAction.SelectTake(take.id))
+                }.padding(7.dp), verticalArrangement = Arrangement.SpaceBetween) {
+                Text("${take.displayName.uppercase()}  ${take.durationMs / 1000}s",
+                    color = if (latched) NjAmber else NjMuted, fontFamily = IbmPlexMono,
+                    fontSize = 9.sp, maxLines = 1)
+                state.capture.takeFiles[take.id]?.let { file ->
+                    NjWaveform(audioFile = file, modifier = Modifier.fillMaxWidth(),
+                        height = 37.dp, barColor = if (latched) NjAmber else NjTrackColors[0])
+                }
+                Text(if (latched) "LATCHED" else "TAP TO LATCH", color = NjMuted,
+                    fontFamily = IbmPlexMono, fontSize = 8.sp)
+            }
+        }
         }
     }
 }

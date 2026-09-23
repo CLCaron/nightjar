@@ -110,6 +110,7 @@ import kotlinx.coroutines.flow.collectLatest
 fun OverviewScreen(
     ideaId: Long,
     onBack: () -> Unit,
+    onOpenRecord: (Long) -> Unit = {},
     onOpenStudio: (Long) -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -275,9 +276,11 @@ fun OverviewScreen(
                     onClick = { vm.onAction(OverviewAction.ToggleFavorite) }
                 )
 
-                NjStudioEntryButton(
-                    onClick = { onOpenStudio(ideaId) }
-                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    NjButton(text = "Explore", caption = "RECORD",
+                        onClick = { onOpenRecord(ideaId) })
+                    NjStudioEntryButton(onClick = { onOpenStudio(ideaId) })
+                }
             }
 
             NjTextField(

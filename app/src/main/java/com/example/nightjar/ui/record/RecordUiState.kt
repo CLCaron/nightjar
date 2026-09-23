@@ -65,6 +65,11 @@ data class RecordUiState(
 
 /** User-initiated actions on the Record screen. */
 sealed interface RecordAction {
+    data object CreateGroup : RecordAction
+    data class OpenGroup(val id: Long) : RecordAction
+    data class RenameGroup(val id: Long, val name: String) : RecordAction
+    data class AddGroupToStudio(val id: Long) : RecordAction
+    data class UnlatchGroup(val id: Long) : RecordAction
     data object ShowSound : RecordAction
     data class WordsChanged(val value: String) : RecordAction
     data object RetryWords : RecordAction

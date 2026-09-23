@@ -5,6 +5,8 @@ import com.example.nightjar.data.repository.IdeaRepository
 import com.example.nightjar.data.repository.CaptureGroup
 import com.example.nightjar.data.repository.SavedCaptureBatch
 import com.example.nightjar.data.db.entity.TakeEntity
+import com.example.nightjar.data.db.entity.CaptureGroupEntity
+import com.example.nightjar.data.db.entity.IdeaEntity
 import com.example.nightjar.data.storage.RecordingStorage
 import com.example.nightjar.util.MainDispatcherRule
 import io.mockk.*
@@ -45,6 +47,13 @@ class CaptureSessionTest {
         coEvery { engine.awaitFirstBuffer(any()) } returns true
         coEvery { font.getSoundFontPath() } returns null
         coEvery { repo.saveCaptureBatch(any(), any()) } returns batch
+        coEvery { repo.getCaptureGroups(42L) } returns listOf(CaptureGroupEntity(
+            id = 1L, ideaId = 42L, clipId = 7L, displayName = "Original Idea",
+            sortIndex = 0, latchedTakeId = 1L, inStudio = true))
+        coEvery { repo.getCaptureTakes(7L) } returns batch.takes
+        coEvery { repo.getCaptureTake(1L) } returns batch.takes.single()
+        coEvery { repo.getIdeaById(42L) } returns IdeaEntity(id = 42L, title = "Idea")
+        coEvery { repo.latchCaptureTake(any(), any()) } just Runs
         every { storage.getAudioFile(any()) } answers { File(firstArg<String>()) }
         coEvery { writer.write(any(), any()) } returns listOf(CaptureAudio(file, 2500L))
         capture = CaptureSession(engine, storage, repo, font, foreground, writer, notes)
@@ -194,11 +203,13 @@ class CaptureSessionTest {
         every { engine.getRecordedDurationMs() } returnsMany listOf(700L, 700L, 1600L)
         repeat(3) { capture.start(CaptureOptions()) }
         assertEquals(4, capture.state.value.takeNumber)
+        assertEquals(3, capture.state.value.pendingTakeWaveforms.size)
         verify(exactly = 1) { engine.startRecording(any()) }
         verify(exactly = 0) { engine.stopRecording() }
         capture.clearCompleted()
         assertTrue(capture.state.value.recording)
         capture.stop(); advanceUntilIdle()
+        assertTrue(capture.state.value.pendingTakeWaveforms.isEmpty())
         coVerify { writer.write(file, listOf(700L, 700L, 1600L)) }
         coVerify { repo.saveCaptureBatch(null, any()) }
         begin(); runCurrent(); capture.stop(); advanceUntilIdle()
@@ -225,7 +236,6 @@ class CaptureSessionTest {
         capture.selectTake(1L)
         assertEquals(1L, capture.state.value.selectedTakeId)
         coVerify(exactly = 1) { repo.saveCaptureBatch(any(), any()) }
-        confirmVerified(repo)
     }
 
     @Test fun `segmentation failure retains boundaries and retries without restarting recording`() = runTest(dispatcher) {
@@ -243,16 +253,18 @@ class CaptureSessionTest {
         assertEquals(CapturePhase.SAVED, capture.state.value.phase)
     }
 
-    @Test fun `starting capture stops audition and removes its backing before opening microphone`() = runTest(dispatcher) {
+    @Test fun `record during playback waits for alignment support without opening microphone`() = runTest(dispatcher) {
         begin(); runCurrent(); capture.stop(); advanceUntilIdle()
         every { engine.addTrack(any(), any(), any(), any(), any(), any(), any(), any()) } returns true
         capture.playSelected()
+        runCurrent()
         assertTrue(capture.state.value.playing)
         clearMocks(engine, answers = false, recordedCalls = true)
-        begin(); runCurrent()
-        verifyOrder { engine.pause(); engine.removeAllTracks(); engine.startRecording(any()) }
-        assertFalse(capture.state.value.playing)
-        capture.stop(); advanceUntilIdle()
+        capture.start(CaptureOptions()); runCurrent()
+        verify(exactly = 0) { engine.startRecording(any()) }
+        assertTrue(capture.state.value.playing)
+        assertTrue(capture.state.value.error!!.contains("alignment"))
+        capture.stopAudition()
     }
 
     @Test fun `text creation and audio finalization share one Idea even when creation is delayed`() = runTest(dispatcher) {

@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -69,6 +70,11 @@ class RecordViewModel @Inject constructor(
 
     fun onAction(action: RecordAction) {
         when (action) {
+            RecordAction.CreateGroup -> capture.createGroup()
+            is RecordAction.OpenGroup -> capture.selectGroup(action.id)
+            is RecordAction.RenameGroup -> capture.renameGroup(action.id, action.name)
+            is RecordAction.AddGroupToStudio -> capture.addGroupToStudio(action.id)
+            is RecordAction.UnlatchGroup -> capture.unlatchGroup(action.id)
             RecordAction.NewIdea -> startNewIdea()
             RecordAction.ShowSound -> _state.value = _state.value.copy(isWriting = false)
             is RecordAction.WordsChanged -> document?.edit(action.value)
@@ -156,6 +162,19 @@ class RecordViewModel @Inject constructor(
             } catch (e: Exception) {
                 val msg = e.message ?: "Failed to create idea."
                 _effects.emit(RecordEffect.ShowError(msg))
+            }
+        }
+    }
+
+    fun openIdea(ideaId: Long) {
+        capture.openIdea(ideaId)
+        viewModelScope.launch {
+            capture.state.first { it.ideaId == ideaId }
+            val next = capture.writingDocument()
+            document = next
+            wordsJob?.cancel()
+            wordsJob = viewModelScope.launch {
+                next.state.collect { words -> _state.value = _state.value.copy(words = words) }
             }
         }
     }
