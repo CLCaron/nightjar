@@ -129,6 +129,20 @@ bool AudioEngine::addTrack(int trackId, const char* filePath,
     return ok;
 }
 
+bool AudioEngine::addLoopingTrack(int trackId, const char* filePath,
+                                  int64_t durationMs, int64_t phaseMs,
+                                  float volume) {
+    if (!mixer_) return false;
+    bool ok = mixer_->addTrack(trackId, std::string(filePath), durationMs,
+                               0, 0, 0, volume, false, true, phaseMs);
+    if (ok) recomputeTotalFrames();
+    return ok;
+}
+
+void AudioEngine::setEndlessPlayback(bool enabled) {
+    if (transport_) transport_->endlessPlayback.store(enabled, std::memory_order_release);
+}
+
 void AudioEngine::removeTrack(int trackId) {
     if (!mixer_) return;
     mixer_->removeTrack(trackId);

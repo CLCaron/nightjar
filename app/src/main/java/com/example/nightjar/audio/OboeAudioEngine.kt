@@ -97,6 +97,13 @@ class OboeAudioEngine @Inject constructor() {
             trimStartMs, trimEndMs, volume, isMuted)
     }
 
+    /** Repeat one immutable take on the Record workspace's unwrapped clock. */
+    fun addLoopingTrack(trackId: Int, filePath: String, durationMs: Long,
+                        phaseMs: Long = 0, volume: Float = 1f): Boolean =
+        nativeAddLoopingTrack(trackId, filePath, durationMs, phaseMs, volume)
+
+    fun setEndlessPlayback(enabled: Boolean) = nativeSetEndlessPlayback(enabled)
+
     fun removeTrack(trackId: Int) = nativeRemoveTrack(trackId)
 
     fun removeAllTracks() = nativeRemoveAllTracks()
@@ -359,6 +366,11 @@ class OboeAudioEngine @Inject constructor() {
         offsetMs: Long, trimStartMs: Long, trimEndMs: Long,
         volume: Float, muted: Boolean
     ): Boolean
+    private external fun nativeAddLoopingTrack(
+        trackId: Int, filePath: String, durationMs: Long,
+        phaseMs: Long, volume: Float
+    ): Boolean
+    private external fun nativeSetEndlessPlayback(enabled: Boolean)
     private external fun nativeRemoveTrack(trackId: Int)
     private external fun nativeRemoveAllTracks()
     private external fun nativePlay()

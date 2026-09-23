@@ -145,7 +145,8 @@ oboe::DataCallbackResult OboePlaybackStream::onAudioReady(
     // last note instead of wrapping.
     bool recording = transport_.recording.load(std::memory_order_relaxed);
     bool loopActive = (loopStart >= 0 && loopEnd > loopStart);
-    if (!recording && !loopActive && total > 0 && pos >= total) {
+    bool endless = transport_.endlessPlayback.load(std::memory_order_relaxed);
+    if (!recording && !loopActive && !endless && total > 0 && pos >= total) {
         // Playback finished — stop and reset to 0
         transport_.playing.store(false, std::memory_order_release);
         transport_.posFrames.store(0, std::memory_order_relaxed);

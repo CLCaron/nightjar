@@ -21,6 +21,9 @@ struct AtomicTransport {
     /** True while overdub recording is active — allows playhead past total. */
     std::atomic<bool> recording{false};
 
+    /** Record workspace playback keeps a shared unwrapped clock. */
+    std::atomic<bool> endlessPlayback{false};
+
     /** Current playback position in frames. */
     std::atomic<int64_t> posFrames{0};
 

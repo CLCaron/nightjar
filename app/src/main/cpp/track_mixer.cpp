@@ -14,7 +14,7 @@ TrackMixer::~TrackMixer() = default;
 bool TrackMixer::addTrack(int trackId, const std::string& filePath,
                           int64_t durationMs, int64_t offsetMs,
                           int64_t trimStartMs, int64_t trimEndMs,
-                          float volume, bool muted) {
+                          float volume, bool muted, bool looping, int64_t phaseMs) {
 
     auto source = std::make_shared<WavTrackSource>();
     if (!source->open(filePath)) {
@@ -29,6 +29,11 @@ bool TrackMixer::addTrack(int trackId, const std::string& filePath,
     slot->trimStartFrames = msToFrames(trimStartMs);
     slot->trimEndFrames = msToFrames(trimEndMs);
     slot->effectiveFrames = msToFrames(durationMs - trimStartMs - trimEndMs);
+    slot->looping = looping && slot->effectiveFrames > 0;
+    if (slot->looping) {
+        slot->phaseFrames = ((msToFrames(phaseMs) % slot->effectiveFrames) + slot->effectiveFrames)
+            % slot->effectiveFrames;
+    }
     slot->volume.store(volume, std::memory_order_relaxed);
     slot->muted.store(muted, std::memory_order_relaxed);
 
@@ -124,6 +129,31 @@ void TrackMixer::renderFrames(float* output, int32_t numFrames, int64_t position
 
         float vol = slot->volume.load(std::memory_order_relaxed);
         if (vol <= 0.0f) continue;
+
+        if (slot->looping) {
+            int32_t outputFrame = 0;
+            while (outputFrame < framesToProcess) {
+                int64_t local = positionFrames + outputFrame - slot->offsetFrames;
+                if (local < 0) {
+                    outputFrame += static_cast<int32_t>(std::min<int64_t>(-local,
+                        framesToProcess - outputFrame));
+                    continue;
+                }
+                int64_t sourceFrame = (local + slot->phaseFrames) % slot->effectiveFrames;
+                int32_t count = static_cast<int32_t>(std::min<int64_t>(
+                    framesToProcess - outputFrame, slot->effectiveFrames - sourceFrame));
+                int64_t read = slot->source->readFrames(monoBuf,
+                    slot->trimStartFrames + sourceFrame, count);
+                for (int64_t i = 0; i < read; ++i) {
+                    float sample = monoBuf[i] * vol;
+                    int32_t outIdx = (outputFrame + static_cast<int32_t>(i)) * kOutputChannelCount;
+                    output[outIdx] += sample;
+                    output[outIdx + 1] += sample;
+                }
+                outputFrame += count;
+            }
+            continue;
+        }
 
         // Map global position → local frame within this track
         // Global position corresponds to: offset + trimStart + localPlayFrame

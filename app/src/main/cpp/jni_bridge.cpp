@@ -111,6 +111,25 @@ Java_com_example_nightjar_audio_OboeAudioEngine_nativeAddTrack(
     return ok ? JNI_TRUE : JNI_FALSE;
 }
 
+JNIEXPORT jboolean JNICALL
+Java_com_example_nightjar_audio_OboeAudioEngine_nativeAddLoopingTrack(
+        JNIEnv* env, jobject /* thiz */, jint trackId, jstring filePath,
+        jlong durationMs, jlong phaseMs, jfloat volume) {
+    if (!sEngine) return JNI_FALSE;
+    const char* path = env->GetStringUTFChars(filePath, nullptr);
+    bool ok = sEngine->addLoopingTrack(static_cast<int>(trackId), path,
+        static_cast<int64_t>(durationMs), static_cast<int64_t>(phaseMs),
+        static_cast<float>(volume));
+    env->ReleaseStringUTFChars(filePath, path);
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_nightjar_audio_OboeAudioEngine_nativeSetEndlessPlayback(
+        JNIEnv* /* env */, jobject /* thiz */, jboolean enabled) {
+    if (sEngine) sEngine->setEndlessPlayback(static_cast<bool>(enabled));
+}
+
 JNIEXPORT void JNICALL
 Java_com_example_nightjar_audio_OboeAudioEngine_nativeRemoveTrack(
         JNIEnv* /* env */, jobject /* thiz */, jint trackId) {

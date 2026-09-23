@@ -45,6 +45,10 @@ public:
                   int64_t durationMs, int64_t offsetMs,
                   int64_t trimStartMs, int64_t trimEndMs,
                   float volume, bool muted);
+    bool addLoopingTrack(int trackId, const char* filePath,
+                         int64_t durationMs, int64_t phaseMs,
+                         float volume);
+    void setEndlessPlayback(bool enabled);
     void removeTrack(int trackId);
     void removeAllTracks();
     void play();

@@ -86,6 +86,7 @@ class CaptureSession @Inject constructor(
     private val currentPeaks = ArrayDeque<Float>()
     private var prepared: List<CaptureAudio>? = null
     private var auditionJob: Job? = null
+    private var auditionStartJob: Job? = null
     private var writing: NotesSession.Document? = null
     private var ideaCreation: Deferred<Long>? = null
 
@@ -163,6 +164,7 @@ class CaptureSession @Inject constructor(
     fun selectGroup(id: Long) {
         if (state.value.busy || state.value.pendingSave || state.value.playing) return
         val target = state.value.groups.find { it.id == id } ?: return
+        stopAudition()
         scope.launch { refreshGroups(target.clipId) }
     }
 
@@ -202,11 +204,14 @@ class CaptureSession @Inject constructor(
     }
 
     fun stopAudition() {
+        auditionStartJob?.cancel()
+        auditionStartJob = null
         if (!state.value.playing) return
         auditionJob?.cancel()
         auditionJob = null
         engine.pause()
         engine.removeAllTracks()
+        engine.setEndlessPlayback(false)
         engine.clearLoopRegion()
         mutableState.value = state.value.copy(playing = false)
     }
@@ -220,7 +225,8 @@ class CaptureSession @Inject constructor(
             return
         }
         val takeId = latched.singleOrNull() ?: return
-        scope.launch { playLatched(takeId) }
+        auditionStartJob?.cancel()
+        auditionStartJob = scope.launch { playLatched(takeId) }
     }
 
     fun unlatchGroup(id: Long) {
@@ -242,11 +248,11 @@ class CaptureSession @Inject constructor(
             engine.pause()
             engine.removeAllTracks()
             engine.clearLoopRegion()
+            engine.setEndlessPlayback(true)
             engine.setCountIn(0, 4)
             engine.setMetronomeEnabled(false)
-            check(engine.addTrack(-1, storage.getAudioFile(take.audioFileName).absolutePath,
-                take.durationMs, 0, 0, 0, 1f, false)) { "Could not play this take." }
-            engine.setLoopRegion(0, take.durationMs)
+            check(engine.addLoopingTrack(-1, storage.getAudioFile(take.audioFileName).absolutePath,
+                take.durationMs)) { "Could not play this take." }
             engine.seekTo(0)
             engine.play()
             mutableState.value = state.value.copy(playing = true, error = null)
@@ -264,6 +270,7 @@ class CaptureSession @Inject constructor(
             Log.e(TAG, "Take audition failed", e)
             engine.pause()
             engine.removeAllTracks()
+            engine.setEndlessPlayback(false)
             engine.clearLoopRegion()
             mutableState.value = state.value.copy(playing = false, error = e.message ?: "Could not play this take.")
         }
@@ -298,6 +305,7 @@ class CaptureSession @Inject constructor(
         stopAudition()
         engine.pause()
         engine.removeAllTracks()
+        engine.setEndlessPlayback(false)
         engine.clearLoopRegion()
         engine.setCountIn(0, 4)
         engine.setMetronomeEnabled(false)

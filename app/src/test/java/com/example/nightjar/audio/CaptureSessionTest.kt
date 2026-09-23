@@ -269,7 +269,7 @@ class CaptureSessionTest {
 
     @Test fun `record during playback waits for alignment support without opening microphone`() = runTest(dispatcher) {
         begin(); runCurrent(); capture.stop(); advanceUntilIdle()
-        every { engine.addTrack(any(), any(), any(), any(), any(), any(), any(), any()) } returns true
+        every { engine.addLoopingTrack(any(), any(), any(), any(), any()) } returns true
         capture.playSelected()
         runCurrent()
         assertTrue(capture.state.value.playing)
@@ -279,6 +279,19 @@ class CaptureSessionTest {
         assertTrue(capture.state.value.playing)
         assertTrue(capture.state.value.error!!.contains("alignment"))
         capture.stopAudition()
+    }
+
+    @Test fun `leaving before a take loads cannot start playback later`() = runTest(dispatcher) {
+        begin(); runCurrent(); capture.stop(); advanceUntilIdle()
+        val take = CompletableDeferred<TakeEntity>()
+        coEvery { repo.getCaptureTake(1L) } coAnswers { take.await() }
+        capture.playSelected()
+        runCurrent()
+        capture.stopAudition()
+        take.complete(batch.takes.single())
+        advanceUntilIdle()
+        verify(exactly = 0) { engine.play() }
+        assertFalse(capture.state.value.playing)
     }
 
     @Test fun `text creation and audio finalization share one Idea even when creation is delayed`() = runTest(dispatcher) {
