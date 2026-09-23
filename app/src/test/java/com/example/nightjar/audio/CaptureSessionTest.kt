@@ -4,6 +4,7 @@ import android.util.Log
 import com.example.nightjar.data.repository.IdeaRepository
 import com.example.nightjar.data.repository.CaptureGroup
 import com.example.nightjar.data.repository.SavedCaptureBatch
+import com.example.nightjar.data.repository.CaptureBackingContext
 import com.example.nightjar.data.db.entity.TakeEntity
 import com.example.nightjar.data.db.entity.CaptureGroupEntity
 import com.example.nightjar.data.db.entity.IdeaEntity
@@ -32,6 +33,7 @@ class CaptureSessionTest {
     private val file = File("retained.wav")
     private val writer = mockk<CaptureTakeWriter>()
     private val notes = mockk<com.example.nightjar.data.repository.NotesSession>(relaxed = true)
+    private val latency = mockk<AudioLatencyEstimator>(relaxed = true)
     private val batch = SavedCaptureBatch(CaptureGroup(42L, 7L), listOf(TakeEntity(id = 1L,
         clipId = 7L, audioFileName = file.name, displayName = "Take 1", sortIndex = 0, durationMs = 2500L)))
     private lateinit var capture: CaptureSession
@@ -46,7 +48,7 @@ class CaptureSessionTest {
         every { storage.createRecordingFile(any(), any()) } returns file
         coEvery { engine.awaitFirstBuffer(any()) } returns true
         coEvery { font.getSoundFontPath() } returns null
-        coEvery { repo.saveCaptureBatch(any(), any()) } returns batch
+        coEvery { repo.saveCaptureBatch(any(), any(), any()) } returns batch
         coEvery { repo.getCaptureGroups(42L) } returns listOf(CaptureGroupEntity(
             id = 1L, ideaId = 42L, clipId = 7L, displayName = "Original Idea",
             sortIndex = 0, latchedTakeId = 1L, inStudio = true))
@@ -56,7 +58,7 @@ class CaptureSessionTest {
         coEvery { repo.latchCaptureTake(any(), any()) } just Runs
         every { storage.getAudioFile(any()) } answers { File(firstArg<String>()) }
         coEvery { writer.write(any(), any()) } returns listOf(CaptureAudio(file, 2500L))
-        capture = CaptureSession(engine, storage, repo, font, foreground, writer, notes)
+        capture = CaptureSession(engine, storage, repo, font, foreground, writer, notes, latency)
     }
 
     @After fun cleanup() { unmockkAll() }
@@ -111,7 +113,7 @@ class CaptureSessionTest {
         capture.stop()
         advanceUntilIdle()
         verify(exactly = 1) { engine.stopRecording() }
-        coVerify(exactly = 1) { repo.saveCaptureBatch(any(), any()) }
+        coVerify(exactly = 1) { repo.saveCaptureBatch(any(), any(), any()) }
         assertEquals(42L, capture.state.value.ideaId)
         assertEquals(CapturePhase.SAVED, capture.state.value.phase)
     }
@@ -125,7 +127,7 @@ class CaptureSessionTest {
         capture.stop()
         advanceUntilIdle()
         verify(exactly = 0) { engine.openWriteGate() }
-        coVerify(exactly = 0) { repo.saveCaptureBatch(any(), any()) }
+        coVerify(exactly = 0) { repo.saveCaptureBatch(any(), any(), any()) }
         assertFalse(capture.state.value.busy)
     }
 
@@ -141,14 +143,14 @@ class CaptureSessionTest {
     }
 
     @Test fun `failed indexing retains file and retries without new capture`() = runTest(dispatcher) {
-        coEvery { repo.saveCaptureBatch(any(), any()) } throws IllegalStateException("disk busy")
+        coEvery { repo.saveCaptureBatch(any(), any(), any()) } throws IllegalStateException("disk busy")
         begin()
         runCurrent()
         capture.stop()
         advanceUntilIdle()
         assertEquals(file, capture.state.value.file)
         assertEquals(CapturePhase.FAILED, capture.state.value.phase)
-        coEvery { repo.saveCaptureBatch(any(), any()) } returns batch
+        coEvery { repo.saveCaptureBatch(any(), any(), any()) } returns batch
         capture.start(CaptureOptions())
         advanceUntilIdle()
         verify(exactly = 1) { engine.startRecording(any()) }
@@ -157,7 +159,7 @@ class CaptureSessionTest {
 
     @Test fun `save remains busy until repository transaction finishes`() = runTest(dispatcher) {
         val saved = CompletableDeferred<SavedCaptureBatch>()
-        coEvery { repo.saveCaptureBatch(any(), any()) } coAnswers { saved.await() }
+        coEvery { repo.saveCaptureBatch(any(), any(), any()) } coAnswers { saved.await() }
         begin()
         runCurrent()
         capture.stop()
@@ -225,21 +227,21 @@ class CaptureSessionTest {
         capture.stop(); advanceUntilIdle()
         assertTrue(capture.state.value.pendingTakeWaveforms.isEmpty())
         coVerify { writer.write(file, listOf(700L, 700L, 1600L)) }
-        coVerify { repo.saveCaptureBatch(null, any()) }
+        coVerify { repo.saveCaptureBatch(null, any(), any()) }
         begin(); runCurrent(); capture.stop(); advanceUntilIdle()
-        coVerify { repo.saveCaptureBatch(CaptureGroup(42L, 7L), any()) }
+        coVerify { repo.saveCaptureBatch(CaptureGroup(42L, 7L), any(), any()) }
         capture.clearCompleted()
         assertNull(capture.state.value.ideaId)
         begin(); runCurrent(); capture.stop(); advanceUntilIdle()
-        coVerify(exactly = 2) { repo.saveCaptureBatch(null, any()) }
+        coVerify(exactly = 2) { repo.saveCaptureBatch(null, any(), any()) }
     }
 
     @Test fun `failed batch cannot be cleared and prepared files are reused for retry`() = runTest(dispatcher) {
-        coEvery { repo.saveCaptureBatch(any(), any()) } throws IllegalStateException("busy")
+        coEvery { repo.saveCaptureBatch(any(), any(), any()) } throws IllegalStateException("busy")
         begin(); runCurrent(); capture.stop(); advanceUntilIdle()
         capture.clearCompleted()
         assertTrue(capture.state.value.pendingSave)
-        coEvery { repo.saveCaptureBatch(any(), any()) } returns batch
+        coEvery { repo.saveCaptureBatch(any(), any(), any()) } returns batch
         capture.start(CaptureOptions()); advanceUntilIdle()
         coVerify(exactly = 1) { writer.write(any(), any()) }
         assertFalse(capture.state.value.pendingSave)
@@ -249,7 +251,7 @@ class CaptureSessionTest {
         begin(); runCurrent(); capture.stop(); advanceUntilIdle()
         capture.selectTake(1L)
         assertEquals(1L, capture.state.value.selectedTakeId)
-        coVerify(exactly = 1) { repo.saveCaptureBatch(any(), any()) }
+        coVerify(exactly = 1) { repo.saveCaptureBatch(any(), any(), any()) }
     }
 
     @Test fun `segmentation failure retains boundaries and retries without restarting recording`() = runTest(dispatcher) {
@@ -259,7 +261,7 @@ class CaptureSessionTest {
         capture.start(CaptureOptions())
         capture.stop(); advanceUntilIdle()
         assertTrue(capture.state.value.pendingSave)
-        coVerify(exactly = 0) { repo.saveCaptureBatch(any(), any()) }
+        coVerify(exactly = 0) { repo.saveCaptureBatch(any(), any(), any()) }
         coEvery { writer.write(any(), any()) } returns listOf(CaptureAudio(file, 2500L))
         capture.start(CaptureOptions()); advanceUntilIdle()
         coVerify(exactly = 2) { writer.write(file, listOf(900L)) }
@@ -267,7 +269,7 @@ class CaptureSessionTest {
         assertEquals(CapturePhase.SAVED, capture.state.value.phase)
     }
 
-    @Test fun `record during playback waits for alignment support without opening microphone`() = runTest(dispatcher) {
+    @Test fun `record during playback keeps loop running until stop`() = runTest(dispatcher) {
         begin(); runCurrent(); capture.stop(); advanceUntilIdle()
         every { engine.addLoopingTrack(any(), any(), any(), any(), any()) } returns true
         capture.playSelected()
@@ -275,10 +277,60 @@ class CaptureSessionTest {
         assertTrue(capture.state.value.playing)
         clearMocks(engine, answers = false, recordedCalls = true)
         capture.start(CaptureOptions()); runCurrent()
-        verify(exactly = 0) { engine.startRecording(any()) }
+        verify(exactly = 1) { foreground.start(capture.state.value.token) }
         assertTrue(capture.state.value.playing)
-        assertTrue(capture.state.value.error!!.contains("alignment"))
-        capture.stopAudition()
+        verify(exactly = 0) { engine.pause() }
+        capture.foregroundReady(capture.state.value.token)
+        runCurrent()
+        verify(exactly = 1) { engine.startRecording(any()) }
+        verify(exactly = 0) { engine.pause() }
+        capture.stop()
+        advanceUntilIdle()
+        verify(exactly = 1) { engine.stopRecording() }
+        verify(atLeast = 1) { engine.pause() }
+        assertFalse(capture.state.value.playing)
+    }
+
+    @Test fun `manual takes retain the same backing and their own unwrapped start`() = runTest(dispatcher) {
+        begin(); runCurrent(); capture.stop(); advanceUntilIdle()
+        every { engine.addLoopingTrack(any(), any(), any(), any(), any()) } returns true
+        every { engine.getCaptureStartPlaybackFrame() } returns 88200L
+        every { engine.getCapturedFrames() } returns 44100L
+        every { latency.computeCompensationMs(0L, true) } returns 100L
+        val parts = listOf(CaptureAudio(File("first.wav"), 1000L), CaptureAudio(File("second.wav"), 1500L))
+        coEvery { writer.write(any(), any()) } returns parts
+        var contexts: List<CaptureBackingContext?> = emptyList()
+        coEvery { repo.saveCaptureBatch(any(), any(), any()) } coAnswers {
+            contexts = thirdArg()
+            batch
+        }
+        capture.playSelected(); runCurrent()
+        capture.start(CaptureOptions())
+        capture.foregroundReady(capture.state.value.token)
+        runCurrent()
+        capture.start(CaptureOptions())
+        capture.stop()
+        advanceUntilIdle()
+        assertEquals(2, contexts.size)
+        assertEquals(listOf(88200L, 132300L), contexts.map { it?.transportStartFrame })
+        assertEquals(listOf(4410L, 4410L), contexts.map { it?.correctionFrames })
+        assertEquals(listOf(1L, 1L), contexts.map { it?.backingTakeId })
+    }
+
+    @Test fun `lost backing stops and saves the microphone take`() = runTest(dispatcher) {
+        begin(); runCurrent(); capture.stop(); advanceUntilIdle()
+        every { engine.addLoopingTrack(any(), any(), any(), any(), any()) } returns true
+        every { engine.isPlaying.value } returns false
+        capture.playSelected(); runCurrent()
+        capture.start(CaptureOptions())
+        capture.foregroundReady(capture.state.value.token)
+        runCurrent()
+        advanceTimeBy(60)
+        runCurrent()
+        assertEquals(CapturePhase.SAVED, capture.state.value.phase)
+        assertFalse(capture.state.value.playing)
+        assertTrue(capture.state.value.error!!.contains("Backing playback stopped"))
+        verify(exactly = 2) { engine.stopRecording() }
     }
 
     @Test fun `leaving before a take loads cannot start playback later`() = runTest(dispatcher) {
@@ -300,8 +352,8 @@ class CaptureSessionTest {
         val created = CompletableDeferred<Long>()
         coEvery { repo.createEmptyIdea() } coAnswers { created.await() }
         coEvery { repo.saveNotesRevision(any(), any(), any()) } returns Unit
-        coEvery { repo.saveCaptureBatchForIdea(42L, null, any()) } returns batch
-        capture = CaptureSession(engine, storage, repo, font, foreground, writer, realNotes)
+        coEvery { repo.saveCaptureBatchForIdea(42L, null, any(), any()) } returns batch
+        capture = CaptureSession(engine, storage, repo, font, foreground, writer, realNotes, latency)
         val words = capture.writingDocument()
         words.edit("before the melody")
         begin(); runCurrent()
@@ -313,8 +365,8 @@ class CaptureSessionTest {
         assertEquals(42L, capture.state.value.ideaId)
         assertEquals(42L, words.state.value.ideaId)
         coVerify(exactly = 1) { repo.createEmptyIdea() }
-        coVerify(exactly = 1) { repo.saveCaptureBatchForIdea(42L, null, any()) }
-        coVerify(exactly = 0) { repo.saveCaptureBatch(any(), any()) }
+        coVerify(exactly = 1) { repo.saveCaptureBatchForIdea(42L, null, any(), any()) }
+        coVerify(exactly = 0) { repo.saveCaptureBatch(any(), any(), any()) }
         assertTrue(words.state.value.safeToLeaveIdea)
     }
 

@@ -93,6 +93,18 @@ Java_com_example_nightjar_audio_OboeAudioEngine_nativeGetRecordedDurationMs(
     return static_cast<jlong>(sEngine->getRecordedDurationMs());
 }
 
+JNIEXPORT jlong JNICALL
+Java_com_example_nightjar_audio_OboeAudioEngine_nativeGetCapturedFrames(
+        JNIEnv* /* env */, jobject /* thiz */) {
+    return sEngine ? static_cast<jlong>(sEngine->getCapturedFrames()) : 0;
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_example_nightjar_audio_OboeAudioEngine_nativeGetCaptureStartPlaybackFrame(
+        JNIEnv* /* env */, jobject /* thiz */) {
+    return sEngine ? static_cast<jlong>(sEngine->getCaptureStartPlaybackFrame()) : -1;
+}
+
 // ── Playback ───────────────────────────────────────────────────────────
 
 JNIEXPORT jboolean JNICALL

@@ -3,6 +3,7 @@ package com.example.nightjar.di
 import android.content.Context
 import com.example.nightjar.data.db.NightjarDatabase
 import com.example.nightjar.data.db.dao.AudioClipDao
+import com.example.nightjar.data.db.dao.CaptureBackingDao
 import com.example.nightjar.data.db.dao.DrumPatternDao
 import com.example.nightjar.data.db.dao.IdeaDao
 import com.example.nightjar.data.db.dao.MidiClipDao
@@ -50,12 +51,13 @@ abstract class AppModule {
             tagDao: TagDao,
             trackDao: TrackDao,
             audioClipDao: AudioClipDao,
+            captureBackingDao: CaptureBackingDao,
             captureGroupDao: com.example.nightjar.data.db.dao.CaptureGroupDao,
             takeDao: TakeDao,
             storage: RecordingStorage,
             database: NightjarDatabase
         ): IdeaRepository = IdeaRepository(
-            ideaDao, tagDao, trackDao, audioClipDao, captureGroupDao, takeDao, storage, database
+            ideaDao, tagDao, trackDao, audioClipDao, captureBackingDao, captureGroupDao, takeDao, storage, database
         )
 
         @Provides
@@ -69,6 +71,9 @@ abstract class AppModule {
 
         @Provides
         fun provideCaptureGroupDao(db: NightjarDatabase): com.example.nightjar.data.db.dao.CaptureGroupDao = db.captureGroupDao()
+
+        @Provides
+        fun provideCaptureBackingDao(db: NightjarDatabase): CaptureBackingDao = db.captureBackingDao()
 
         @Provides
         @Singleton

@@ -1,4 +1,5 @@
 #include "oboe_recording_stream.h"
+#include "atomic_transport.h"
 #include "common.h"
 #include <algorithm>
 #include <cmath>
@@ -7,7 +8,7 @@
 
 namespace nightjar {
 
-OboeRecordingStream::OboeRecordingStream() = default;
+OboeRecordingStream::OboeRecordingStream(AtomicTransport& transport) : transport_(transport) {}
 
 OboeRecordingStream::~OboeRecordingStream() {
     stop();
@@ -28,6 +29,8 @@ bool OboeRecordingStream::start(const std::string& filePath) {
     pipelineHot_.store(false, std::memory_order_relaxed);
     writeGateOpen_.store(false, std::memory_order_relaxed);
     peakAmplitude_.store(0.0f, std::memory_order_relaxed);
+    capturedFrames_.store(0, std::memory_order_relaxed);
+    captureStartPlaybackFrame_.store(-1, std::memory_order_relaxed);
 
     // Open WAV file
     if (!wavWriter_.open(filePath)) {
@@ -166,7 +169,15 @@ oboe::DataCallbackResult OboeRecordingStream::onAudioReady(
 
     // Only push to ring buffer when the write gate is open
     if (writeGateOpen_.load(std::memory_order_acquire)) {
-        ringBuffer_.write(floatData, static_cast<size_t>(numFrames));
+        size_t accepted = ringBuffer_.write(floatData, static_cast<size_t>(numFrames));
+        if (accepted > 0) {
+            if (capturedFrames_.load(std::memory_order_relaxed) == 0) {
+                captureStartPlaybackFrame_.store(
+                    transport_.posFrames.load(std::memory_order_relaxed),
+                    std::memory_order_release);
+            }
+            capturedFrames_.fetch_add(static_cast<int64_t>(accepted), std::memory_order_release);
+        }
     }
 
     return oboe::DataCallbackResult::Continue;

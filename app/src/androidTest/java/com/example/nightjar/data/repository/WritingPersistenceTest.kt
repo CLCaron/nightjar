@@ -29,7 +29,7 @@ class WritingPersistenceTest {
         val context = object : ContextWrapper(app) { override fun getFilesDir(): File = folder }
         db = Room.inMemoryDatabaseBuilder(context, NightjarDatabase::class.java).build()
         repo = IdeaRepository(db.ideaDao(), db.tagDao(), db.trackDao(), db.audioClipDao(),
-            db.captureGroupDao(), db.takeDao(), RecordingStorage(context), db)
+            db.captureBackingDao(), db.captureGroupDao(), db.takeDao(), RecordingStorage(context), db)
         storage = NotesDraftStorage(context)
     }
 

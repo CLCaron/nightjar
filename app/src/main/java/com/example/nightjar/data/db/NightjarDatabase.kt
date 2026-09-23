@@ -6,6 +6,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import com.example.nightjar.data.db.dao.AudioClipDao
 import com.example.nightjar.data.db.dao.CaptureGroupDao
+import com.example.nightjar.data.db.dao.CaptureBackingDao
 import com.example.nightjar.data.db.dao.DrumPatternDao
 import com.example.nightjar.data.db.dao.IdeaDao
 import com.example.nightjar.data.db.dao.MidiClipDao
@@ -15,6 +16,7 @@ import com.example.nightjar.data.db.dao.TakeDao
 import com.example.nightjar.data.db.dao.TrackDao
 import com.example.nightjar.data.db.entity.AudioClipEntity
 import com.example.nightjar.data.db.entity.CaptureGroupEntity
+import com.example.nightjar.data.db.entity.CaptureBackingEntity
 import com.example.nightjar.data.db.entity.DrumClipEntity
 import com.example.nightjar.data.db.entity.DrumPatternEntity
 import com.example.nightjar.data.db.entity.DrumStepEntity
@@ -59,16 +61,18 @@ import com.example.nightjar.data.db.entity.TrackEntity
  *             `bars * stepsPerBar`. `bars` column stays for now but is no
  *             longer read at runtime (dropped in a later cleanup).
  * - **v15** — Added capture groups, independent latches, and explicit Studio visibility.
+ * - **v16** — Added immutable backing-loop timing context for capture takes.
  */
 @Database(
     entities = [
         IdeaEntity::class, TagEntity::class, IdeaTagCrossRef::class,
         TrackEntity::class, AudioClipEntity::class, TakeEntity::class, CaptureGroupEntity::class,
+        CaptureBackingEntity::class,
         DrumPatternEntity::class, DrumStepEntity::class,
         DrumClipEntity::class,
         MidiClipEntity::class, MidiNoteEntity::class
     ],
-    version = 15,
+    version = 16,
     exportSchema = false
 )
 abstract class NightjarDatabase : RoomDatabase() {
@@ -79,6 +83,7 @@ abstract class NightjarDatabase : RoomDatabase() {
     abstract fun takeDao(): TakeDao
     abstract fun audioClipDao(): AudioClipDao
     abstract fun captureGroupDao(): CaptureGroupDao
+    abstract fun captureBackingDao(): CaptureBackingDao
     abstract fun drumPatternDao(): DrumPatternDao
     abstract fun midiClipDao(): MidiClipDao
     abstract fun midiNoteDao(): MidiNoteDao
@@ -636,6 +641,25 @@ abstract class NightjarDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_15_16 = object : androidx.room.migration.Migration(15, 16) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS capture_backings (
+                        takeId INTEGER NOT NULL,
+                        backingTakeId INTEGER NOT NULL,
+                        backingLoopFrames INTEGER NOT NULL,
+                        transportStartFrame INTEGER NOT NULL,
+                        correctionFrames INTEGER NOT NULL,
+                        sourcePhaseFrame INTEGER NOT NULL,
+                        syncMethod TEXT NOT NULL,
+                        PRIMARY KEY(takeId, backingTakeId),
+                        FOREIGN KEY(takeId) REFERENCES takes(id) ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_capture_backings_backingTakeId ON capture_backings(backingTakeId)")
+            }
+        }
+
         fun getInstance(context: Context): NightjarDatabase {
             return INSTANCE ?: synchronized(this) {
                 val db = Room.databaseBuilder(
@@ -647,7 +671,7 @@ abstract class NightjarDatabase : RoomDatabase() {
                     MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
                     MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10,
                     MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
-                    MIGRATION_13_14, MIGRATION_14_15
+                    MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16
                 ).build()
                 INSTANCE = db
                 db

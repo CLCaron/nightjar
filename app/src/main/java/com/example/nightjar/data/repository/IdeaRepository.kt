@@ -4,12 +4,14 @@ import androidx.room.withTransaction
 import com.example.nightjar.data.db.IdeaTagCrossRef
 import com.example.nightjar.data.db.NightjarDatabase
 import com.example.nightjar.data.db.dao.AudioClipDao
+import com.example.nightjar.data.db.dao.CaptureBackingDao
 import com.example.nightjar.data.db.dao.CaptureGroupDao
 import com.example.nightjar.data.db.dao.IdeaDao
 import com.example.nightjar.data.db.dao.TagDao
 import com.example.nightjar.data.db.dao.TakeDao
 import com.example.nightjar.data.db.dao.TrackDao
 import com.example.nightjar.data.db.entity.AudioClipEntity
+import com.example.nightjar.data.db.entity.CaptureBackingEntity
 import com.example.nightjar.data.db.entity.CaptureGroupEntity
 import com.example.nightjar.data.db.entity.IdeaEntity
 import com.example.nightjar.data.db.entity.TagEntity
@@ -25,6 +27,22 @@ import com.example.nightjar.audio.CaptureAudio
 
 data class CaptureGroup(val ideaId: Long, val clipId: Long)
 data class SavedCaptureBatch(val group: CaptureGroup, val takes: List<TakeEntity>)
+data class CaptureBackingContext(
+    val backingTakeId: Long,
+    val backingLoopFrames: Long,
+    val transportStartFrame: Long,
+    val correctionFrames: Long
+) {
+    fun atOffsetFrames(offsetFrames: Long): CaptureBackingContext =
+        copy(transportStartFrame = transportStartFrame + offsetFrames)
+
+    fun forTake(takeId: Long): CaptureBackingEntity {
+        require(backingLoopFrames > 0)
+        val phase = Math.floorMod(transportStartFrame - correctionFrames, backingLoopFrames)
+        return CaptureBackingEntity(takeId, backingTakeId, backingLoopFrames,
+            transportStartFrame, correctionFrames, phase, "estimated")
+    }
+}
 
 /**
  * Central repository for idea lifecycle operations.
@@ -38,6 +56,7 @@ class IdeaRepository(
     private val tagDao: TagDao,
     private val trackDao: TrackDao,
     private val audioClipDao: AudioClipDao,
+    private val captureBackingDao: CaptureBackingDao,
     private val captureGroupDao: CaptureGroupDao,
     private val takeDao: TakeDao,
     private val storage: RecordingStorage,
@@ -55,6 +74,9 @@ class IdeaRepository(
         takeDao.getTakesForClip(clipId)
 
     suspend fun getCaptureTake(id: Long): TakeEntity? = takeDao.getTakeById(id)
+
+    suspend fun getCaptureBackings(takeId: Long): List<CaptureBackingEntity> =
+        captureBackingDao.forTake(takeId)
 
     suspend fun createCaptureGroup(ideaId: Long): CaptureGroupEntity = database.withTransaction {
         requireNotNull(ideaDao.getIdeaById(ideaId)) { "This Idea no longer exists." }
@@ -97,17 +119,20 @@ class IdeaRepository(
     }
 
     /** One atomic batch; subsequent intervals append without changing the chosen take. */
-    suspend fun saveCaptureBatch(group: CaptureGroup?, audio: List<CaptureAudio>): SavedCaptureBatch {
-        return persistCaptureBatch(group, audio, null)
+    suspend fun saveCaptureBatch(group: CaptureGroup?, audio: List<CaptureAudio>,
+                                 backings: List<CaptureBackingContext?> = List(audio.size) { null }): SavedCaptureBatch {
+        return persistCaptureBatch(group, audio, null, backings)
     }
 
-    suspend fun saveCaptureBatchForIdea(ideaId: Long, group: CaptureGroup?, audio: List<CaptureAudio>): SavedCaptureBatch {
+    suspend fun saveCaptureBatchForIdea(ideaId: Long, group: CaptureGroup?, audio: List<CaptureAudio>,
+                                        backings: List<CaptureBackingContext?> = List(audio.size) { null }): SavedCaptureBatch {
         require(group == null || group.ideaId == ideaId)
-        return persistCaptureBatch(group, audio, ideaId)
+        return persistCaptureBatch(group, audio, ideaId, backings)
     }
 
-    private suspend fun persistCaptureBatch(group: CaptureGroup?, audio: List<CaptureAudio>, existingIdeaId: Long?): SavedCaptureBatch {
-        require(audio.isNotEmpty())
+    private suspend fun persistCaptureBatch(group: CaptureGroup?, audio: List<CaptureAudio>,
+                                            existingIdeaId: Long?, backings: List<CaptureBackingContext?>): SavedCaptureBatch {
+        require(audio.isNotEmpty() && audio.size == backings.size)
         return database.withTransaction {
             val target = if (group == null) {
                 val ideaId = existingIdeaId?.also { requireNotNull(ideaDao.getIdeaById(it)) { "This Idea no longer exists." } }
@@ -136,7 +161,9 @@ class IdeaRepository(
                 val take = TakeEntity(clipId = target.clipId, audioFileName = part.file.name,
                     displayName = "Take ${firstIndex + index + 1}", sortIndex = firstIndex + index,
                     durationMs = part.durationMs, isActive = existing.isEmpty() && index == 0)
-                take.copy(id = takeDao.insertTake(take))
+                take.copy(id = takeDao.insertTake(take)).also { saved ->
+                    backings[index]?.let { captureBackingDao.insert(it.forTake(saved.id)) }
+                }
             }
             val source = requireNotNull(audioClipDao.getClipById(target.clipId))
             val track = requireNotNull(trackDao.getTrackById(source.trackId))

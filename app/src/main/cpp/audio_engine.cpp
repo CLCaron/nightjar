@@ -25,8 +25,8 @@ bool AudioEngine::initialize() {
     LOGD("AudioEngine initializing (sampleRate=%d, outputChannels=%d)",
          kSampleRate, kOutputChannelCount);
 
-    recordingStream_ = std::make_unique<OboeRecordingStream>();
     transport_ = std::make_unique<AtomicTransport>();
+    recordingStream_ = std::make_unique<OboeRecordingStream>(*transport_);
     mixer_ = std::make_unique<TrackMixer>();
     synthEngine_ = std::make_unique<SynthEngine>(*transport_);
     playbackStream_ = std::make_unique<OboePlaybackStream>(*mixer_, *transport_, synthEngine_.get());
@@ -61,9 +61,9 @@ void AudioEngine::shutdown() {
 
     mixer_.reset();
     synthEngine_.reset();
-    transport_.reset();
     playbackStream_.reset();
     recordingStream_.reset();
+    transport_.reset();
 
     initialized_.store(false, std::memory_order_release);
     LOGD("AudioEngine shut down");
@@ -77,7 +77,7 @@ bool AudioEngine::startRecording(const char* filePath) {
         return false;
     }
     if (!recordingStream_) {
-        recordingStream_ = std::make_unique<OboeRecordingStream>();
+        recordingStream_ = std::make_unique<OboeRecordingStream>(*transport_);
     }
     return recordingStream_->start(std::string(filePath));
 }
@@ -111,6 +111,14 @@ float AudioEngine::getLatestPeakAmplitude() const {
 int64_t AudioEngine::getRecordedDurationMs() const {
     if (!recordingStream_) return 0;
     return recordingStream_->getRecordedDurationMs();
+}
+
+int64_t AudioEngine::getCapturedFrames() const {
+    return recordingStream_ ? recordingStream_->getCapturedFrames() : 0;
+}
+
+int64_t AudioEngine::getCaptureStartPlaybackFrame() const {
+    return recordingStream_ ? recordingStream_->getCaptureStartPlaybackFrame() : -1;
 }
 
 // ── Playback API ───────────────────────────────────────────────────────

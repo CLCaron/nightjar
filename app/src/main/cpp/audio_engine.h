@@ -39,6 +39,8 @@ public:
     bool isRecordingActive() const;
     float getLatestPeakAmplitude() const;
     int64_t getRecordedDurationMs() const;
+    int64_t getCapturedFrames() const;
+    int64_t getCaptureStartPlaybackFrame() const;
 
     // ── Playback API ────────────────────────────────────────────────────
     bool addTrack(int trackId, const char* filePath,

@@ -3,6 +3,7 @@ package com.example.nightjar.audio
 import android.util.Log
 import com.example.nightjar.data.repository.IdeaRepository
 import com.example.nightjar.data.repository.CaptureGroup
+import com.example.nightjar.data.repository.CaptureBackingContext
 import com.example.nightjar.data.repository.NotesSession
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
@@ -70,7 +71,8 @@ class CaptureSession @Inject constructor(
     private val soundFont: SoundFontManager,
     private val foreground: CaptureForeground,
     private val takeWriter: CaptureTakeWriter,
-    private val notes: NotesSession
+    private val notes: NotesSession,
+    private val latencyEstimator: AudioLatencyEstimator
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val mutableState = MutableStateFlow(CaptureState())
@@ -87,6 +89,10 @@ class CaptureSession @Inject constructor(
     private var prepared: List<CaptureAudio>? = null
     private var auditionJob: Job? = null
     private var auditionStartJob: Job? = null
+    private var auditionTake: TakeEntity? = null
+    private var recordingBacking: TakeEntity? = null
+    private var recordingStartFrame = -1L
+    private var recordingCorrectionFrames = 0L
     private var writing: NotesSession.Document? = null
     private var ideaCreation: Deferred<Long>? = null
 
@@ -204,6 +210,8 @@ class CaptureSession @Inject constructor(
     }
 
     fun stopAudition() {
+        // The Record screen may leave composition while its foreground capture continues.
+        if (state.value.recording && state.value.playing) return
         auditionStartJob?.cancel()
         auditionStartJob = null
         if (!state.value.playing) return
@@ -213,6 +221,7 @@ class CaptureSession @Inject constructor(
         engine.removeAllTracks()
         engine.setEndlessPlayback(false)
         engine.clearLoopRegion()
+        auditionTake = null
         mutableState.value = state.value.copy(playing = false)
     }
 
@@ -255,13 +264,15 @@ class CaptureSession @Inject constructor(
                 take.durationMs)) { "Could not play this take." }
             engine.seekTo(0)
             engine.play()
+            auditionTake = take
             mutableState.value = state.value.copy(playing = true, error = null)
             auditionJob = scope.launch {
                 while (isActive) {
                     delay(50)
                     engine.pollState()
                     if (!engine.isPlaying.value) {
-                        stopAudition()
+                        if (state.value.recording) stop("Backing playback stopped. Recording saved.")
+                        else stopAudition()
                         break
                     }
                 }
@@ -272,13 +283,17 @@ class CaptureSession @Inject constructor(
             engine.removeAllTracks()
             engine.setEndlessPlayback(false)
             engine.clearLoopRegion()
+            auditionTake = null
             mutableState.value = state.value.copy(playing = false, error = e.message ?: "Could not play this take.")
         }
     }
 
     fun start(options: CaptureOptions) {
         if (state.value.phase == CapturePhase.RECORDING) {
-            boundaries.add(engine.getRecordedDurationMs().coerceAtLeast(boundaries.lastOrNull() ?: 0))
+            val capturedFrames = engine.getCapturedFrames()
+            val capturedMs = if (capturedFrames > 0) capturedFrames * 1000 / SAMPLE_RATE
+                else engine.getRecordedDurationMs()
+            boundaries.add(capturedMs.coerceAtLeast(boundaries.lastOrNull() ?: 0))
             val thumbnail = state.value.amplitudes.filterIndexed { index, _ -> index % 10 == 0 }
             currentPeaks.clear()
             mutableState.value = state.value.copy(takeNumber = state.value.takeNumber + 1,
@@ -287,12 +302,6 @@ class CaptureSession @Inject constructor(
             return
         }
         if (state.value.busy) return
-        if (state.value.playing) {
-            mutableState.value = state.value.copy(
-                error = "Stop playback before recording. Backing capture needs an alignment check."
-            )
-            return
-        }
         // A failed database save must be retried before replacing its in-memory recovery context.
         if (state.value.pendingSave) {
             retrySave()
@@ -302,18 +311,28 @@ class CaptureSession @Inject constructor(
             mutableState.value = state.value.copy(phase = CapturePhase.FAILED, error = "Another recording is still active.")
             return
         }
-        stopAudition()
-        engine.pause()
-        engine.removeAllTracks()
-        engine.setEndlessPlayback(false)
-        engine.clearLoopRegion()
-        engine.setCountIn(0, 4)
-        engine.setMetronomeEnabled(false)
+        val recordingWithBacking = state.value.playing
+        if (recordingWithBacking && auditionTake == null) {
+            mutableState.value = state.value.copy(error = "Could not identify the backing take. Stop and play it again.")
+            return
+        }
+        recordingBacking = if (recordingWithBacking) auditionTake else null
+        recordingStartFrame = -1L
+        recordingCorrectionFrames = 0L
+        if (!recordingWithBacking) {
+            stopAudition()
+            engine.pause()
+            engine.removeAllTracks()
+            engine.setEndlessPlayback(false)
+            engine.clearLoopRegion()
+            engine.setCountIn(0, 4)
+            engine.setMetronomeEnabled(false)
+        }
         boundaries.clear()
         currentPeaks.clear()
         gateOpened = false
         prepared = null
-        this.options = options
+        this.options = if (recordingWithBacking) options.copy(metronome = false, countInBars = 0) else options
         durationMs = 0
         val token = UUID.randomUUID().toString()
         mutableState.value = state.value.copy(token = token, phase = CapturePhase.STARTING,
@@ -324,6 +343,7 @@ class CaptureSession @Inject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Cannot start foreground capture", e)
             mutableState.value = state.value.copy(phase = CapturePhase.FAILED, error = "Could not start recording. Return to Nightjar and try again.")
+            stopAudition()
         }
     }
 
@@ -354,6 +374,10 @@ class CaptureSession @Inject constructor(
                 if (countIn) delay((options.countInBars * 4 * 60_000.0 / options.bpm).toLong())
                 engine.openWriteGate()
                 gateOpened = true
+                if (recordingBacking != null) {
+                    recordingCorrectionFrames = latencyEstimator.computeCompensationMs(
+                        preRollMs = 0L, hasPlayableTracks = true) * SAMPLE_RATE / 1000
+                }
                 mutableState.value = state.value.copy(phase = CapturePhase.RECORDING, countingIn = false)
                 tickJob = scope.launch {
                     // Only retain the visible tail. Long background recordings must not grow a
@@ -385,6 +409,7 @@ class CaptureSession @Inject constructor(
     }
 
     fun stop(reason: String? = null) {
+        if (state.value.phase == CapturePhase.SAVING) return
         if (!state.value.recording) { stopAudition(); return }
         mutableState.value = state.value.copy(phase = CapturePhase.SAVING, countingIn = false, error = reason)
         tickJob?.cancel()
@@ -395,10 +420,12 @@ class CaptureSession @Inject constructor(
             // In particular, wait for awaitFirstBuffer's IO call before closing its stream.
             starting?.cancelAndJoin()
             try {
-                engine.setMetronomeEnabled(false)
-                engine.pause()
                 durationMs = if (ownsInput) engine.stopRecording() else 0L
                 ownsInput = false
+                recordingStartFrame = engine.getCaptureStartPlaybackFrame()
+                engine.setMetronomeEnabled(false)
+                stopAudition()
+                engine.pause()
                 mutableState.value = state.value.copy(pendingSave = gateOpened || durationMs > 0)
                 if ((gateOpened || durationMs > 0) && state.value.file != null) {
                     save()
@@ -425,14 +452,24 @@ class CaptureSession @Inject constructor(
             val parts = prepared ?: takeWriter.write(file, boundaries.toList()).also { prepared = it }
             // Text creation may still be finishing when the microphone is stopped.
             val ideaId = ideaCreation?.await() ?: state.value.ideaId
-            val saved = if (ideaId == null || group != null) repo.saveCaptureBatch(group, parts)
-                else repo.saveCaptureBatchForIdea(ideaId, group, parts)
+            val backing = recordingBacking?.takeIf { recordingStartFrame >= 0 && it.durationMs > 0 }
+            val starts = listOf(0L) + boundaries
+            val contexts = parts.indices.map { index -> backing?.let {
+                CaptureBackingContext(it.id, it.durationMs * SAMPLE_RATE / 1000,
+                    recordingStartFrame + starts[index] * SAMPLE_RATE / 1000,
+                    recordingCorrectionFrames)
+            } }
+            val saved = if (ideaId == null || group != null) repo.saveCaptureBatch(group, parts, contexts)
+                else repo.saveCaptureBatchForIdea(ideaId, group, parts, contexts)
             group = saved.group
             writing?.attachIdea(saved.group.ideaId)
             val newest = saved.takes.last()
             durationMs = 0
             prepared = null
             boundaries.clear()
+            recordingBacking = null
+            recordingStartFrame = -1L
+            recordingCorrectionFrames = 0L
             mutableState.value = state.value.copy(phase = CapturePhase.SAVED, ideaId = saved.group.ideaId,
                 file = parts.last().file, takes = state.value.takes + saved.takes,
                 selectedTakeId = newest.id, pendingSave = false, amplitudes = emptyList(),
@@ -462,5 +499,6 @@ class CaptureSession @Inject constructor(
     private companion object {
         const val TAG = "CaptureSession"
         const val MAX_PEAKS = 1200
+        const val SAMPLE_RATE = 44100L
     }
 }

@@ -86,6 +86,12 @@ class OboeAudioEngine @Inject constructor() {
 
     fun getRecordedDurationMs(): Long = nativeGetRecordedDurationMs()
 
+    /** Input frames accepted by the writer, independent of its disk-drain progress. */
+    fun getCapturedFrames(): Long = nativeGetCapturedFrames()
+
+    /** Unwrapped playback frame when the first recorded input buffer was accepted. */
+    fun getCaptureStartPlaybackFrame(): Long = nativeGetCaptureStartPlaybackFrame()
+
     // ── Playback ───────────────────────────────────────────────────────────
 
     fun addTrack(
@@ -359,6 +365,8 @@ class OboeAudioEngine @Inject constructor() {
     private external fun nativeIsRecordingActive(): Boolean
     private external fun nativeGetLatestPeakAmplitude(): Float
     private external fun nativeGetRecordedDurationMs(): Long
+    private external fun nativeGetCapturedFrames(): Long
+    private external fun nativeGetCaptureStartPlaybackFrame(): Long
 
     // Playback
     private external fun nativeAddTrack(

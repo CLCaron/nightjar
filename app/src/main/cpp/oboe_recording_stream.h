@@ -8,6 +8,7 @@
 #include <string>
 
 namespace nightjar {
+struct AtomicTransport;
 
 /**
  * Oboe input stream for recording.
@@ -28,7 +29,7 @@ namespace nightjar {
 class OboeRecordingStream : public oboe::AudioStreamDataCallback,
                             public oboe::AudioStreamErrorCallback {
 public:
-    OboeRecordingStream();
+    explicit OboeRecordingStream(AtomicTransport& transport);
     ~OboeRecordingStream();
 
     /**
@@ -80,6 +81,15 @@ public:
         return wavWriter_.getDurationMs();
     }
 
+    int64_t getCapturedFrames() const {
+        return capturedFrames_.load(std::memory_order_acquire);
+    }
+
+    /** Output transport frame observed by the first accepted input callback. */
+    int64_t getCaptureStartPlaybackFrame() const {
+        return captureStartPlaybackFrame_.load(std::memory_order_acquire);
+    }
+
     // ── Oboe callbacks ──────────────────────────────────────────────────
 
     oboe::DataCallbackResult onAudioReady(
@@ -92,6 +102,7 @@ public:
         oboe::Result error) override;
 
 private:
+    AtomicTransport& transport_;
     std::shared_ptr<oboe::AudioStream> stream_;
     SpscRingBuffer<kRingBufferCapacity> ringBuffer_;
     WavWriter wavWriter_;
@@ -100,6 +111,8 @@ private:
     std::atomic<bool> pipelineHot_{false};
     std::atomic<bool> writeGateOpen_{false};
     std::atomic<float> peakAmplitude_{0.0f};
+    std::atomic<int64_t> capturedFrames_{0};
+    std::atomic<int64_t> captureStartPlaybackFrame_{-1};
 };
 
 }  // namespace nightjar

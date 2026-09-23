@@ -24,12 +24,26 @@ class CaptureBatchTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         db = Room.inMemoryDatabaseBuilder(context, NightjarDatabase::class.java).build()
         repo = IdeaRepository(db.ideaDao(), db.tagDao(), db.trackDao(), db.audioClipDao(),
-            db.captureGroupDao(), db.takeDao(), RecordingStorage(context), db)
+            db.captureBackingDao(), db.captureGroupDao(), db.takeDao(), RecordingStorage(context), db)
     }
 
     @After fun close() = db.close()
 
     private fun audio(name: String) = CaptureAudio(File("$name.wav"), 1000)
+
+    @Test fun backingContextStoresUnwrappedStartAndAudiblePhase() = runTest {
+        val guitar = repo.saveCaptureBatch(null, listOf(audio("guitar")))
+        val destination = repo.createCaptureGroup(guitar.group.ideaId)
+        val backing = CaptureBackingContext(guitar.takes.single().id, 44100L,
+            transportStartFrame = 2 * 44100L, correctionFrames = 4410L)
+        val melody = repo.saveCaptureBatch(CaptureGroup(guitar.group.ideaId, destination.clipId),
+            listOf(audio("melody")), listOf(backing))
+        val saved = repo.getCaptureBackings(melody.takes.single().id).single()
+        assertEquals(guitar.takes.single().id, saved.backingTakeId)
+        assertEquals(2 * 44100L, saved.transportStartFrame)
+        assertEquals(39690L, saved.sourcePhaseFrame)
+        assertEquals("estimated", saved.syncMethod)
+    }
 
     @Test fun appendingUsesOneGroupAndPreservesChosenTake() = runTest {
         val first = repo.saveCaptureBatch(null, listOf(audio("one"), audio("two")))
