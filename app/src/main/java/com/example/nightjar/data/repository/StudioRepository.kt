@@ -90,7 +90,7 @@ class StudioRepository(
                 }
             }
         }
-        return if (needsRefresh) trackDao.getTracksForIdea(ideaId) else existing
+        return trackDao.getStudioTracksForIdea(ideaId)
     }
 
     // ── Track CRUD ────────────────────────────────────────────────────────
@@ -237,7 +237,7 @@ class StudioRepository(
     // ── Reads ────────────────────────────────────────────────────────────
 
     suspend fun getTracks(ideaId: Long): List<TrackEntity> =
-        trackDao.getTracksForIdea(ideaId)
+        trackDao.getStudioTracksForIdea(ideaId)
 
     // ── Audio Clip CRUD ──────────────────────────────────────────────────
 
@@ -477,7 +477,7 @@ class StudioRepository(
      * isMuted) stays on the instance itself.
      */
     suspend fun getActiveAudioSlotsForIdea(ideaId: Long): List<AudioPlaybackSlot> {
-        val tracks = trackDao.getTracksForIdea(ideaId).filter { it.isAudio }
+        val tracks = trackDao.getStudioTracksForIdea(ideaId).filter { it.isAudio }
         if (tracks.isEmpty()) return emptyList()
 
         val trackIds = tracks.map { it.id }

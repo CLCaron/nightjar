@@ -30,6 +30,9 @@ interface TrackDao {
     @Query("UPDATE tracks SET durationMs = :durationMs WHERE id = :id")
     suspend fun updateDuration(id: Long, durationMs: Long)
 
+    @Query("UPDATE tracks SET audioFileName = :fileName, durationMs = :durationMs WHERE id = :id")
+    suspend fun updateCaptureSource(id: Long, fileName: String, durationMs: Long)
+
     @Query("UPDATE tracks SET midiProgram = :program WHERE id = :id")
     suspend fun updateMidiProgram(id: Long, program: Int)
 
@@ -41,6 +44,16 @@ interface TrackDao {
 
     @Query("SELECT * FROM tracks WHERE ideaId = :ideaId ORDER BY sortIndex ASC")
     suspend fun getTracksForIdea(ideaId: Long): List<TrackEntity>
+
+    @Query("""
+        SELECT tracks.* FROM tracks
+        WHERE tracks.ideaId = :ideaId AND NOT EXISTS (
+            SELECT 1 FROM audio_clips JOIN capture_groups ON capture_groups.clipId = audio_clips.id
+            WHERE audio_clips.trackId = tracks.id AND capture_groups.inStudio = 0
+        )
+        ORDER BY tracks.sortIndex ASC
+    """)
+    suspend fun getStudioTracksForIdea(ideaId: Long): List<TrackEntity>
 
     @Query("SELECT * FROM tracks WHERE id = :id")
     suspend fun getTrackById(id: Long): TrackEntity?

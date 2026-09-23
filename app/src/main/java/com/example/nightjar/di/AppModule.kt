@@ -50,11 +50,12 @@ abstract class AppModule {
             tagDao: TagDao,
             trackDao: TrackDao,
             audioClipDao: AudioClipDao,
+            captureGroupDao: com.example.nightjar.data.db.dao.CaptureGroupDao,
             takeDao: TakeDao,
             storage: RecordingStorage,
             database: NightjarDatabase
         ): IdeaRepository = IdeaRepository(
-            ideaDao, tagDao, trackDao, audioClipDao, takeDao, storage, database
+            ideaDao, tagDao, trackDao, audioClipDao, captureGroupDao, takeDao, storage, database
         )
 
         @Provides
@@ -65,6 +66,9 @@ abstract class AppModule {
 
         @Provides
         fun provideAudioClipDao(db: NightjarDatabase): AudioClipDao = db.audioClipDao()
+
+        @Provides
+        fun provideCaptureGroupDao(db: NightjarDatabase): com.example.nightjar.data.db.dao.CaptureGroupDao = db.captureGroupDao()
 
         @Provides
         @Singleton

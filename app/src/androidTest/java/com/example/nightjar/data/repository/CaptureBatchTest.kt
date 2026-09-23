@@ -24,7 +24,7 @@ class CaptureBatchTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         db = Room.inMemoryDatabaseBuilder(context, NightjarDatabase::class.java).build()
         repo = IdeaRepository(db.ideaDao(), db.tagDao(), db.trackDao(), db.audioClipDao(),
-            db.takeDao(), RecordingStorage(context), db)
+            db.captureGroupDao(), db.takeDao(), RecordingStorage(context), db)
     }
 
     @After fun close() = db.close()
@@ -67,5 +67,17 @@ class CaptureBatchTest {
         } catch (_: android.database.sqlite.SQLiteException) { failed = true }
         assertTrue(failed)
         assertEquals(listOf("one.wav"), db.takeDao().getTakesForClip(first.group.clipId).map { it.audioFileName })
+    }
+
+    @Test fun newGroupKeepsLatchSeparateFromStudioUntilAdded() = runTest {
+        val original = repo.saveCaptureBatch(null, listOf(audio("guitar")))
+        val melody = repo.createCaptureGroup(original.group.ideaId)
+        val saved = repo.saveCaptureBatch(CaptureGroup(melody.ideaId, melody.clipId), listOf(audio("melody")))
+        repo.latchCaptureTake(melody, saved.takes.single().id)
+        assertEquals(2, repo.getCaptureGroups(original.group.ideaId).size)
+        assertEquals(saved.takes.single().id, repo.getCaptureGroups(original.group.ideaId).last().latchedTakeId)
+        assertEquals(1, db.trackDao().getStudioTracksForIdea(original.group.ideaId).size)
+        repo.addCaptureGroupToStudio(melody)
+        assertEquals(2, db.trackDao().getStudioTracksForIdea(original.group.ideaId).size)
     }
 }

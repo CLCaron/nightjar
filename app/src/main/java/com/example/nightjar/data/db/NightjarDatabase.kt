@@ -5,6 +5,7 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import com.example.nightjar.data.db.dao.AudioClipDao
+import com.example.nightjar.data.db.dao.CaptureGroupDao
 import com.example.nightjar.data.db.dao.DrumPatternDao
 import com.example.nightjar.data.db.dao.IdeaDao
 import com.example.nightjar.data.db.dao.MidiClipDao
@@ -13,6 +14,7 @@ import com.example.nightjar.data.db.dao.TagDao
 import com.example.nightjar.data.db.dao.TakeDao
 import com.example.nightjar.data.db.dao.TrackDao
 import com.example.nightjar.data.db.entity.AudioClipEntity
+import com.example.nightjar.data.db.entity.CaptureGroupEntity
 import com.example.nightjar.data.db.entity.DrumClipEntity
 import com.example.nightjar.data.db.entity.DrumPatternEntity
 import com.example.nightjar.data.db.entity.DrumStepEntity
@@ -56,16 +58,17 @@ import com.example.nightjar.data.db.entity.TrackEntity
  *             `lengthSteps` to `drum_patterns`, back-filled as
  *             `bars * stepsPerBar`. `bars` column stays for now but is no
  *             longer read at runtime (dropped in a later cleanup).
+ * - **v15** — Added capture groups, independent latches, and explicit Studio visibility.
  */
 @Database(
     entities = [
         IdeaEntity::class, TagEntity::class, IdeaTagCrossRef::class,
-        TrackEntity::class, AudioClipEntity::class, TakeEntity::class,
+        TrackEntity::class, AudioClipEntity::class, TakeEntity::class, CaptureGroupEntity::class,
         DrumPatternEntity::class, DrumStepEntity::class,
         DrumClipEntity::class,
         MidiClipEntity::class, MidiNoteEntity::class
     ],
-    version = 14,
+    version = 15,
     exportSchema = false
 )
 abstract class NightjarDatabase : RoomDatabase() {
@@ -75,6 +78,7 @@ abstract class NightjarDatabase : RoomDatabase() {
     abstract fun trackDao(): TrackDao
     abstract fun takeDao(): TakeDao
     abstract fun audioClipDao(): AudioClipDao
+    abstract fun captureGroupDao(): CaptureGroupDao
     abstract fun drumPatternDao(): DrumPatternDao
     abstract fun midiClipDao(): MidiClipDao
     abstract fun midiNoteDao(): MidiNoteDao
@@ -605,6 +609,33 @@ abstract class NightjarDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_14_15 = object : androidx.room.migration.Migration(14, 15) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS capture_groups (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        ideaId INTEGER NOT NULL,
+                        clipId INTEGER NOT NULL,
+                        displayName TEXT NOT NULL,
+                        sortIndex INTEGER NOT NULL,
+                        latchedTakeId INTEGER,
+                        inStudio INTEGER NOT NULL DEFAULT 0,
+                        FOREIGN KEY(ideaId) REFERENCES ideas(id) ON DELETE CASCADE,
+                        FOREIGN KEY(clipId) REFERENCES audio_clips(id) ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_capture_groups_ideaId ON capture_groups(ideaId)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_capture_groups_clipId ON capture_groups(clipId)")
+                // Existing capture clips already belong to arrangements. Keep them visible.
+                db.execSQL("""
+                    INSERT INTO capture_groups (ideaId, clipId, displayName, sortIndex, inStudio)
+                    SELECT tracks.ideaId, audio_clips.id, tracks.displayName, tracks.sortIndex, 1
+                    FROM audio_clips INNER JOIN tracks ON tracks.id = audio_clips.trackId
+                    WHERE tracks.trackType = 'audio' AND audio_clips.sourceClipId IS NULL
+                """.trimIndent())
+            }
+        }
+
         fun getInstance(context: Context): NightjarDatabase {
             return INSTANCE ?: synchronized(this) {
                 val db = Room.databaseBuilder(
@@ -616,7 +647,7 @@ abstract class NightjarDatabase : RoomDatabase() {
                     MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
                     MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10,
                     MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
-                    MIGRATION_13_14
+                    MIGRATION_13_14, MIGRATION_14_15
                 ).build()
                 INSTANCE = db
                 db

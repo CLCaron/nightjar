@@ -4,11 +4,13 @@ import androidx.room.withTransaction
 import com.example.nightjar.data.db.IdeaTagCrossRef
 import com.example.nightjar.data.db.NightjarDatabase
 import com.example.nightjar.data.db.dao.AudioClipDao
+import com.example.nightjar.data.db.dao.CaptureGroupDao
 import com.example.nightjar.data.db.dao.IdeaDao
 import com.example.nightjar.data.db.dao.TagDao
 import com.example.nightjar.data.db.dao.TakeDao
 import com.example.nightjar.data.db.dao.TrackDao
 import com.example.nightjar.data.db.entity.AudioClipEntity
+import com.example.nightjar.data.db.entity.CaptureGroupEntity
 import com.example.nightjar.data.db.entity.IdeaEntity
 import com.example.nightjar.data.db.entity.TagEntity
 import com.example.nightjar.data.db.entity.TakeEntity
@@ -36,12 +38,63 @@ class IdeaRepository(
     private val tagDao: TagDao,
     private val trackDao: TrackDao,
     private val audioClipDao: AudioClipDao,
+    private val captureGroupDao: CaptureGroupDao,
     private val takeDao: TakeDao,
     private val storage: RecordingStorage,
     private val database: NightjarDatabase
 ) {
 
     // ── Record ──────────────────────────────────────────────────────────
+
+    suspend fun getCaptureGroups(ideaId: Long): List<CaptureGroupEntity> = database.withTransaction {
+        captureGroupDao.clearMissingLatches()
+        captureGroupDao.forIdea(ideaId)
+    }
+
+    suspend fun getCaptureTakes(clipId: Long): List<TakeEntity> =
+        takeDao.getTakesForClip(clipId)
+
+    suspend fun getCaptureTake(id: Long): TakeEntity? = takeDao.getTakeById(id)
+
+    suspend fun createCaptureGroup(ideaId: Long): CaptureGroupEntity = database.withTransaction {
+        requireNotNull(ideaDao.getIdeaById(ideaId)) { "This Idea no longer exists." }
+        val index = (captureGroupDao.forIdea(ideaId).maxOfOrNull { it.sortIndex } ?: -1) + 1
+        val name = if (index == 0) "Original Idea" else "Group ${index + 1}"
+        val trackIndex = (trackDao.getTracksForIdea(ideaId).maxOfOrNull { it.sortIndex } ?: -1) + 1
+        val trackId = trackDao.insertTrack(TrackEntity(ideaId = ideaId, displayName = name,
+            sortIndex = trackIndex, durationMs = 0))
+        val clipId = audioClipDao.insertClip(AudioClipEntity(trackId = trackId,
+            displayName = "Clip 1", sortIndex = 0))
+        val candidate = CaptureGroupEntity(ideaId = ideaId, clipId = clipId,
+            displayName = name, sortIndex = index)
+        candidate.copy(id = captureGroupDao.insert(candidate))
+    }
+
+    suspend fun renameCaptureGroup(id: Long, name: String) {
+        val trimmed = name.trim().take(40)
+        require(trimmed.isNotEmpty())
+        database.withTransaction {
+            val group = requireNotNull(captureGroupDao.forId(id))
+            captureGroupDao.rename(id, trimmed)
+            if (group.inStudio) {
+                val clip = requireNotNull(audioClipDao.getClipById(group.clipId))
+                trackDao.updateDisplayName(clip.trackId, trimmed)
+            }
+        }
+    }
+
+    suspend fun latchCaptureTake(group: CaptureGroupEntity, takeId: Long?) = database.withTransaction {
+        require(takeId == null || takeDao.getTakeById(takeId)?.clipId == group.clipId)
+        captureGroupDao.latch(group.id, takeId)
+    }
+
+    suspend fun addCaptureGroupToStudio(group: CaptureGroupEntity) = database.withTransaction {
+        val clip = requireNotNull(audioClipDao.getClipById(group.clipId))
+        val track = requireNotNull(trackDao.getTrackById(clip.trackId))
+        require(track.ideaId == group.ideaId)
+        trackDao.updateDisplayName(track.id, group.displayName)
+        captureGroupDao.addToStudio(group.id)
+    }
 
     /** One atomic batch; subsequent intervals append without changing the chosen take. */
     suspend fun saveCaptureBatch(group: CaptureGroup?, audio: List<CaptureAudio>): SavedCaptureBatch {
@@ -72,12 +125,23 @@ class IdeaRepository(
                 group
             }
             val existing = takeDao.getTakesForClip(target.clipId)
+            if (captureGroupDao.forClip(target.clipId) == null) {
+                val index = (captureGroupDao.forIdea(target.ideaId).maxOfOrNull { it.sortIndex } ?: -1) + 1
+                captureGroupDao.insert(CaptureGroupEntity(ideaId = target.ideaId, clipId = target.clipId,
+                    displayName = if (index == 0) "Original Idea" else "Group ${index + 1}",
+                    sortIndex = index, inStudio = index == 0))
+            }
             val firstIndex = (existing.maxOfOrNull { it.sortIndex } ?: -1) + 1
             val takes = audio.mapIndexed { index, part ->
                 val take = TakeEntity(clipId = target.clipId, audioFileName = part.file.name,
                     displayName = "Take ${firstIndex + index + 1}", sortIndex = firstIndex + index,
                     durationMs = part.durationMs, isActive = existing.isEmpty() && index == 0)
                 take.copy(id = takeDao.insertTake(take))
+            }
+            val source = requireNotNull(audioClipDao.getClipById(target.clipId))
+            val track = requireNotNull(trackDao.getTrackById(source.trackId))
+            if (track.audioFileName == null && existing.isEmpty()) {
+                trackDao.updateCaptureSource(track.id, audio.first().file.name, audio.first().durationMs)
             }
             SavedCaptureBatch(target, takes)
         }
