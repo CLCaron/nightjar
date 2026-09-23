@@ -22,6 +22,10 @@
             android:name=".audio.CaptureService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+        <service
+            android:name=".audio.StudioRecordingService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

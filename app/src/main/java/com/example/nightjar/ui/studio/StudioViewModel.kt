@@ -7,6 +7,7 @@ import com.example.nightjar.audio.AudioLatencyEstimator
 import com.example.nightjar.audio.MetronomePreferences
 import com.example.nightjar.audio.MusicalTimeConverter
 import com.example.nightjar.audio.StudioPreferences
+import com.example.nightjar.audio.StudioRecordingForeground
 import com.example.nightjar.audio.OboeAudioEngine
 import com.example.nightjar.audio.SoundFontManager
 import com.example.nightjar.audio.WavSplitter
@@ -22,6 +23,8 @@ import com.example.nightjar.data.storage.RecordingStorage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -34,9 +37,6 @@ import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.roundToLong
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import javax.inject.Inject
 
 /**
@@ -70,7 +70,8 @@ class StudioViewModel @Inject constructor(
     private val soundFontManager: SoundFontManager,
     private val metronomePrefs: MetronomePreferences,
     private val studioPrefs: StudioPreferences,
-    private val pulseBus: PulseBus
+    private val pulseBus: PulseBus,
+    private val studioForeground: StudioRecordingForeground
 ) : ViewModel() {
 
     init {
@@ -129,6 +130,10 @@ class StudioViewModel @Inject constructor(
     private var recordingTrimStartMs: Long = 0L
     private var recordingTickJob: Job? = null
     private var recordingFile: File? = null
+    private var recordingForegroundToken: String? = null
+    private var recordingStartJob: Job? = null
+    private var recordingOwnsInput = false
+    private var stoppingRecordingStartup = false
     private var tickJob: Job? = null
 
     // Live waveform amplitude buffer (mirrors RecordViewModel pattern)
@@ -611,6 +616,10 @@ class StudioViewModel @Inject constructor(
     }
 
     private fun navigateBack() {
+        if (_state.value.isRecording || _state.value.isCountingIn || recordingStartJob?.isActive == true || recordingForegroundToken != null) {
+            viewModelScope.launch { _effects.emit(StudioEffect.ShowError("Stop recording before leaving Studio.")) }
+            return
+        }
         val ideaId = currentIdeaId ?: run {
             viewModelScope.launch { _effects.emit(StudioEffect.NavigateBack) }
             return
@@ -685,6 +694,7 @@ class StudioViewModel @Inject constructor(
             stopRecording()
             return
         }
+        if (recordingStartJob?.isActive == true || recordingForegroundToken != null) return
 
         if (st.armedTrackId != null) {
             // Armed track exists -- record a take on it
@@ -710,14 +720,17 @@ class StudioViewModel @Inject constructor(
     private fun startRecordingAfterPermission() {
         val ideaId = currentIdeaId ?: return
         val st = _state.value
+        if (recordingStartJob?.isActive == true || recordingForegroundToken != null || st.isRecording) return
 
         // Determine if loop recording should be active
         isLoopRecording = st.isLoopEnabled && st.hasLoopRegion
         loopResetTimestampsMs.clear()
         lastLoopResetCount = audioEngine.getLoopResetCount()
 
-        viewModelScope.launch {
+        recordingStartJob = viewModelScope.launch {
             try {
+                // Android must grant foreground microphone ownership before Oboe opens input.
+                recordingForegroundToken = studioForeground.start { onForegroundStop() }
                 val countInBars = st.countInBars
                 val hasCountIn = countInBars > 0 && st.isMetronomeEnabled
 
@@ -731,21 +744,25 @@ class StudioViewModel @Inject constructor(
                     audioEngine.setCountIn(countInBars, st.timeSignatureNumerator)
                 }
 
-                val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-                val file = recordingStorage.getAudioFile("nightjar_overdub_$ts.wav")
+                val file = recordingStorage.createRecordingFile(prefix = "nightjar_overdub")
                 recordingFile = file
 
                 val intendedStartMs = _state.value.cursorPositionMs
 
                 // Phase 1: Start input stream
+                recordingOwnsInput = true
                 val started = audioEngine.startRecording(file.absolutePath)
                 if (!started) {
+                    audioEngine.stopRecording()
+                    recordingOwnsInput = false
+                    recordingForegroundToken?.let(studioForeground::finish)
+                    recordingForegroundToken = null
                     _state.update { it.copy(isCountingIn = false) }
                     _effects.emit(StudioEffect.ShowError("Failed to start recording."))
                     return@launch
                 }
                 // Phase 2: Pipeline hot
-                audioEngine.awaitFirstBuffer()
+                check(audioEngine.awaitFirstBuffer()) { "The microphone did not provide audio. Please try again." }
 
                 // Seek to cursor position before starting playback for overdub context
                 audioEngine.seekTo(intendedStartMs)
@@ -811,6 +828,7 @@ class StudioViewModel @Inject constructor(
                         recordingTargetTrackId = recordingArmedTrackId
                     )
                 }
+                recordingForegroundToken?.let { studioForeground.update(it, StudioRecordingForeground.Phase.RECORDING) }
 
                 // Single tick job for both elapsed time and amplitude polling (~60fps)
                 recordingTickJob = viewModelScope.launch {
@@ -826,11 +844,45 @@ class StudioViewModel @Inject constructor(
                         }
                     }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _state.update { it.copy(isCountingIn = false) }
+                audioEngine.setRecording(false)
+                audioEngine.pause()
+                if (recordingOwnsInput) audioEngine.stopRecording()
+                recordingOwnsInput = false
+                recordingForegroundToken?.let(studioForeground::finish)
+                recordingForegroundToken = null
+                _state.update { it.copy(isCountingIn = false, isRecording = false) }
                 _effects.emit(
                     StudioEffect.ShowError(e.message ?: "Failed to start recording.")
                 )
+            }
+        }
+    }
+
+    private fun onForegroundStop() {
+        if (_state.value.isRecording) {
+            stopRecording()
+        } else if (recordingStartJob?.isActive == true && !stoppingRecordingStartup) {
+            stoppingRecordingStartup = true
+            val starting = recordingStartJob
+            viewModelScope.launch {
+                try {
+                    starting?.cancelAndJoin()
+                    audioEngine.setRecording(false)
+                    audioEngine.pause()
+                    if (recordingOwnsInput) audioEngine.stopRecording()
+                    recordingOwnsInput = false
+                    recordingFile = null
+                    _state.update { it.copy(isCountingIn = false) }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Could not finish canceled Studio recording startup", e)
+                } finally {
+                    recordingForegroundToken?.let(studioForeground::finish)
+                    recordingForegroundToken = null
+                    stoppingRecordingStartup = false
+                }
             }
         }
     }
@@ -843,6 +895,8 @@ class StudioViewModel @Inject constructor(
      */
     private fun stopRecording() {
         val ideaId = currentIdeaId ?: return
+        val foregroundToken = recordingForegroundToken
+        foregroundToken?.let { studioForeground.update(it, StudioRecordingForeground.Phase.SAVING) }
 
         audioEngine.setRecording(false)
         audioEngine.pause()
@@ -850,6 +904,7 @@ class StudioViewModel @Inject constructor(
         recordingTickJob = null
 
         val durationMs = audioEngine.stopRecording()
+        recordingOwnsInput = false
         val file = recordingFile
         recordingFile = null
 
@@ -876,6 +931,8 @@ class StudioViewModel @Inject constructor(
         }
 
         if (durationMs <= 0 || file == null) {
+            foregroundToken?.let(studioForeground::finish)
+            recordingForegroundToken = null
             viewModelScope.launch {
                 _effects.emit(StudioEffect.ShowError("Recording failed -- no audio captured."))
             }
@@ -942,6 +999,9 @@ class StudioViewModel @Inject constructor(
                 _effects.emit(
                     StudioEffect.ShowError(e.message ?: "Failed to save recording.")
                 )
+            } finally {
+                foregroundToken?.let(studioForeground::finish)
+                if (recordingForegroundToken == foregroundToken) recordingForegroundToken = null
             }
         }
     }
@@ -2839,6 +2899,7 @@ class StudioViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
+        recordingStartJob?.cancel()
         tickJob?.cancel()
         recordingTickJob?.cancel()
         previewNoteOffJob?.cancel()
@@ -2846,9 +2907,12 @@ class StudioViewModel @Inject constructor(
         drumPatternJobs.clear()
         midiNoteJobs.values.forEach { it.cancel() }
         midiNoteJobs.clear()
-        if (audioEngine.isRecordingActive()) {
+        if (recordingOwnsInput || audioEngine.isRecordingActive()) {
             audioEngine.stopRecording()
         }
+        recordingOwnsInput = false
+        recordingForegroundToken?.let(studioForeground::finish)
+        recordingForegroundToken = null
         // Order matters: pause stops the render thread from ticking,
         // disable prevents new note events, then silence kills remaining notes
         audioEngine.pause()

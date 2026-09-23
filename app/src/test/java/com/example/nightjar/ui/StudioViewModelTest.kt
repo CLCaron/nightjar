@@ -6,6 +6,7 @@ import com.example.nightjar.audio.MetronomePreferences
 import com.example.nightjar.audio.OboeAudioEngine
 import com.example.nightjar.audio.SoundFontManager
 import com.example.nightjar.audio.StudioPreferences
+import com.example.nightjar.audio.StudioRecordingForeground
 import com.example.nightjar.data.db.entity.IdeaEntity
 import com.example.nightjar.data.db.entity.TrackEntity
 import com.example.nightjar.data.events.PulseBus
@@ -26,6 +27,7 @@ import io.mockk.verify
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -67,7 +69,8 @@ class StudioViewModelTest {
     private fun createViewModel(
         ideaRepo: IdeaRepository = mockk(),
         studioRepo: StudioRepository = mockk(),
-        audioEngine: OboeAudioEngine = mockAudioEngine()
+        audioEngine: OboeAudioEngine = mockAudioEngine(),
+        studioForeground: StudioRecordingForeground = mockk(relaxed = true)
     ): StudioViewModel = StudioViewModel(
         ideaRepo = ideaRepo,
         studioRepo = studioRepo,
@@ -79,7 +82,8 @@ class StudioViewModelTest {
         soundFontManager = mockk<SoundFontManager>(relaxed = true),
         metronomePrefs = mockk<MetronomePreferences>(relaxed = true),
         studioPrefs = mockk<StudioPreferences>(relaxed = true),
-        pulseBus = PulseBus()
+        pulseBus = PulseBus(),
+        studioForeground = studioForeground
     )
 
     @Test
@@ -162,6 +166,27 @@ class StudioViewModelTest {
         assertFalse(state.isPlaying)
         assertEquals(0L, state.globalPositionMs)
         assertEquals(0L, state.totalDurationMs)
+    }
+
+    @Test
+    fun `mic input stays closed when Studio foreground start fails`() = runTest(mainDispatcherRule.dispatcher.scheduler) {
+        val ideaRepo = mockk<IdeaRepository>()
+        val studioRepo = mockk<StudioRepository>()
+        val foreground = mockk<StudioRecordingForeground>(relaxed = true)
+        val engine = mockAudioEngine()
+        coEvery { ideaRepo.getIdeaById(1L) } returns idea
+        coEvery { studioRepo.ensureProjectInitialized(1L) } returns tracks
+        coEvery { foreground.start(any()) } throws SecurityException("foreground denied")
+
+        val vm = createViewModel(ideaRepo, studioRepo, engine, foreground)
+        vm.onAction(StudioAction.Load(1L))
+        runCurrent()
+        vm.onAction(StudioAction.MicPermissionGranted)
+        runCurrent()
+
+        coVerify(exactly = 1) { foreground.start(any()) }
+        verify(exactly = 0) { engine.startRecording(any()) }
+        assertFalse(vm.state.value.isRecording)
     }
 
     @Test

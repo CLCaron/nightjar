@@ -141,7 +141,6 @@ fun StudioScreen(
 
     val state by vm.state.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
-    val currentIsRecording by rememberUpdatedState(state.isRecording)
 
     val scrollState = rememberScrollState()
     val zoomScope = rememberCoroutineScope()
@@ -375,17 +374,14 @@ fun StudioScreen(
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            when {
-                event == Lifecycle.Event.ON_STOP && currentIsRecording -> {
-                    vm.onAction(StudioAction.StopRecording)
-                }
-                event == Lifecycle.Event.ON_RESUME -> {
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> {
                     // Sync loop region from the audio engine — picks up any
                     // changes the user made on the full-screen Piano Roll
                     // while we were paused.
                     vm.refreshLoopFromEngine()
                 }
-                else -> {}
+                else -> Unit
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
