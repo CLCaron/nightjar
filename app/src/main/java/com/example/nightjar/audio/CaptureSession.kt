@@ -38,6 +38,7 @@ enum class CapturePhase { IDLE, STARTING, RECORDING, SAVING, SAVED, FAILED }
 data class CaptureState(
     val token: String = "",
     val phase: CapturePhase = CapturePhase.IDLE,
+    val loadingIdea: Boolean = false,
     val countingIn: Boolean = false,
     val amplitudes: List<Float> = emptyList(),
     val pendingTakeWaveforms: List<List<Float>> = emptyList(),
@@ -55,7 +56,7 @@ data class CaptureState(
     val error: String? = null
 ) {
     val recording: Boolean get() = phase == CapturePhase.STARTING || phase == CapturePhase.RECORDING
-    val busy: Boolean get() = recording || phase == CapturePhase.SAVING
+    val busy: Boolean get() = recording || phase == CapturePhase.SAVING || loadingIdea
 }
 
 /** Owns initial capture and finalization independently of the screen and its ViewModel.
@@ -112,12 +113,22 @@ class CaptureSession @Inject constructor(
             return
         }
         stopAudition()
+        group = null
+        writing = null
+        mutableState.value = CaptureState(ideaId = ideaId, loadingIdea = true)
         scope.launch {
-            if (repo.getIdeaById(ideaId) == null) return@launch
-            group = null
-            writing = notes.open(ideaId)
-            mutableState.value = CaptureState(ideaId = ideaId)
-            refreshGroups()
+            try {
+                if (repo.getIdeaById(ideaId) == null) {
+                    mutableState.value = CaptureState(error = "This Idea is no longer available.")
+                    return@launch
+                }
+                writing = notes.open(ideaId)
+                refreshGroups()
+            } catch (e: Exception) {
+                Log.e(TAG, "Could not reopen Idea", e)
+                mutableState.value = state.value.copy(loadingIdea = false,
+                    error = "Could not open this Idea.")
+            }
         }
     }
 
@@ -128,7 +139,8 @@ class CaptureSession @Inject constructor(
             ?: groups.find { it.id == state.value.openGroupId } ?: groups.firstOrNull()
         group = open?.let { CaptureGroup(ideaId, it.clipId) }
         val takes = open?.let { repo.getCaptureTakes(it.clipId) }.orEmpty()
-        mutableState.value = state.value.copy(ideaTitle = repo.getIdeaById(ideaId)?.title,
+        mutableState.value = state.value.copy(loadingIdea = false,
+            ideaTitle = repo.getIdeaById(ideaId)?.title,
             groups = groups, openGroupId = open?.id,
             takes = takes, takeFiles = takes.associate { it.id to storage.getAudioFile(it.audioFileName) },
             selectedTakeId = takes.lastOrNull()?.id,

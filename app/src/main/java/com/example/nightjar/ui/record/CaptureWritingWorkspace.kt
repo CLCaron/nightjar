@@ -82,6 +82,7 @@ internal fun CaptureWritingWorkspace(
     }
 
     val status = when {
+        capture.loadingIdea -> "LOADING IDEA"
         state.isCountingIn -> "COUNT IN"
         state.isRecording -> "TAKE ${capture.takeNumber} / REC"
         state.isSaving -> "SAVING AUDIO"
@@ -287,7 +288,9 @@ private fun CaptureWritingTransport(state: RecordUiState, onRecord: () -> Unit,
             enabled = !capture.busy && !capture.pendingSave && capture.groups.any { it.latchedTakeId != null },
             onClick = { onAction(RecordAction.PlayTake) })
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            HardwareRecordButton(state.isRecording, enabled = !state.isSaving && !state.isCountingIn, onClick = onRecord,
+            HardwareRecordButton(state.isRecording,
+                enabled = !state.isSaving && !state.isCountingIn && !capture.loadingIdea,
+                onClick = onRecord,
                 modifier = if (compact) Modifier.size(48.dp) else Modifier)
             Text("RECORD", color = NjMuted, fontFamily = IbmPlexMono, fontSize = 10.sp)
         }

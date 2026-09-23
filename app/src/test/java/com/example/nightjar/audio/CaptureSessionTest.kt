@@ -80,6 +80,20 @@ class CaptureSessionTest {
         advanceUntilIdle()
     }
 
+    @Test fun `reopening an Idea cannot record into the previous group while loading`() = runTest(dispatcher) {
+        val groups = CompletableDeferred<List<CaptureGroupEntity>>()
+        coEvery { repo.getCaptureGroups(42L) } coAnswers { groups.await() }
+        capture.openIdea(42L)
+        assertTrue(capture.state.value.loadingIdea)
+        capture.start(CaptureOptions())
+        verify(exactly = 0) { foreground.start(any()) }
+        groups.complete(listOf(CaptureGroupEntity(id = 1L, ideaId = 42L,
+            clipId = 7L, displayName = "Original Idea", sortIndex = 0)))
+        advanceUntilIdle()
+        assertFalse(capture.state.value.loadingIdea)
+        assertEquals(7L, capture.state.value.groups.single().clipId)
+    }
+
     @Test fun `stop before service readiness cannot reopen microphone`() = runTest(dispatcher) {
         capture.start(CaptureOptions())
         val token = capture.state.value.token

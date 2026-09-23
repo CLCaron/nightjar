@@ -54,6 +54,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -72,6 +75,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -302,17 +306,22 @@ internal fun CaptureGroupStrip(state: RecordUiState, onAction: (RecordAction) ->
 internal fun CaptureTakeShelf(state: RecordUiState, onAction: (RecordAction) -> Unit,
     modifier: Modifier = Modifier) {
     val open = state.capture.groups.find { it.id == state.capture.openGroupId }
+    val scrollStates = rememberSaveableStateHolder()
     Column(modifier.fillMaxWidth()) {
         Text("${(open?.displayName ?: "ORIGINAL IDEA").uppercase()} TAKES  /  ${state.capture.takes.size + state.capture.pendingTakeWaveforms.size}",
             color = NjMuted, fontFamily = IbmPlexMono, fontSize = 9.sp,
             modifier = Modifier.padding(vertical = 7.dp))
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+        Box(Modifier.fillMaxWidth().weight(1f)) {
+        scrollStates.SaveableStateProvider(open?.id ?: 0L) {
+        LazyColumn(Modifier.fillMaxSize(), state = rememberLazyListState(),
             verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (state.capture.takes.isEmpty() && state.capture.pendingTakeWaveforms.isEmpty()) {
+            item {
             Text("Press Record to capture a take in this group.", color = NjMuted,
                 style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(12.dp))
+            }
         }
-        state.capture.pendingTakeWaveforms.indices.reversed().forEach { index ->
+        items(state.capture.pendingTakeWaveforms.indices.reversed().toList(), key = { "pending-$it" }) { index ->
             val waveform = state.capture.pendingTakeWaveforms[index]
             Column(Modifier.fillMaxWidth().height(82.dp)
                 .clip(RoundedCornerShape(5.dp)).background(NjPanelInset).padding(7.dp),
@@ -324,7 +333,7 @@ internal fun CaptureTakeShelf(state: RecordUiState, onAction: (RecordAction) -> 
                 Text("FINALIZES ON STOP", color = NjMuted2, fontFamily = IbmPlexMono, fontSize = 8.sp)
             }
         }
-        state.capture.takes.asReversed().forEach { take ->
+        items(state.capture.takes.asReversed(), key = { it.id }) { take ->
             val latched = state.capture.groups.any { it.latchedTakeId == take.id }
             Column(Modifier.fillMaxWidth().height(82.dp)
                 .clip(RoundedCornerShape(5.dp))
@@ -342,6 +351,8 @@ internal fun CaptureTakeShelf(state: RecordUiState, onAction: (RecordAction) -> 
                 Text(if (latched) "LATCHED" else "TAP TO LATCH", color = NjMuted,
                     fontFamily = IbmPlexMono, fontSize = 8.sp)
             }
+        }
+        }
         }
         }
     }

@@ -167,9 +167,14 @@ class RecordViewModel @Inject constructor(
     }
 
     fun openIdea(ideaId: Long) {
+        wordsJob?.cancel()
+        document = null
+        _state.value = _state.value.copy(isWriting = false,
+            words = com.example.nightjar.data.repository.NotesState(ready = false))
         capture.openIdea(ideaId)
         viewModelScope.launch {
-            capture.state.first { it.ideaId == ideaId }
+            val loaded = capture.state.first { !it.loadingIdea }
+            if (loaded.ideaId != ideaId) return@launch
             val next = capture.writingDocument()
             document = next
             wordsJob?.cancel()
