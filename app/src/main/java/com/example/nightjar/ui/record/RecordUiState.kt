@@ -65,6 +65,8 @@ data class RecordUiState(
 
 /** User-initiated actions on the Record screen. */
 sealed interface RecordAction {
+    data object RequestAudioImport : RecordAction
+    data class ImportAudio(val uri: android.net.Uri) : RecordAction
     data object CreateGroup : RecordAction
     data class OpenGroup(val id: Long) : RecordAction
     data class RenameGroup(val id: Long, val name: String) : RecordAction
@@ -105,6 +107,7 @@ sealed interface RecordAction {
 
 /** One-shot side effects emitted by [RecordViewModel]. */
 sealed interface RecordEffect {
+    data object RequestAudioImport : RecordEffect
     data class OpenOverview(val ideaId: Long) : RecordEffect
     data class OpenStudio(val ideaId: Long) : RecordEffect
     data class ShowError(val message: String) : RecordEffect

@@ -83,6 +83,50 @@ class CaptureSessionTest {
         advanceUntilIdle()
     }
 
+    @Test fun `import locks capture and opens separate vocals without starting sound`() = runTest(dispatcher) {
+        val importer = mockk<AudioImporter>()
+        val uri = mockk<android.net.Uri>()
+        val pending = kotlinx.coroutines.CompletableDeferred<AudioImporter.ImportedAudio>()
+        coEvery { importer.import(uri) } coAnswers { pending.await() }
+        coEvery { repo.createImportedIdea(any()) } returns CaptureGroup(42L, 8L)
+        coEvery { repo.getCaptureGroups(42L) } returns listOf(
+            CaptureGroupEntity(id = 1, ideaId = 42, clipId = 7, displayName = "Backing", sortIndex = 0, latchedTakeId = 1),
+            CaptureGroupEntity(id = 2, ideaId = 42, clipId = 8, displayName = "Vocals", sortIndex = 1))
+        coEvery { repo.getCaptureTakes(8L) } returns emptyList()
+        capture.importIdea(importer, uri)
+        assertTrue(capture.state.value.busy)
+        runCurrent()
+        capture.start(CaptureOptions())
+        capture.playSelected()
+        pending.complete(AudioImporter.ImportedAudio(file, File("original.source"), 2500, "Song"))
+        runCurrent()
+        assertFalse(capture.state.value.busy)
+        assertEquals(42L, capture.state.value.ideaId)
+        assertEquals(2L, capture.state.value.openGroupId)
+        assertTrue(capture.state.value.takes.isEmpty())
+        assertFalse(capture.state.value.playing)
+        verify(exactly = 0) { foreground.start(any()) }
+        verify(exactly = 0) { engine.play() }
+    }
+
+    @Test fun `failed import retains current idea and cleans provisional files`() = runTest(dispatcher) {
+        val document = mockk<com.example.nightjar.data.repository.NotesSession.Document>(relaxed = true)
+        every { notes.open(42L) } returns document
+        coEvery { document.flush() } returns true
+        capture.openIdea(42L); runCurrent()
+        val importer = mockk<AudioImporter>()
+        val uri = mockk<android.net.Uri>()
+        coEvery { importer.import(uri) } returns AudioImporter.ImportedAudio(File("new.wav"), File("new.source"), 3000, "New")
+        coEvery { repo.createImportedIdea(any()) } throws IllegalStateException("Storage failed")
+        every { storage.deleteAudioFile(any()) } just Runs
+        capture.importIdea(importer, uri); runCurrent()
+        assertEquals(42L, capture.state.value.ideaId)
+        assertEquals(1L, capture.state.value.openGroupId)
+        assertEquals("Storage failed", capture.state.value.error)
+        assertFalse(capture.state.value.busy)
+        verify { storage.deleteAudioFile("new.wav"); storage.deleteAudioFile("new.source") }
+    }
+
     private fun prepareRelatedPair() {
         val melody = TakeEntity(id = 2L, clipId = 8L, audioFileName = "melody.wav",
             displayName = "Take 1", sortIndex = 0, durationMs = 5000L)

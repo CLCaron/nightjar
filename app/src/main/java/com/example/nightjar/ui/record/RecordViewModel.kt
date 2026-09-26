@@ -30,7 +30,8 @@ class RecordViewModel @Inject constructor(
     private val audioEngine: OboeAudioEngine,
     private val repo: IdeaRepository,
     private val metronomePrefs: MetronomePreferences,
-    private val capture: CaptureSession
+    private val capture: CaptureSession,
+    private val importer: com.example.nightjar.audio.AudioImporter
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(RecordUiState())
@@ -69,7 +70,19 @@ class RecordViewModel @Inject constructor(
     }
 
     fun onAction(action: RecordAction) {
+        if (capture.state.value.importing) return
         when (action) {
+            RecordAction.RequestAudioImport -> {
+                if (!capture.state.value.busy && !capture.state.value.pendingSave && !capture.state.value.playing) viewModelScope.launch {
+                    _effects.emit(RecordEffect.RequestAudioImport)
+                }
+            }
+            is RecordAction.ImportAudio -> viewModelScope.launch {
+                val previousId = capture.state.value.ideaId
+                capture.importIdea(importer, action.uri)
+                val result = capture.state.first { !it.importing }
+                if (result.ideaId != previousId) result.ideaId?.let { openIdea(it) }
+            }
             RecordAction.CreateGroup -> capture.createGroup()
             is RecordAction.OpenGroup -> capture.selectGroup(action.id)
             is RecordAction.RenameGroup -> capture.renameGroup(action.id, action.name)

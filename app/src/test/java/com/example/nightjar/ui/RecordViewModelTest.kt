@@ -33,7 +33,7 @@ class RecordViewModelTest {
 
     private fun viewModel(): RecordViewModel {
         every { session.state } returns captureState
-        return RecordViewModel(engine, repo, prefs, session)
+        return RecordViewModel(engine, repo, prefs, session, mockk(relaxed = true))
     }
 
     @Test fun `clearing screen does not stop the app owned recording`() = runTest(dispatcher) {

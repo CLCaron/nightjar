@@ -82,6 +82,7 @@ internal fun CaptureWritingWorkspace(
     }
 
     val status = when {
+        capture.importing -> "IMPORTING AUDIO"
         capture.loadingIdea -> "LOADING IDEA"
         state.isCountingIn -> "COUNT IN"
         state.isRecording -> "TAKE ${capture.takeNumber} / REC"
@@ -157,7 +158,7 @@ private fun CaptureWordsEditor(state: RecordUiState, editor: TextFieldValue, edi
     }
     val paper: @Composable (Modifier) -> Unit = { paperModifier ->
         Box(paperModifier.background(NjWritingPaper).padding(if (compact) 6.dp else 14.dp)) {
-            BasicTextField(value = editor, onValueChange = edit, enabled = state.words.ready,
+            BasicTextField(value = editor, onValueChange = edit, enabled = state.words.ready && !state.capture.importing,
                 textStyle = MaterialTheme.typography.bodyLarge.copy(color = NjWritingInk),
                 cursorBrush = SolidColor(NjWritingInk),
                 modifier = Modifier.fillMaxSize().focusRequester(focus)
@@ -205,9 +206,13 @@ private fun CaptureTempoDrawerSlot(state: RecordUiState, onAction: (RecordAction
 
 @Composable
 private fun CaptureMeterRow(state: RecordUiState, onAction: (RecordAction) -> Unit, height: androidx.compose.ui.unit.Dp) {
-    WaveformSection(state.postRecording, state.liveAmplitudes, NjTrackColors[0],
-        { state.capture.takes.lastOrNull()?.let { onAction(RecordAction.SelectTake(it.id)) } },
-        Modifier.fillMaxWidth().height(height))
+    Box(Modifier.fillMaxWidth().height(height)) {
+        WaveformSection(state.postRecording, state.liveAmplitudes, NjTrackColors[0],
+            { state.capture.takes.lastOrNull()?.let { onAction(RecordAction.SelectTake(it.id)) } },
+            Modifier.fillMaxSize())
+        if (state.capture.importing) Text("IMPORTING AUDIO", color = NjStarlight,
+            fontFamily = IbmPlexMono, fontSize = 11.sp, modifier = Modifier.align(Alignment.Center))
+    }
 }
 
 @Composable
@@ -271,10 +276,12 @@ private fun CaptureNavigationDock(state: RecordUiState, onAction: (RecordAction)
     onLibrary: () -> Unit, onSettings: () -> Unit) {
     val capture = state.capture
     Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        NjButton(text = "Import", caption = "IMPORT", enabled = !capture.busy && !capture.pendingSave && !capture.playing,
+            onClick = { onAction(RecordAction.RequestAudioImport) }, modifier = Modifier.weight(1f))
         NjButton(text = "Studio", enabled = !capture.busy && !capture.pendingSave,
             onClick = { onAction(RecordAction.CreateStudioIdea) }, modifier = Modifier.weight(1f))
         NjButton(text = "Library", enabled = !capture.busy, onClick = onLibrary, modifier = Modifier.weight(1f))
-        NjButton(text = "Settings", onClick = onSettings, modifier = Modifier.weight(1f))
+        NjButton(text = "Settings", enabled = !capture.importing, onClick = onSettings, modifier = Modifier.weight(1f))
     }
 }
 
@@ -289,7 +296,7 @@ private fun CaptureWritingTransport(state: RecordUiState, onRecord: () -> Unit,
             onClick = { onAction(RecordAction.PlayTake) })
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             HardwareRecordButton(state.isRecording,
-                enabled = !state.isSaving && !state.isCountingIn && !capture.loadingIdea,
+                enabled = !state.isSaving && !state.isCountingIn && !capture.loadingIdea && !capture.importing,
                 onClick = onRecord,
                 modifier = if (compact) Modifier.size(48.dp) else Modifier)
             Text("RECORD", color = NjMuted, fontFamily = IbmPlexMono, fontSize = 10.sp)

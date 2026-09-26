@@ -136,6 +136,9 @@ fun RecordScreen(
     val state by vm.state.collectAsState()
     LaunchedEffect(ideaId) { ideaId?.let(vm::openIdea) }
 
+    val audioPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { vm.onAction(RecordAction.ImportAudio(it)) }
+    }
     val uiScope = androidx.compose.runtime.rememberCoroutineScope()
     val notificationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         vm.onAction(RecordAction.StartRecording)
@@ -170,6 +173,7 @@ fun RecordScreen(
     LaunchedEffect(Unit) {
         vm.effects.collectLatest { effect ->
             when (effect) {
+                RecordEffect.RequestAudioImport -> audioPicker.launch(arrayOf("audio/*", "application/octet-stream"))
                 is RecordEffect.OpenOverview -> onOpenOverview(effect.ideaId)
                 is RecordEffect.OpenStudio -> onOpenStudio(effect.ideaId)
                 is RecordEffect.ShowError -> {

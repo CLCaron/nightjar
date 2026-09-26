@@ -40,6 +40,7 @@ data class CaptureState(
     val token: String = "",
     val phase: CapturePhase = CapturePhase.IDLE,
     val loadingIdea: Boolean = false,
+    val importing: Boolean = false,
     val countingIn: Boolean = false,
     val amplitudes: List<Float> = emptyList(),
     val pendingTakeWaveforms: List<List<Float>> = emptyList(),
@@ -57,7 +58,7 @@ data class CaptureState(
     val error: String? = null
 ) {
     val recording: Boolean get() = phase == CapturePhase.STARTING || phase == CapturePhase.RECORDING
-    val busy: Boolean get() = recording || phase == CapturePhase.SAVING || loadingIdea
+    val busy: Boolean get() = recording || phase == CapturePhase.SAVING || loadingIdea || importing
 }
 
 /** Owns initial capture and finalization independently of the screen and its ViewModel.
@@ -112,6 +113,38 @@ class CaptureSession @Inject constructor(
     fun canStartNewIdea(): Boolean = !state.value.busy && !state.value.pendingSave &&
         ideaCreation?.isActive != true && (writing?.state?.value?.safeToLeaveIdea != false)
 
+
+    /** Locks the app-owned workspace while a new imported Idea is prepared. */
+    fun importIdea(importer: AudioImporter, uri: android.net.Uri) {
+        if (state.value.busy || state.value.pendingSave || state.value.playing) return
+        mutableState.value = state.value.copy(importing = true, error = null)
+        scope.launch { importIdeaInternal(importer, uri) }
+    }
+
+    private suspend fun importIdeaInternal(importer: AudioImporter, uri: android.net.Uri) {
+        var imported: AudioImporter.ImportedAudio? = null
+        var committed = false
+        try {
+            check(writing?.flush() != false) { "Words are still being saved. Try again." }
+            imported = importer.import(uri)
+            val destination = kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                repo.createImportedIdea(imported).also { committed = true }
+            }
+            stopAudition()
+            group = destination
+            writing = notes.open(destination.ideaId)
+            mutableState.value = CaptureState(ideaId = destination.ideaId, loadingIdea = true, importing = true)
+            refreshGroups(destination.clipId)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            Log.e(TAG, "Audio import failed", error)
+            mutableState.value = state.value.copy(error = error.message ?: "Could not import this audio file.")
+        } finally {
+            if (!committed) imported?.let { storage.deleteAudioFile(it.file.name); storage.deleteAudioFile(it.original.name) }
+            mutableState.value = state.value.copy(importing = false, loadingIdea = false)
+        }
+    }
 
     fun openIdea(ideaId: Long) {
         if (state.value.busy || state.value.pendingSave) return
