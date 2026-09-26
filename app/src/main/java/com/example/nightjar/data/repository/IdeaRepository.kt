@@ -65,6 +65,24 @@ class IdeaRepository(
 
     // ── Record ──────────────────────────────────────────────────────────
 
+    /** Imported backing and empty vocal destination are committed together. */
+    suspend fun createImportedIdea(audio: com.example.nightjar.audio.AudioImporter.ImportedAudio): CaptureGroup =
+        database.withTransaction {
+            val ideaId = ideaDao.insertIdea(IdeaEntity(title = audio.title, createdAtEpochMs = System.currentTimeMillis()))
+            val trackId = trackDao.insertTrack(TrackEntity(ideaId = ideaId, audioFileName = audio.file.name,
+                displayName = "Backing", sortIndex = 0, durationMs = audio.durationMs))
+            val clipId = audioClipDao.insertClip(AudioClipEntity(trackId = trackId, displayName = "Imported Audio", sortIndex = 0))
+            val takeId = takeDao.insertTake(TakeEntity(clipId = clipId, audioFileName = audio.file.name,
+                displayName = audio.title, sortIndex = 0, durationMs = audio.durationMs, isActive = true))
+            captureGroupDao.insert(CaptureGroupEntity(ideaId = ideaId, clipId = clipId,
+                displayName = "Backing", sortIndex = 0, latchedTakeId = takeId, inStudio = true))
+            val vocal = createCaptureGroup(ideaId)
+            captureGroupDao.rename(vocal.id, "Vocals")
+            database.importedSourceDao().insert(com.example.nightjar.data.db.entity.ImportedSourceEntity(
+                audio.file.name, audio.original.name, ideaId))
+            CaptureGroup(ideaId, vocal.clipId)
+        }
+
     suspend fun getCaptureGroups(ideaId: Long): List<CaptureGroupEntity> = database.withTransaction {
         captureGroupDao.clearMissingLatches()
         captureGroupDao.forIdea(ideaId)
@@ -295,9 +313,14 @@ class IdeaRepository(
         tagDao.removeTagFromIdea(ideaId, tagId)
 
     suspend fun deleteIdeaAndAudio(id: Long) {
+        val sources = database.importedSourceDao().forIdea(id)
         val tracks = trackDao.getTracksForIdea(id)
-        ideaDao.deleteIdeaById(id) // cascade deletes track rows
-        tracks.forEach { it.audioFileName?.let { name -> storage.deleteAudioFile(name) } }
+        val clips = tracks.flatMap { audioClipDao.getClipsForTrack(it.id) }
+        val takes = takeDao.getTakesForClips(clips.map { it.id })
+        ideaDao.deleteIdeaById(id)
+        (tracks.mapNotNull { it.audioFileName } + takes.map { it.audioFileName } +
+            sources.flatMap { listOf(it.originalFileName, it.playbackFileName) }).distinct()
+            .forEach(storage::deleteAudioFile)
     }
 
     /**

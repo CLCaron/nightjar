@@ -67,15 +67,17 @@ import com.example.nightjar.data.db.entity.TrackEntity
     entities = [
         IdeaEntity::class, TagEntity::class, IdeaTagCrossRef::class,
         TrackEntity::class, AudioClipEntity::class, TakeEntity::class, CaptureGroupEntity::class,
-        CaptureBackingEntity::class,
+        CaptureBackingEntity::class, com.example.nightjar.data.db.entity.ImportedSourceEntity::class,
         DrumPatternEntity::class, DrumStepEntity::class,
         DrumClipEntity::class,
         MidiClipEntity::class, MidiNoteEntity::class
     ],
-    version = 16,
+    version = 17,
     exportSchema = false
 )
 abstract class NightjarDatabase : RoomDatabase() {
+
+    abstract fun importedSourceDao(): com.example.nightjar.data.db.dao.ImportedSourceDao
 
     abstract fun ideaDao(): IdeaDao
     abstract fun tagDao(): TagDao
@@ -641,6 +643,13 @@ abstract class NightjarDatabase : RoomDatabase() {
             }
         }
 
+        internal val MIGRATION_16_17 = object : androidx.room.migration.Migration(16, 17) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS imported_sources (playbackFileName TEXT NOT NULL PRIMARY KEY, originalFileName TEXT NOT NULL, ideaId INTEGER NOT NULL, FOREIGN KEY(ideaId) REFERENCES ideas(id) ON DELETE CASCADE)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_imported_sources_ideaId ON imported_sources(ideaId)")
+            }
+        }
+
         private val MIGRATION_15_16 = object : androidx.room.migration.Migration(15, 16) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                 db.execSQL("""
@@ -671,7 +680,7 @@ abstract class NightjarDatabase : RoomDatabase() {
                     MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
                     MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10,
                     MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
-                    MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16
+                    MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17
                 ).build()
                 INSTANCE = db
                 db

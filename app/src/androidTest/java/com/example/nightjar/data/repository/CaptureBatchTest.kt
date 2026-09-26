@@ -31,6 +31,77 @@ class CaptureBatchTest {
 
     private fun audio(name: String) = CaptureAudio(File("$name.wav"), 1000)
 
+    @Test fun v16MigrationRetainsExistingIdeaTakesAndLatches() = runTest {
+        val saved = repo.saveCaptureBatch(null, listOf(audio("legacy")))
+        val group = repo.getCaptureGroups(saved.group.ideaId).single()
+        repo.latchCaptureTake(group, saved.takes.single().id)
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val name = "import-migration-${java.util.UUID.randomUUID()}.db"
+        val path = context.getDatabasePath(name)
+        path.parentFile?.mkdirs()
+        val old = android.database.sqlite.SQLiteDatabase.openOrCreateDatabase(path, null)
+        try {
+            val schemas = db.openHelper.readableDatabase.query("SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '%imported_sources%' AND name != 'room_master_table'")
+            schemas.use { while (it.moveToNext()) old.execSQL(it.getString(1)) }
+            for (table in listOf("ideas", "tracks", "audio_clips", "takes", "capture_groups")) {
+                db.openHelper.readableDatabase.query("SELECT * FROM $table").use { rows ->
+                    while (rows.moveToNext()) {
+                        val values = android.content.ContentValues()
+                        for (column in 0 until rows.columnCount) {
+                            val columnName = rows.getColumnName(column)
+                            when (rows.getType(column)) {
+                                android.database.Cursor.FIELD_TYPE_NULL -> values.putNull(columnName)
+                                android.database.Cursor.FIELD_TYPE_INTEGER -> values.put(columnName, rows.getLong(column))
+                                android.database.Cursor.FIELD_TYPE_FLOAT -> values.put(columnName, rows.getDouble(column))
+                                else -> values.put(columnName, rows.getString(column))
+                            }
+                        }
+                        old.insertOrThrow(table, null, values)
+                    }
+                }
+            }
+            old.version = 16
+        } finally { old.close() }
+        val migrated = Room.databaseBuilder(context, NightjarDatabase::class.java, name)
+            .addMigrations(NightjarDatabase.MIGRATION_16_17).build()
+        try {
+            assertEquals("legacy.wav", migrated.takeDao().getTakeById(saved.takes.single().id)?.audioFileName)
+            assertEquals(saved.takes.single().id, migrated.captureGroupDao().forIdea(saved.group.ideaId).single().latchedTakeId)
+            assertTrue(migrated.importedSourceDao().forIdea(saved.group.ideaId).isEmpty())
+        } finally { migrated.close(); context.deleteDatabase(name) }
+    }
+
+    @Test fun importedIdeaHasSelectedBackingAndSeparateEmptyVocalDestination() = runTest {
+        val imported = com.example.nightjar.audio.AudioImporter.ImportedAudio(File("song.wav"), File("original.source"), 180000, "Band Song")
+        val vocal = repo.createImportedIdea(imported)
+        assertEquals("Band Song", repo.getIdeaById(vocal.ideaId)?.title)
+        val groups = repo.getCaptureGroups(vocal.ideaId)
+        assertEquals(listOf("Backing", "Vocals"), groups.map { it.displayName })
+        assertEquals(vocal.clipId, groups.last().clipId)
+        assertTrue(repo.getCaptureTakes(vocal.clipId).isEmpty())
+        assertNull(groups.last().latchedTakeId)
+        val backing = repo.getCaptureTakes(groups.first().clipId).single()
+        assertEquals(backing.id, groups.first().latchedTakeId)
+        assertEquals("song.wav", backing.audioFileName)
+        assertEquals(1, db.trackDao().getStudioTracksForIdea(vocal.ideaId).size)
+        assertEquals("original.source", db.importedSourceDao().forIdea(vocal.ideaId).single().originalFileName)
+        db.takeDao().deleteTakeById(backing.id)
+        assertEquals(1, db.importedSourceDao().forIdea(vocal.ideaId).size)
+        repo.deleteIdeaAndAudio(vocal.ideaId)
+        assertTrue(db.importedSourceDao().forIdea(vocal.ideaId).isEmpty())
+    }
+
+    @Test fun importedSourceInsertFailureRollsBackNewIdea() = runTest {
+        db.openHelper.writableDatabase.execSQL("CREATE TRIGGER reject_import BEFORE INSERT ON imported_sources BEGIN SELECT RAISE(ABORT, 'injected failure'); END")
+        val before = db.openHelper.readableDatabase.query("SELECT COUNT(*) FROM ideas").use { it.moveToFirst(); it.getInt(0) }
+        try {
+            repo.createImportedIdea(com.example.nightjar.audio.AudioImporter.ImportedAudio(File("song.wav"), File("original.source"), 180000, "Band Song"))
+            fail("Expected import rollback")
+        } catch (_: android.database.sqlite.SQLiteException) { }
+        val after = db.openHelper.readableDatabase.query("SELECT COUNT(*) FROM ideas").use { it.moveToFirst(); it.getInt(0) }
+        assertEquals(before, after)
+    }
+
     @Test fun backingContextStoresUnwrappedStartAndAudiblePhase() = runTest {
         val guitar = repo.saveCaptureBatch(null, listOf(audio("guitar")))
         val destination = repo.createCaptureGroup(guitar.group.ideaId)
