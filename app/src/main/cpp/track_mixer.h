@@ -26,6 +26,7 @@ struct TrackSlot {
     int64_t effectiveFrames = 0;  // duration - trimStart - trimEnd
     bool looping = false;
     int64_t phaseFrames = 0;
+    int64_t cycleFrames = 0;
     std::atomic<float> volume{1.0f};
     std::atomic<bool> muted{false};
 };
@@ -59,7 +60,8 @@ public:
     bool addTrack(int trackId, const std::string& filePath,
                   int64_t durationMs, int64_t offsetMs,
                   int64_t trimStartMs, int64_t trimEndMs,
-                  float volume, bool muted, bool looping = false, int64_t phaseMs = 0);
+                  float volume, bool muted, bool looping = false,
+                  int64_t phaseFrames = 0, int64_t cycleFrames = 0);
 
     /** Remove a track by ID. Called from the UI thread. */
     void removeTrack(int trackId);

@@ -51,6 +51,8 @@ public:
                          int64_t durationMs, int64_t phaseMs,
                          float volume);
     void setEndlessPlayback(bool enabled);
+    bool addCaptureLoop(int trackId, const char* filePath, int64_t durationMs,
+                        int64_t phaseFrames, int64_t cycleFrames);
     void removeTrack(int trackId);
     void removeAllTracks();
     void play();

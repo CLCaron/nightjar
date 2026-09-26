@@ -110,6 +110,11 @@ class OboeAudioEngine @Inject constructor() {
 
     fun setEndlessPlayback(enabled: Boolean) = nativeSetEndlessPlayback(enabled)
 
+    /** Repeat a source within a complete performance cycle, keeping the clock unwrapped. */
+    fun addCaptureLoop(trackId: Int, filePath: String, durationMs: Long,
+                       phaseFrames: Long, cycleFrames: Long): Boolean =
+        nativeAddCaptureLoop(trackId, filePath, durationMs, phaseFrames, cycleFrames)
+
     fun removeTrack(trackId: Int) = nativeRemoveTrack(trackId)
 
     fun removeAllTracks() = nativeRemoveAllTracks()
@@ -379,6 +384,8 @@ class OboeAudioEngine @Inject constructor() {
         phaseMs: Long, volume: Float
     ): Boolean
     private external fun nativeSetEndlessPlayback(enabled: Boolean)
+    private external fun nativeAddCaptureLoop(trackId: Int, filePath: String,
+        durationMs: Long, phaseFrames: Long, cycleFrames: Long): Boolean
     private external fun nativeRemoveTrack(trackId: Int)
     private external fun nativeRemoveAllTracks()
     private external fun nativePlay()

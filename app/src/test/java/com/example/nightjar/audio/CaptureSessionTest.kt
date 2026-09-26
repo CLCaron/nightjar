@@ -6,6 +6,7 @@ import com.example.nightjar.data.repository.CaptureGroup
 import com.example.nightjar.data.repository.SavedCaptureBatch
 import com.example.nightjar.data.repository.CaptureBackingContext
 import com.example.nightjar.data.db.entity.TakeEntity
+import com.example.nightjar.data.db.entity.CaptureBackingEntity
 import com.example.nightjar.data.db.entity.CaptureGroupEntity
 import com.example.nightjar.data.db.entity.IdeaEntity
 import com.example.nightjar.data.storage.RecordingStorage
@@ -80,6 +81,55 @@ class CaptureSessionTest {
         assertEquals(CapturePhase.RECORDING, capture.state.value.phase)
         capture.stop()
         advanceUntilIdle()
+    }
+
+    private fun prepareRelatedPair() {
+        val melody = TakeEntity(id = 2L, clipId = 8L, audioFileName = "melody.wav",
+            displayName = "Take 1", sortIndex = 0, durationMs = 5000L)
+        coEvery { repo.getCaptureGroups(42L) } returns listOf(
+            CaptureGroupEntity(id = 1L, ideaId = 42L, clipId = 7L,
+                displayName = "Guitar", sortIndex = 0, latchedTakeId = 1L),
+            CaptureGroupEntity(id = 2L, ideaId = 42L, clipId = 8L,
+                displayName = "Melody", sortIndex = 1, latchedTakeId = 2L))
+        coEvery { repo.getCaptureTake(2L) } returns melody
+        coEvery { repo.getCaptureBackings(1L) } returns emptyList()
+        coEvery { repo.getCaptureBackings(2L) } returns listOf(CaptureBackingEntity(
+            2L, 1L, 110250L, 100000L, 4410L, 44100L, "estimated"))
+        every { engine.addCaptureLoop(any(), any(), any(), any(), any()) } returns true
+        capture.openIdea(42L)
+    }
+
+    @Test fun `selected related pair uses performance cycle and remembered backing phase`() = runTest(dispatcher) {
+        prepareRelatedPair(); runCurrent()
+        capture.playSelected(); runCurrent()
+        assertTrue(capture.state.value.playing)
+        verify { engine.addCaptureLoop(-1, any(), 5000L, 0L, 220500L) }
+        verify { engine.addCaptureLoop(-2, any(), 2500L, 44100L, 220500L) }
+        capture.start(CaptureOptions())
+        verify(exactly = 0) { foreground.start(any()) }
+        assertTrue(capture.state.value.playing)
+        assertTrue(capture.state.value.error!!.contains("one backing take"))
+        capture.stopAudition(); advanceUntilIdle()
+    }
+
+    @Test fun `unrelated selection remains latched without starting audio`() = runTest(dispatcher) {
+        prepareRelatedPair(); runCurrent()
+        coEvery { repo.getCaptureBackings(2L) } returns emptyList()
+        capture.playSelected(); advanceUntilIdle()
+        assertFalse(capture.state.value.playing)
+        assertEquals(listOf(1L, 2L), capture.state.value.groups.map { it.latchedTakeId })
+        verify(exactly = 0) { engine.play() }
+        verify(exactly = 0) { engine.addCaptureLoop(any(), any(), any(), any(), any()) }
+    }
+
+    @Test fun `failure loading second source cleans up without playing the first alone`() = runTest(dispatcher) {
+        prepareRelatedPair(); runCurrent()
+        every { engine.addCaptureLoop(-2, any(), any(), any(), any()) } returns false
+        capture.playSelected(); advanceUntilIdle()
+        assertFalse(capture.state.value.playing)
+        verify(exactly = 0) { engine.play() }
+        verify(atLeast = 2) { engine.removeAllTracks() }
+        assertEquals(listOf(1L, 2L), capture.state.value.groups.map { it.latchedTakeId })
     }
 
     @Test fun `reopening an Idea cannot record into the previous group while loading`() = runTest(dispatcher) {

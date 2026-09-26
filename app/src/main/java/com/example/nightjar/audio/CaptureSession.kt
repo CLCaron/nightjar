@@ -89,7 +89,7 @@ class CaptureSession @Inject constructor(
     private var prepared: List<CaptureAudio>? = null
     private var auditionJob: Job? = null
     private var auditionStartJob: Job? = null
-    private var auditionTake: TakeEntity? = null
+    private var auditionTakes: List<TakeEntity> = emptyList()
     private var recordingBacking: TakeEntity? = null
     private var recordingStartFrame = -1L
     private var recordingCorrectionFrames = 0L
@@ -221,7 +221,7 @@ class CaptureSession @Inject constructor(
         engine.removeAllTracks()
         engine.setEndlessPlayback(false)
         engine.clearLoopRegion()
-        auditionTake = null
+        auditionTakes = emptyList()
         mutableState.value = state.value.copy(playing = false)
     }
 
@@ -229,13 +229,9 @@ class CaptureSession @Inject constructor(
         if (state.value.busy || state.value.pendingSave) return
         if (state.value.playing) return
         val latched = state.value.groups.mapNotNull { it.latchedTakeId }
-        if (latched.size > 1) {
-            mutableState.value = state.value.copy(error = "Combined playback needs an alignment check. Select one group for now.")
-            return
-        }
-        val takeId = latched.singleOrNull() ?: return
+        if (latched.isEmpty()) return
         auditionStartJob?.cancel()
-        auditionStartJob = scope.launch { playLatched(takeId) }
+        auditionStartJob = scope.launch { playLatched(latched) }
     }
 
     fun unlatchGroup(id: Long) {
@@ -247,24 +243,29 @@ class CaptureSession @Inject constructor(
         }
     }
 
-    private suspend fun playLatched(takeId: Long) {
-        val take = repo.getCaptureTake(takeId) ?: run {
-            mutableState.value = state.value.copy(error = "This take is no longer available.")
-            return
-        }
-        if (take.durationMs <= 0) return
+    private suspend fun playLatched(takeIds: List<Long>) {
         try {
+            require(takeIds.size <= 2) { "Select one take, or a recording and its original backing take." }
+            val takes = takeIds.map { requireNotNull(repo.getCaptureTake(it)) { "This take is no longer available." } }
+            val backings = if (takes.size == 2) takes.associate { it.id to repo.getCaptureBackings(it.id) }
+                else emptyMap()
+            val plan = CapturePlaybackPlanner.plan(takes, backings)
             engine.pause()
             engine.removeAllTracks()
             engine.clearLoopRegion()
             engine.setEndlessPlayback(true)
             engine.setCountIn(0, 4)
             engine.setMetronomeEnabled(false)
-            check(engine.addLoopingTrack(-1, storage.getAudioFile(take.audioFileName).absolutePath,
-                take.durationMs)) { "Could not play this take." }
+            plan.slots.forEachIndexed { index, slot ->
+                val file = storage.getAudioFile(slot.take.audioFileName).absolutePath
+                val added = if (plan.slots.size == 1) engine.addLoopingTrack(-1, file, slot.take.durationMs)
+                    else engine.addCaptureLoop(-1 - index, file, slot.take.durationMs,
+                        slot.phaseFrames, slot.cycleFrames)
+                check(added) { "Could not play this take." }
+            }
             engine.seekTo(0)
             engine.play()
-            auditionTake = take
+            auditionTakes = plan.slots.map { it.take }
             mutableState.value = state.value.copy(playing = true, error = null)
             auditionJob = scope.launch {
                 while (isActive) {
@@ -277,13 +278,15 @@ class CaptureSession @Inject constructor(
                     }
                 }
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Take audition failed", e)
             engine.pause()
             engine.removeAllTracks()
             engine.setEndlessPlayback(false)
             engine.clearLoopRegion()
-            auditionTake = null
+            auditionTakes = emptyList()
             mutableState.value = state.value.copy(playing = false, error = e.message ?: "Could not play this take.")
         }
     }
@@ -312,11 +315,11 @@ class CaptureSession @Inject constructor(
             return
         }
         val recordingWithBacking = state.value.playing
-        if (recordingWithBacking && auditionTake == null) {
-            mutableState.value = state.value.copy(error = "Could not identify the backing take. Stop and play it again.")
+        if (recordingWithBacking && auditionTakes.size != 1) {
+            mutableState.value = state.value.copy(error = "To record, select one backing take and press Play.")
             return
         }
-        recordingBacking = if (recordingWithBacking) auditionTake else null
+        recordingBacking = if (recordingWithBacking) auditionTakes.single() else null
         recordingStartFrame = -1L
         recordingCorrectionFrames = 0L
         if (!recordingWithBacking) {

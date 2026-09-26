@@ -142,6 +142,19 @@ Java_com_example_nightjar_audio_OboeAudioEngine_nativeSetEndlessPlayback(
     if (sEngine) sEngine->setEndlessPlayback(static_cast<bool>(enabled));
 }
 
+JNIEXPORT jboolean JNICALL
+Java_com_example_nightjar_audio_OboeAudioEngine_nativeAddCaptureLoop(
+        JNIEnv* env, jobject /* thiz */, jint trackId, jstring filePath,
+        jlong durationMs, jlong phaseFrames, jlong cycleFrames) {
+    if (!sEngine) return JNI_FALSE;
+    const char* path = env->GetStringUTFChars(filePath, nullptr);
+    bool ok = sEngine->addCaptureLoop(static_cast<int>(trackId), path,
+        static_cast<int64_t>(durationMs), static_cast<int64_t>(phaseFrames),
+        static_cast<int64_t>(cycleFrames));
+    env->ReleaseStringUTFChars(filePath, path);
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+
 JNIEXPORT void JNICALL
 Java_com_example_nightjar_audio_OboeAudioEngine_nativeRemoveTrack(
         JNIEnv* /* env */, jobject /* thiz */, jint trackId) {

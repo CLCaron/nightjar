@@ -14,7 +14,8 @@ TrackMixer::~TrackMixer() = default;
 bool TrackMixer::addTrack(int trackId, const std::string& filePath,
                           int64_t durationMs, int64_t offsetMs,
                           int64_t trimStartMs, int64_t trimEndMs,
-                          float volume, bool muted, bool looping, int64_t phaseMs) {
+                          float volume, bool muted, bool looping,
+                          int64_t phaseFrames, int64_t cycleFrames) {
 
     auto source = std::make_shared<WavTrackSource>();
     if (!source->open(filePath)) {
@@ -31,8 +32,9 @@ bool TrackMixer::addTrack(int trackId, const std::string& filePath,
     slot->effectiveFrames = msToFrames(durationMs - trimStartMs - trimEndMs);
     slot->looping = looping && slot->effectiveFrames > 0;
     if (slot->looping) {
-        slot->phaseFrames = ((msToFrames(phaseMs) % slot->effectiveFrames) + slot->effectiveFrames)
+        slot->phaseFrames = ((phaseFrames % slot->effectiveFrames) + slot->effectiveFrames)
             % slot->effectiveFrames;
+        slot->cycleFrames = std::max<int64_t>(0, cycleFrames);
     }
     slot->volume.store(volume, std::memory_order_relaxed);
     slot->muted.store(muted, std::memory_order_relaxed);
@@ -139,9 +141,14 @@ void TrackMixer::renderFrames(float* output, int32_t numFrames, int64_t position
                         framesToProcess - outputFrame));
                     continue;
                 }
-                int64_t sourceFrame = (local + slot->phaseFrames) % slot->effectiveFrames;
+                int64_t cycleLocal = slot->cycleFrames > 0 ? local % slot->cycleFrames : local;
+                int64_t sourceFrame = (cycleLocal + slot->phaseFrames) % slot->effectiveFrames;
                 int32_t count = static_cast<int32_t>(std::min<int64_t>(
                     framesToProcess - outputFrame, slot->effectiveFrames - sourceFrame));
+                if (slot->cycleFrames > 0) {
+                    count = static_cast<int32_t>(std::min<int64_t>(count,
+                        slot->cycleFrames - cycleLocal));
+                }
                 int64_t read = slot->source->readFrames(monoBuf,
                     slot->trimStartFrames + sourceFrame, count);
                 for (int64_t i = 0; i < read; ++i) {

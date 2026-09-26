@@ -142,13 +142,23 @@ bool AudioEngine::addLoopingTrack(int trackId, const char* filePath,
                                   float volume) {
     if (!mixer_) return false;
     bool ok = mixer_->addTrack(trackId, std::string(filePath), durationMs,
-                               0, 0, 0, volume, false, true, phaseMs);
+                               0, 0, 0, volume, false, true, msToFrames(phaseMs));
     if (ok) recomputeTotalFrames();
     return ok;
 }
 
 void AudioEngine::setEndlessPlayback(bool enabled) {
     if (transport_) transport_->endlessPlayback.store(enabled, std::memory_order_release);
+}
+
+bool AudioEngine::addCaptureLoop(int trackId, const char* filePath,
+                                  int64_t durationMs, int64_t phaseFrames,
+                                  int64_t cycleFrames) {
+    if (!mixer_ || durationMs <= 0 || cycleFrames <= 0) return false;
+    bool ok = mixer_->addTrack(trackId, std::string(filePath), durationMs,
+        0, 0, 0, 1.0f, false, true, phaseFrames, cycleFrames);
+    if (ok) recomputeTotalFrames();
+    return ok;
 }
 
 void AudioEngine::removeTrack(int trackId) {
