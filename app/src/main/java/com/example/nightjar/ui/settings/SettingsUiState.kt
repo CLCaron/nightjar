@@ -11,6 +11,7 @@ data class SettingsUiState(
     val microphones: List<MicrophoneOption> = emptyList(),
     val selectedMicrophone: String = "default",
     val audioBusy: Boolean = false,
+    val audioBusyReason: String? = null,
     val audioError: String? = null,
     val checkingTiming: Boolean = false,
     val timingMessage: String = "Timing: Estimated. Run an optional timing check below."

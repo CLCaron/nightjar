@@ -41,9 +41,10 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             while (isActive) {
                 try {
+                    val busyReason = audioBusyReason()
                     _state.update { it.copy(routes = routes.read(), microphones = inputs.options(),
                         selectedMicrophone = inputs.selectedKey,
-                        audioBusy = engine.isRecordingActive() || capture.state.value.busy || engine.isPlaying.value) }
+                        audioBusy = busyReason != null, audioBusyReason = busyReason) }
                 } catch (e: Exception) {
                     Log.w("SettingsViewModel", "Cannot inspect audio routing", e)
                     _state.update { it.copy(audioError = "Audio routing is unavailable. You can still record.") }
@@ -56,7 +57,7 @@ class SettingsViewModel @Inject constructor(
     fun onAction(action: SettingsAction) {
         when (action) {
             SettingsAction.CheckTiming -> {
-                if (checkJob?.isActive == true || _state.value.audioBusy || !_state.value.showAudioSync) return
+                if (checkJob?.isActive == true || audioBusyReason() != null || !_state.value.showAudioSync) return
                 checkJob = viewModelScope.launch {
                     _state.update { it.copy(checkingTiming = true, audioError = null,
                         timingMessage = "Checking timing. Keep the output close to the selected microphone.") }
@@ -84,7 +85,7 @@ class SettingsViewModel @Inject constructor(
                 _state.update { it.copy(showAudioSync = false) }
             }
             is SettingsAction.SelectMicrophone -> {
-                if (_state.value.checkingTiming || engine.isRecordingActive() || capture.state.value.busy || engine.isPlaying.value) return
+                if (_state.value.checkingTiming || audioBusyReason() != null) return
                 try {
                     inputs.select(action.key)
                     _state.update { it.copy(selectedMicrophone = action.key, audioError = null) }
@@ -97,6 +98,18 @@ class SettingsViewModel @Inject constructor(
                 themePrefs.themeKey = action.key
                 _state.update { it.copy(themeKey = action.key) }
             }
+        }
+    }
+
+    private fun audioBusyReason(): String? {
+        val session = capture.state.value
+        return when {
+            session.recording || engine.isRecordingActive() -> "Stop recording before checking timing."
+            session.pendingSave || session.phase == com.example.nightjar.audio.CapturePhase.SAVING ->
+                "Finish saving the recording before checking timing."
+            session.busy -> "Wait for the Idea to finish loading before checking timing."
+            engine.isPlaybackActive() -> "Stop playback before checking timing."
+            else -> null
         }
     }
 }

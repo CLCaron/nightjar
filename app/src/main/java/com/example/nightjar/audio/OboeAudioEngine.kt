@@ -156,11 +156,16 @@ class OboeAudioEngine @Inject constructor(private val inputPreferences: AudioInp
 
     fun play() {
         nativePlay()
+        _isPlaying.value = nativeIsPlaying()
     }
 
     fun pause() {
         nativePause()
+        _isPlaying.value = nativeIsPlaying()
     }
+
+    /** Query the current transport even when its screen's polling job has stopped. */
+    fun isPlaybackActive(): Boolean = nativeIsPlaying()
 
     fun seekTo(positionMs: Long) {
         nativeSeekTo(positionMs)

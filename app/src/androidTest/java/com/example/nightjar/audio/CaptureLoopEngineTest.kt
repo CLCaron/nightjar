@@ -7,12 +7,39 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
 import org.junit.Test
 import org.junit.runner.RunWith
 
 /** Exercises simultaneous native playback and microphone capture on a real device. */
 @RunWith(AndroidJUnit4::class)
 class CaptureLoopEngineTest {
+    @Test fun pausedTransportReleasesTimingCheckWithoutAnotherPoll() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val engine = OboeAudioEngine(AudioInputPreferences(context))
+        try {
+            assertTrue(engine.initialize())
+            engine.pause()
+            engine.removeAllTracks()
+            engine.setEndlessPlayback(true)
+            engine.play()
+            engine.pollState()
+            assertTrue("Test must begin with the published playback flag set", engine.isPlaying.value)
+            engine.pause()
+            assertFalse("Pause must clear the published flag without a later screen poll", engine.isPlaying.value)
+            // Unarmed calibration captures evidence but emits no sounds and creates no file.
+            assertTrue("Stopped transport must allow a timing check", engine.startAcousticCheck(AcousticProbePlan.generate()))
+            assertTrue(engine.awaitFirstBuffer())
+            assertTrue(engine.stopAcousticCheck())
+            assertFalse("Timing check must release temporary microphone input", engine.isRecordingActive())
+            assertTrue("Silent check must collect input before cancellation", engine.acousticCheckSamples().isNotEmpty())
+        } finally {
+            engine.stopAcousticCheck()
+            engine.pause()
+            engine.setEndlessPlayback(false)
+        }
+    }
+
     @Test fun inputContinuesAcrossSeveralBackingLoops() = runBlocking {
         val cache = InstrumentationRegistry.getInstrumentation().targetContext.cacheDir
         val loop = File(cache, "capture-loop-test.wav")

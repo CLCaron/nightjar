@@ -56,7 +56,9 @@ fun AudioRouteSettings(state: SettingsUiState, onAction: (SettingsAction) -> Uni
                 Text("Recording with: ${state.routes.inputName}")
                 Text(state.timingMessage)
                 Text("You can record without calibration. Microphone changes apply to the next recording.")
-                Text("In a quiet room, place the phone speaker or one removed earbud close to the selected microphone. The check plays short sounds for about 15 seconds. Use a comfortable listening volume.")
+                Text("The check plays short sounds for about 15 seconds. Use a quiet room and a comfortable listening volume.")
+                Text("With the phone speaker, keep the phone uncovered. With earbuds and the phone microphone, hold one removed earbud a few centimetres from the phone. Keep its top and bottom edges uncovered; try the other edge if the sounds are not detected. With a headset microphone, place the sound outlet close to that microphone.")
+                if (!state.checkingTiming) state.audioBusyReason?.let { Text(it) }
                 NjButton(text = "Check", caption = "CHECK", enabled = !state.audioBusy && !state.checkingTiming,
                     onClick = {
                         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
