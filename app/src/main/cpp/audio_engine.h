@@ -4,6 +4,8 @@
 #include "stream_evidence.h"
 #include <atomic>
 #include <memory>
+#include <mutex>
+#include <vector>
 
 namespace nightjar {
 
@@ -11,6 +13,7 @@ class OboeRecordingStream;
 class OboePlaybackStream;
 class TrackMixer;
 class SynthEngine;
+class AcousticCheck;
 struct AtomicTransport;
 
 /**
@@ -45,6 +48,12 @@ public:
     void setPreferredInputDevice(int32_t id);
     std::array<int64_t, 35> getStreamEvidence() const;
     std::array<int64_t, 3> getCaptureAnchor() const;
+    bool startAcousticCheck(const float* probes, int count);
+    void armAcousticCheck();
+    bool stopAcousticCheck();
+    std::array<int64_t, 3> acousticCheckProgress() const;
+    std::vector<float> acousticCheckSamples() const;
+    std::vector<int64_t> acousticCheckEvidence() const;
 
     // ── Playback API ────────────────────────────────────────────────────
     bool addTrack(int trackId, const char* filePath,
@@ -135,6 +144,8 @@ public:
     int64_t getInputLatencyMs() const;
 
 private:
+    mutable std::mutex inputControl_;
+    std::unique_ptr<AcousticCheck> acousticCheck_;
     /** Recompute totalFrames from max(mixer tracks, drum patterns, MIDI). */
     void recomputeTotalFrames();
 

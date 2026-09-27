@@ -5,7 +5,9 @@
 #include "synth_engine.h"
 #include "atomic_transport.h"
 #include "stream_evidence.h"
+#include "acoustic_check.h"
 #include <oboe/Oboe.h>
+#include <mutex>
 
 namespace nightjar {
 
@@ -23,7 +25,7 @@ class OboePlaybackStream : public oboe::AudioStreamDataCallback,
                            public oboe::AudioStreamErrorCallback {
 public:
     OboePlaybackStream(TrackMixer& mixer, AtomicTransport& transport,
-                       SynthEngine* synth = nullptr);
+                       SynthEngine* synth = nullptr, AcousticCheck* check = nullptr);
     ~OboePlaybackStream();
 
     /** Open and start the output stream. */
@@ -33,7 +35,7 @@ public:
     void stop();
 
     /** Returns true if the stream is open and started. */
-    bool isStreamOpen() const { return stream_ != nullptr; }
+    bool isStreamOpen() const { return evidence_.snapshot()[0] != 0; }
 
     /**
      * Returns the output pipeline latency in ms via hardware timestamps.
@@ -58,6 +60,8 @@ public:
         oboe::Result error) override;
 
 private:
+    mutable std::mutex control_;
+    AcousticCheck* check_;
     bool openStream();
 
     TrackMixer& mixer_;

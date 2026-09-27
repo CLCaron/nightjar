@@ -8,6 +8,9 @@
 #include "atomic_transport.h"
 #include "common.h"
 #include <algorithm>
+#include <chrono>
+#include <thread>
+#include "acoustic_check.h"
 
 namespace nightjar {
 
@@ -27,10 +30,11 @@ bool AudioEngine::initialize() {
          kSampleRate, kOutputChannelCount);
 
     transport_ = std::make_unique<AtomicTransport>();
-    recordingStream_ = std::make_unique<OboeRecordingStream>(*transport_);
+    acousticCheck_ = std::make_unique<AcousticCheck>();
+    recordingStream_ = std::make_unique<OboeRecordingStream>(*transport_, acousticCheck_.get());
     mixer_ = std::make_unique<TrackMixer>();
     synthEngine_ = std::make_unique<SynthEngine>(*transport_);
-    playbackStream_ = std::make_unique<OboePlaybackStream>(*mixer_, *transport_, synthEngine_.get());
+    playbackStream_ = std::make_unique<OboePlaybackStream>(*mixer_, *transport_, synthEngine_.get(), acousticCheck_.get());
 
     // Start the output stream — it sits idle (outputting silence) until play()
     if (!playbackStream_->start()) {
@@ -64,6 +68,7 @@ void AudioEngine::shutdown() {
     synthEngine_.reset();
     playbackStream_.reset();
     recordingStream_.reset();
+    acousticCheck_.reset();
     transport_.reset();
 
     initialized_.store(false, std::memory_order_release);
@@ -73,17 +78,20 @@ void AudioEngine::shutdown() {
 // ── Recording API ──────────────────────────────────────────────────────
 
 bool AudioEngine::startRecording(const char* filePath) {
+    std::lock_guard<std::mutex> control(inputControl_);
+    if (acousticCheck_ && acousticCheck_->running()) return false;
     if (!initialized_.load(std::memory_order_acquire)) {
         LOGE("AudioEngine: startRecording called but not initialized");
         return false;
     }
     if (!recordingStream_) {
-        recordingStream_ = std::make_unique<OboeRecordingStream>(*transport_);
+        recordingStream_ = std::make_unique<OboeRecordingStream>(*transport_, acousticCheck_.get());
     }
     return recordingStream_->start(std::string(filePath));
 }
 
 bool AudioEngine::awaitFirstBuffer(int timeoutMs) {
+    std::lock_guard<std::mutex> control(inputControl_);
     if (!recordingStream_) return false;
     return recordingStream_->awaitFirstBuffer(timeoutMs);
 }
@@ -95,6 +103,8 @@ void AudioEngine::openWriteGate() {
 }
 
 int64_t AudioEngine::stopRecording() {
+    std::lock_guard<std::mutex> control(inputControl_);
+    if (acousticCheck_ && acousticCheck_->running()) return -1;
     if (!recordingStream_) return -1;
     return recordingStream_->stop();
 }
@@ -123,11 +133,49 @@ int64_t AudioEngine::getCaptureStartPlaybackFrame() const {
 }
 
 void AudioEngine::setPreferredInputDevice(int32_t id) {
+    std::lock_guard<std::mutex> control(inputControl_);
     if (recordingStream_ && !recordingStream_->isActive()) recordingStream_->setPreferredDevice(id);
 }
 
 std::array<int64_t, 3> AudioEngine::getCaptureAnchor() const {
     return recordingStream_ ? recordingStream_->captureAnchor() : std::array<int64_t, 3>{-1, 0, 0};
+}
+
+bool AudioEngine::startAcousticCheck(const float* probes, int count) {
+    std::lock_guard<std::mutex> control(inputControl_);
+    if (!initialized_.load() || !recordingStream_ || recordingStream_->isActive() ||
+        transport_->playing.load() || !playbackStream_ || !playbackStream_->evidence()[0]) return false;
+    if (!acousticCheck_->prepare(probes, count)) return false;
+    if (!recordingStream_->startCalibration()) { acousticCheck_->stop(); return false; }
+    return true;
+}
+
+void AudioEngine::armAcousticCheck() { if (acousticCheck_) acousticCheck_->arm(); }
+
+bool AudioEngine::stopAcousticCheck() {
+    std::lock_guard<std::mutex> control(inputControl_);
+    if (!acousticCheck_) return true;
+    const bool ownedInput = acousticCheck_->running();
+    acousticCheck_->stop();
+    if (ownedInput && recordingStream_) recordingStream_->stop();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (!acousticCheck_->quiescent()) {
+        if (std::chrono::steady_clock::now() > deadline) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return true;
+}
+
+std::array<int64_t, 3> AudioEngine::acousticCheckProgress() const {
+    return acousticCheck_ ? acousticCheck_->progress() : std::array<int64_t, 3>{0, 1, 0};
+}
+std::vector<float> AudioEngine::acousticCheckSamples() const {
+    if (!acousticCheck_ || acousticCheck_->running() || !acousticCheck_->quiescent()) return {};
+    return acousticCheck_->samples();
+}
+std::vector<int64_t> AudioEngine::acousticCheckEvidence() const {
+    if (!acousticCheck_ || acousticCheck_->running() || !acousticCheck_->quiescent()) return {};
+    return acousticCheck_->evidence();
 }
 
 std::array<int64_t, 35> AudioEngine::getStreamEvidence() const {
@@ -207,6 +255,8 @@ void AudioEngine::removeAllTracks() {
 }
 
 void AudioEngine::play() {
+    std::lock_guard<std::mutex> control(inputControl_);
+    if (acousticCheck_ && acousticCheck_->running()) return;
     if (!transport_) return;
 
     int64_t countIn = countInFrames_.exchange(0, std::memory_order_relaxed);
@@ -546,6 +596,7 @@ int64_t AudioEngine::getOutputLatencyMs() const {
 }
 
 int64_t AudioEngine::getInputLatencyMs() const {
+    std::lock_guard<std::mutex> control(inputControl_);
     if (!recordingStream_) return -1;
     return recordingStream_->getInputLatencyMs();
 }

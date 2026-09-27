@@ -16,6 +16,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import javax.inject.Inject
+import com.example.nightjar.audio.AcousticCheckRunner
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
@@ -23,7 +26,8 @@ class SettingsViewModel @Inject constructor(
     private val inputs: AudioInputPreferences,
     private val routes: AudioRouteMonitor,
     private val engine: OboeAudioEngine,
-    private val capture: CaptureSession
+    private val capture: CaptureSession,
+    private val acousticCheck: AcousticCheckRunner
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(
@@ -31,6 +35,7 @@ class SettingsViewModel @Inject constructor(
             selectedMicrophone = inputs.selectedKey)
     )
     val state = _state.asStateFlow()
+    private var checkJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -50,10 +55,36 @@ class SettingsViewModel @Inject constructor(
 
     fun onAction(action: SettingsAction) {
         when (action) {
+            SettingsAction.CheckTiming -> {
+                if (checkJob?.isActive == true || _state.value.audioBusy || !_state.value.showAudioSync) return
+                checkJob = viewModelScope.launch {
+                    _state.update { it.copy(checkingTiming = true, audioError = null,
+                        timingMessage = "Checking timing. Keep the output close to the selected microphone.") }
+                    try {
+                        val measurement = acousticCheck.measure()
+                        _state.update { it.copy(timingMessage =
+                            "Last check: %.1f ms delay from %d trials. Timing remains Estimated until device verification."
+                                .format(measurement.delayMs, measurement.acceptedTrials)) }
+                    } catch (e: CancellationException) {
+                        _state.update { it.copy(timingMessage = "Check stopped. Timing: Estimated.") }
+                        throw e
+                    } catch (e: Exception) {
+                        Log.w("SettingsViewModel", "Acoustic timing check failed", e)
+                        _state.update { it.copy(audioError = e.message,
+                            timingMessage = "Timing: Estimated. You can still record.") }
+                    } finally {
+                        _state.update { it.copy(checkingTiming = false) }
+                    }
+                }
+            }
+            SettingsAction.StopTimingCheck -> checkJob?.cancel()
             SettingsAction.OpenAudioSync -> _state.update { it.copy(showAudioSync = true) }
-            SettingsAction.CloseAudioSync -> _state.update { it.copy(showAudioSync = false) }
+            SettingsAction.CloseAudioSync -> {
+                checkJob?.cancel()
+                _state.update { it.copy(showAudioSync = false) }
+            }
             is SettingsAction.SelectMicrophone -> {
-                if (engine.isRecordingActive() || capture.state.value.busy || engine.isPlaying.value) return
+                if (_state.value.checkingTiming || engine.isRecordingActive() || capture.state.value.busy || engine.isPlaying.value) return
                 try {
                     inputs.select(action.key)
                     _state.update { it.copy(selectedMicrophone = action.key, audioError = null) }

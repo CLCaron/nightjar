@@ -531,4 +531,44 @@ Java_com_example_nightjar_audio_OboeAudioEngine_nativeGetLastMetronomeBeatFrame(
     return static_cast<jlong>(sEngine->getLastMetronomeBeatFrame());
 }
 
+JNIEXPORT jboolean JNICALL
+Java_com_example_nightjar_audio_OboeAudioEngine_nativeStartAcousticCheck(JNIEnv* env, jobject, jfloatArray probes) {
+    if (!sEngine || !probes || env->GetArrayLength(probes) != 11 * 1764) return JNI_FALSE;
+    std::vector<float> data(11 * 1764);
+    env->GetFloatArrayRegion(probes, 0, static_cast<jsize>(data.size()), data.data());
+    if (env->ExceptionCheck()) return JNI_FALSE;
+    return sEngine->startAcousticCheck(data.data(), static_cast<int>(data.size()));
+}
+JNIEXPORT void JNICALL
+Java_com_example_nightjar_audio_OboeAudioEngine_nativeArmAcousticCheck(JNIEnv*, jobject) {
+    if (sEngine) sEngine->armAcousticCheck();
+}
+JNIEXPORT jboolean JNICALL
+Java_com_example_nightjar_audio_OboeAudioEngine_nativeStopAcousticCheck(JNIEnv*, jobject) {
+    return sEngine && sEngine->stopAcousticCheck();
+}
+JNIEXPORT jlongArray JNICALL
+Java_com_example_nightjar_audio_OboeAudioEngine_nativeAcousticCheckProgress(JNIEnv* env, jobject) {
+    auto value = sEngine ? sEngine->acousticCheckProgress() : std::array<int64_t, 3>{0, 1, 0};
+    auto result = env->NewLongArray(3);
+    jlong data[3] = {value[0], value[1], value[2]};
+    if (result) env->SetLongArrayRegion(result, 0, 3, data);
+    return result;
+}
+JNIEXPORT jfloatArray JNICALL
+Java_com_example_nightjar_audio_OboeAudioEngine_nativeAcousticCheckSamples(JNIEnv* env, jobject) {
+    auto data = sEngine ? sEngine->acousticCheckSamples() : std::vector<float>{};
+    auto result = env->NewFloatArray(static_cast<jsize>(data.size()));
+    if (result && !data.empty()) env->SetFloatArrayRegion(result, 0, static_cast<jsize>(data.size()), data.data());
+    return result;
+}
+JNIEXPORT jlongArray JNICALL
+Java_com_example_nightjar_audio_OboeAudioEngine_nativeAcousticCheckEvidence(JNIEnv* env, jobject) {
+    auto data = sEngine ? sEngine->acousticCheckEvidence() : std::vector<int64_t>{};
+    std::vector<jlong> values(data.begin(), data.end());
+    auto result = env->NewLongArray(static_cast<jsize>(values.size()));
+    if (result && !values.empty()) env->SetLongArrayRegion(result, 0, static_cast<jsize>(values.size()), values.data());
+    return result;
+}
+
 }  // extern "C"

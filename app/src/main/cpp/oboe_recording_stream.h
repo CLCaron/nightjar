@@ -4,6 +4,7 @@
 #include "spsc_ring_buffer.h"
 #include "wav_writer.h"
 #include "stream_evidence.h"
+#include "acoustic_check.h"
 #include <oboe/Oboe.h>
 #include <atomic>
 #include <string>
@@ -30,7 +31,8 @@ struct AtomicTransport;
 class OboeRecordingStream : public oboe::AudioStreamDataCallback,
                             public oboe::AudioStreamErrorCallback {
 public:
-    explicit OboeRecordingStream(AtomicTransport& transport);
+    explicit OboeRecordingStream(AtomicTransport& transport, AcousticCheck* check = nullptr);
+    bool startCalibration();
     ~OboeRecordingStream();
 
     /**
@@ -112,6 +114,9 @@ public:
         oboe::Result error) override;
 
 private:
+    bool startInput(const std::string& filePath, bool calibration);
+    AcousticCheck* check_;
+    bool calibration_ = false;
     AtomicTransport& transport_;
     StreamEvidence evidence_;
     std::atomic<int32_t> preferredDevice_{0};

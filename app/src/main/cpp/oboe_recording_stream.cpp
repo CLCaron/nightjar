@@ -8,13 +8,20 @@
 
 namespace nightjar {
 
-OboeRecordingStream::OboeRecordingStream(AtomicTransport& transport) : transport_(transport) {}
+OboeRecordingStream::OboeRecordingStream(AtomicTransport& transport, AcousticCheck* check)
+    : check_(check), transport_(transport) {}
 
 OboeRecordingStream::~OboeRecordingStream() {
     stop();
 }
 
 bool OboeRecordingStream::start(const std::string& filePath) {
+    return startInput(filePath, false);
+}
+
+bool OboeRecordingStream::startCalibration() { return startInput("", true); }
+
+bool OboeRecordingStream::startInput(const std::string& filePath, bool calibration) {
     if (active_.load(std::memory_order_acquire)) {
         LOGE("OboeRecordingStream: already recording");
         return false;
@@ -23,6 +30,7 @@ bool OboeRecordingStream::start(const std::string& filePath) {
     // An error callback can mark the input inactive while its writer still needs
     // draining. Finish that file before reusing the ring buffer or writer.
     if (stream_) stop();
+    calibration_ = calibration;
 
     // Reset state
     ringBuffer_.reset();
@@ -36,7 +44,7 @@ bool OboeRecordingStream::start(const std::string& filePath) {
     captureStartBlockFrames_.store(0, std::memory_order_relaxed);
 
     // Open WAV file
-    if (!wavWriter_.open(filePath)) {
+    if (!calibration_ && !wavWriter_.open(filePath)) {
         return false;
     }
 
@@ -71,7 +79,7 @@ bool OboeRecordingStream::start(const std::string& filePath) {
 
     evidence_.opened(*stream_);
     // Start the WavWriter consumer thread (it will block until data arrives)
-    wavWriter_.startConsuming(ringBuffer_);
+    if (!calibration_) wavWriter_.startConsuming(ringBuffer_);
 
     // Start the Oboe stream — audio callbacks begin firing
     result = stream_->requestStart();
@@ -130,6 +138,7 @@ int64_t OboeRecordingStream::stop() {
     }
 
     // Stop the WavWriter (drains remaining ring buffer data, patches header)
+    if (calibration_) { peakAmplitude_.store(0); return 0; }
     wavWriter_.stopConsuming();
 
     int64_t durationMs = wavWriter_.getDurationMs();
@@ -161,6 +170,7 @@ oboe::DataCallbackResult OboeRecordingStream::onAudioReady(
 
     auto* floatData = static_cast<const float*>(audioData);
     const auto anchor = evidence_.callback(numFrames, transport_.posFrames.load(std::memory_order_relaxed));
+    if (calibration_ && check_) check_->capture(floatData, numFrames, anchor[0], anchor[1]);
 
     // Compute peak amplitude for UI visualization
     float peak = 0.0f;

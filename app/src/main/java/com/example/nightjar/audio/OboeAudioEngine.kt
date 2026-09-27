@@ -107,6 +107,26 @@ class OboeAudioEngine @Inject constructor(private val inputPreferences: AudioInp
     /** First retained input callback: stream frame, monotonic delivery time, block frames. */
     fun getCaptureAnchor(): LongArray = nativeGetCaptureAnchor()
 
+    /** Control-thread API. Stop and await quiescence before copying a check's data. */
+    internal fun startAcousticCheck(probes: FloatArray): Boolean {
+        requestedInputDevice = inputPreferences.resolveDeviceId()
+        nativeSetPreferredInputDevice(requestedInputDevice)
+        return nativeStartAcousticCheck(probes)
+    }
+
+    internal fun armAcousticCheck() = nativeArmAcousticCheck()
+    internal fun stopAcousticCheck(): Boolean = nativeStopAcousticCheck()
+    internal fun acousticCheckProgress(): LongArray = nativeAcousticCheckProgress()
+    internal fun acousticCheckSamples(): FloatArray = nativeAcousticCheckSamples()
+    internal fun acousticCheckEvidence(): LongArray = nativeAcousticCheckEvidence()
+
+    private external fun nativeStartAcousticCheck(probes: FloatArray): Boolean
+    private external fun nativeArmAcousticCheck()
+    private external fun nativeStopAcousticCheck(): Boolean
+    private external fun nativeAcousticCheckProgress(): LongArray
+    private external fun nativeAcousticCheckSamples(): FloatArray
+    private external fun nativeAcousticCheckEvidence(): LongArray
+
     // ── Playback ───────────────────────────────────────────────────────────
 
     fun addTrack(

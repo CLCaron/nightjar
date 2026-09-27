@@ -13,6 +13,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.DisposableEffect
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.example.nightjar.audio.CallbackClockMapper
@@ -22,6 +32,21 @@ import com.example.nightjar.ui.components.NjButton
 @Composable
 fun AudioRouteSettings(state: SettingsUiState, onAction: (SettingsAction) -> Unit) {
     var showDetails by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val microphonePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) onAction(SettingsAction.CheckTiming)
+    }
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) onAction(SettingsAction.StopTimingCheck)
+        }
+        lifecycle.addObserver(observer)
+        onDispose {
+            lifecycle.removeObserver(observer)
+            onAction(SettingsAction.StopTimingCheck)
+        }
+    }
     AlertDialog(
         onDismissRequest = { onAction(SettingsAction.CloseAudioSync) },
         title = { Text("Audio Sync") },
@@ -29,12 +54,21 @@ fun AudioRouteSettings(state: SettingsUiState, onAction: (SettingsAction) -> Uni
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Listening through: ${state.routes.outputName}")
                 Text("Recording with: ${state.routes.inputName}")
-                Text("Timing: Estimated. Acoustic calibration is awaiting device verification.")
+                Text(state.timingMessage)
                 Text("You can record without calibration. Microphone changes apply to the next recording.")
+                Text("In a quiet room, place the phone speaker or one removed earbud close to the selected microphone. The check plays short sounds for about 15 seconds. Use a comfortable listening volume.")
+                NjButton(text = "Check", caption = "CHECK", enabled = !state.audioBusy && !state.checkingTiming,
+                    onClick = {
+                        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
+                            onAction(SettingsAction.CheckTiming)
+                        else microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+                    })
+                NjButton(text = "Stop", caption = "STOP", enabled = state.checkingTiming,
+                    onClick = { onAction(SettingsAction.StopTimingCheck) })
                 Text("MICROPHONE", style = MaterialTheme.typography.labelMedium)
                 state.microphones.forEach { mic ->
                     NjButton(text = mic.label, caption = "MICROPHONE", modifier = Modifier.fillMaxWidth(),
-                        isActive = mic.key == state.selectedMicrophone, enabled = !state.audioBusy,
+                        isActive = mic.key == state.selectedMicrophone, enabled = !state.audioBusy && !state.checkingTiming,
                         onClick = { onAction(SettingsAction.SelectMicrophone(mic.key)) })
                 }
                 if (state.microphones.none { it.key == state.selectedMicrophone }) {

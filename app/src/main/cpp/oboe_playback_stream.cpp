@@ -6,19 +6,21 @@
 namespace nightjar {
 
 OboePlaybackStream::OboePlaybackStream(TrackMixer& mixer, AtomicTransport& transport,
-                                       SynthEngine* synth)
-    : mixer_(mixer), transport_(transport), synth_(synth) {}
+                                       SynthEngine* synth, AcousticCheck* check)
+    : check_(check), mixer_(mixer), transport_(transport), synth_(synth) {}
 
 OboePlaybackStream::~OboePlaybackStream() {
     stop();
 }
 
 bool OboePlaybackStream::start() {
+    std::lock_guard<std::mutex> control(control_);
     if (stream_) return true;
     return openStream();
 }
 
 void OboePlaybackStream::stop() {
+    std::lock_guard<std::mutex> control(control_);
     if (stream_) {
         stream_->requestStop();
         stream_->close();
@@ -60,6 +62,7 @@ bool OboePlaybackStream::openStream() {
         LOGE("OboePlaybackStream: failed to start: %s", oboe::convertToText(result));
         stream_->close();
         stream_.reset();
+        evidence_.closed();
         return false;
     }
 
@@ -68,6 +71,7 @@ bool OboePlaybackStream::openStream() {
 }
 
 int64_t OboePlaybackStream::getOutputLatencyMs() const {
+    std::lock_guard<std::mutex> control(control_);
     if (!stream_) return -1;
     auto result = stream_->calculateLatencyMillis();
     if (result) {
@@ -84,7 +88,8 @@ oboe::DataCallbackResult OboePlaybackStream::onAudioReady(
         int32_t numFrames) {
 
     auto* output = static_cast<float*>(audioData);
-    evidence_.callback(numFrames, transport_.posFrames.load(std::memory_order_relaxed));
+    const auto anchor = evidence_.callback(numFrames, transport_.posFrames.load(std::memory_order_relaxed));
+    if (check_ && check_->render(output, numFrames, anchor[0], anchor[1])) return oboe::DataCallbackResult::Continue;
 
     if (!transport_.playing.load(std::memory_order_acquire)) {
         // Paused: skip the timeline-driven track mixer and position
@@ -163,10 +168,15 @@ oboe::DataCallbackResult OboePlaybackStream::onAudioReady(
 void OboePlaybackStream::onErrorAfterClose(
         oboe::AudioStream* /* stream */,
         oboe::Result error) {
+    std::lock_guard<std::mutex> control(control_);
     LOGW("OboePlaybackStream: error after close: %s — reopening",
          oboe::convertToText(error));
     evidence_.closed();
     routeInterruptions_.fetch_add(1, std::memory_order_release);
+    if (check_ && check_->running()) {
+        check_->abort();
+        transport_.playing.store(false, std::memory_order_release);
+    }
     // Phase-one telemetry only. Preserve existing playback recovery until route
     // events and backed/unbacked source ranges are durably represented.
     stream_.reset();

@@ -11,10 +11,14 @@ data class SettingsUiState(
     val microphones: List<MicrophoneOption> = emptyList(),
     val selectedMicrophone: String = "default",
     val audioBusy: Boolean = false,
-    val audioError: String? = null
+    val audioError: String? = null,
+    val checkingTiming: Boolean = false,
+    val timingMessage: String = "Timing: Estimated. Run an optional timing check below."
 )
 
 sealed interface SettingsAction {
+    data object CheckTiming : SettingsAction
+    data object StopTimingCheck : SettingsAction
     data class SetTheme(val key: String) : SettingsAction
     data object OpenAudioSync : SettingsAction
     data object CloseAudioSync : SettingsAction
