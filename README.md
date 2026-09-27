@@ -12,6 +12,8 @@ Named after a nocturnal songbird, this app is designed around late-night creativ
 
 Development checkpoint: `feat/latency-calibration` adds Settings > Audio Sync with actual opened-route readouts and stopped-only microphone choice, plus native callback evidence and independently tested detection/timing foundations. Recording still uses existing estimated compensation. Acoustic probes, saved profiles, non-destructive Record/Studio correction and disconnect continuity are not enabled yet. Physical microphone, route and clock checks are required before measured integration. The protected import checkpoint remains `00fce22`; import phone verification is pending.
 
+Galaxy Z Fold4 device smoke checks: all eight isolated capture/import tests and the native backing-loop capture test pass. The migration fixture excludes Android's automatically created locale table. The installed Capture Test data was backed up before updating. Real-library migration and hands-on listening checks remain separate acceptance steps.
+
 Open the app. You're already on the capture screen. Three ways to start:
 
 - **Record** -- tap Record to start, press it again for another take, and press Stop to save. Keep trying within one idea, then listen back to any saved take.

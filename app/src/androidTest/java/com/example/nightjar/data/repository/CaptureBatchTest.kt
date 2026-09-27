@@ -41,7 +41,8 @@ class CaptureBatchTest {
         path.parentFile?.mkdirs()
         val old = android.database.sqlite.SQLiteDatabase.openOrCreateDatabase(path, null)
         try {
-            val schemas = db.openHelper.readableDatabase.query("SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '%imported_sources%' AND name != 'room_master_table'")
+            // Android creates its locale table when opening the fixture database.
+            val schemas = db.openHelper.readableDatabase.query("SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '%imported_sources%' AND name NOT IN ('room_master_table', 'android_metadata')")
             schemas.use { while (it.moveToNext()) old.execSQL(it.getString(1)) }
             for (table in listOf("ideas", "tracks", "audio_clips", "takes", "capture_groups")) {
                 db.openHelper.readableDatabase.query("SELECT * FROM $table").use { rows ->
