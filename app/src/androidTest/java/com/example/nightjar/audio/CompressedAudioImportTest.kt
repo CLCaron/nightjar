@@ -63,7 +63,9 @@ class CompressedAudioImportTest {
             imported = result
             assertEquals(digest(source), digest(result.original))
             assertTrue(result.durationMs in 80..300)
-            assertEquals(source.name, result.title)
+            // A file URI has no OpenableColumns display-name provider. The existing
+            // importer deliberately uses its safe title fallback for this fixture.
+            assertEquals("Imported Idea", result.title)
             checkWorkingAudio(result.file)
             assertTrue(result.file.parentFile!!.listFiles().orEmpty().none { it.name.startsWith("decoded_import_") })
         } finally { imported?.file?.delete(); imported?.original?.delete(); source.delete() }
@@ -115,6 +117,7 @@ class CompressedAudioImportTest {
             checkWorkingAudio(result.file)
             android.util.Log.i("CompressedAudioImportTest", "Private M4A decoded: ${result.durationMs} ms, ${result.file.length()} bytes")
         } finally { imported?.file?.delete(); imported?.original?.delete() }
+        Unit // JUnit requires a void method, not Log.i's inferred Int return type.
     }
 
     private fun encodeAac(output: File) {
