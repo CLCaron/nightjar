@@ -14,6 +14,8 @@ Development checkpoint: `feat/latency-calibration` adds Settings > Audio Sync wi
 
 Galaxy Z Fold4 device smoke checks: all eight isolated capture/import tests and the native backing-loop capture test pass. The migration fixture excludes Android's automatically created locale table. The installed Capture Test data was backed up before updating. Real v16-to-v17 Library migration passed integrity checking, preserving every existing application-table row and all 83 recording hashes. Hands-on import and listening checks remain pending.
 
+Compressed import checkpoint: `feat/compressed-audio-import` adds offline Android decoding for supported M4A/AAC, MP3, FLAC and Ogg audio, including files without an extension. Original bytes remain preserved; the working copy is converted to the same mono PCM16/44.1 kHz WAV used by existing imports. PCM and floating-point WAV retain their existing conversion path. Temporary decoding uses bounded buffers and extra disk space, with cancellation and failure cleanup. The focused audio suite passes 60 tests. Generated M4A and private full-song device tests compile; decoder verification and installation await the phone. This is not a claim of universal format support or calibrated overdub timing.
+
 Open the app. You're already on the capture screen. Three ways to start:
 
 - **Record** -- tap Record to start, press it again for another take, and press Stop to save. Keep trying within one idea, then listen back to any saved take.

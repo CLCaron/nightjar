@@ -42,7 +42,7 @@ class AudioImporter @Inject constructor(
                         }
                     }
                 } ?: error("Could not open this audio file.")
-                val duration = WavImportConverter.convert(sourceFile, outputFile) { jobContext.ensureActive() }
+                val duration = PlatformAudioImportConverter.convert(sourceFile, outputFile) { jobContext.ensureActive() }
                 ImportedAudio(outputFile, sourceFile, duration,
                     name.substringBeforeLast('.', name).filter { !it.isISOControl() }.trim().take(80).ifBlank { "Imported Idea" })
             }
