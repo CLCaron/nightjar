@@ -31,6 +31,9 @@ bool OboeRecordingStream::start(const std::string& filePath) {
     peakAmplitude_.store(0.0f, std::memory_order_relaxed);
     capturedFrames_.store(0, std::memory_order_relaxed);
     captureStartPlaybackFrame_.store(-1, std::memory_order_relaxed);
+    captureStartInputFrame_.store(-1, std::memory_order_relaxed);
+    captureStartNanos_.store(0, std::memory_order_relaxed);
+    captureStartBlockFrames_.store(0, std::memory_order_relaxed);
 
     // Open WAV file
     if (!wavWriter_.open(filePath)) {
@@ -40,6 +43,7 @@ bool OboeRecordingStream::start(const std::string& filePath) {
     // Build the Oboe input stream
     oboe::AudioStreamBuilder builder;
     builder.setDirection(oboe::Direction::Input);
+    builder.setDeviceId(preferredDevice_.load());
     builder.setPerformanceMode(oboe::PerformanceMode::LowLatency);
     builder.setSharingMode(oboe::SharingMode::Exclusive);
     builder.setFormat(oboe::AudioFormat::Float);
@@ -65,6 +69,7 @@ bool OboeRecordingStream::start(const std::string& filePath) {
          oboe::convertToText(stream_->getFormat()),
          oboe::convertToText(stream_->getSharingMode()));
 
+    evidence_.opened(*stream_);
     // Start the WavWriter consumer thread (it will block until data arrives)
     wavWriter_.startConsuming(ringBuffer_);
 
@@ -74,6 +79,7 @@ bool OboeRecordingStream::start(const std::string& filePath) {
         LOGE("OboeRecordingStream: failed to start stream: %s",
              oboe::convertToText(result));
         wavWriter_.stopConsuming();
+        evidence_.closed();
         stream_->close();
         stream_.reset();
         return false;
@@ -112,6 +118,7 @@ int64_t OboeRecordingStream::stop() {
     }
 
     active_.store(false, std::memory_order_release);
+    evidence_.closed();
 
     // Stop the Oboe stream (callbacks will stop)
     if (stream_) {
@@ -153,6 +160,7 @@ oboe::DataCallbackResult OboeRecordingStream::onAudioReady(
         int32_t numFrames) {
 
     auto* floatData = static_cast<const float*>(audioData);
+    const auto anchor = evidence_.callback(numFrames, transport_.posFrames.load(std::memory_order_relaxed));
 
     // Compute peak amplitude for UI visualization
     float peak = 0.0f;
@@ -170,8 +178,12 @@ oboe::DataCallbackResult OboeRecordingStream::onAudioReady(
     // Only push to ring buffer when the write gate is open
     if (writeGateOpen_.load(std::memory_order_acquire)) {
         size_t accepted = ringBuffer_.write(floatData, static_cast<size_t>(numFrames));
+        evidence_.dropped(numFrames - static_cast<int64_t>(accepted));
         if (accepted > 0) {
             if (capturedFrames_.load(std::memory_order_relaxed) == 0) {
+                captureStartInputFrame_.store(anchor[0], std::memory_order_relaxed);
+                captureStartBlockFrames_.store(numFrames, std::memory_order_relaxed);
+                captureStartNanos_.store(anchor[1], std::memory_order_release);
                 captureStartPlaybackFrame_.store(
                     transport_.posFrames.load(std::memory_order_relaxed),
                     std::memory_order_release);
@@ -190,6 +202,7 @@ void OboeRecordingStream::onErrorAfterClose(
     // For recording, we don't auto-reopen — the caller should handle the error.
     // Mark as inactive so the UI knows recording has stopped unexpectedly.
     active_.store(false, std::memory_order_release);
+    evidence_.closed();
 }
 
 }  // namespace nightjar

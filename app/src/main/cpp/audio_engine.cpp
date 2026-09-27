@@ -7,6 +7,7 @@
 #include "midi_sequencer.h"
 #include "atomic_transport.h"
 #include "common.h"
+#include <algorithm>
 
 namespace nightjar {
 
@@ -119,6 +120,34 @@ int64_t AudioEngine::getCapturedFrames() const {
 
 int64_t AudioEngine::getCaptureStartPlaybackFrame() const {
     return recordingStream_ ? recordingStream_->getCaptureStartPlaybackFrame() : -1;
+}
+
+void AudioEngine::setPreferredInputDevice(int32_t id) {
+    if (recordingStream_ && !recordingStream_->isActive()) recordingStream_->setPreferredDevice(id);
+}
+
+std::array<int64_t, 3> AudioEngine::getCaptureAnchor() const {
+    return recordingStream_ ? recordingStream_->captureAnchor() : std::array<int64_t, 3>{-1, 0, 0};
+}
+
+std::array<int64_t, 35> AudioEngine::getStreamEvidence() const {
+    std::array<int64_t, 35> result{};
+    if (recordingStream_) {
+        const auto epoch = recordingStream_->streamEpoch();
+        auto input = recordingStream_->evidence();
+        if (epoch != recordingStream_->streamEpoch()) input[12] = 0;
+        std::copy(input.begin(), input.end(), result.begin());
+        result[32] = epoch;
+    }
+    if (playbackStream_) {
+        const auto epoch = playbackStream_->streamEpoch();
+        auto output = playbackStream_->evidence();
+        if (epoch != playbackStream_->streamEpoch()) output[12] = 0;
+        std::copy(output.begin(), output.end(), result.begin() + 16);
+        result[33] = epoch;
+        result[34] = playbackStream_->routeInterruptions();
+    }
+    return result;
 }
 
 // ── Playback API ───────────────────────────────────────────────────────

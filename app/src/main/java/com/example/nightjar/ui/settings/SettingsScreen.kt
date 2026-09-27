@@ -15,6 +15,9 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import com.example.nightjar.ui.components.NjButton
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -53,6 +56,10 @@ fun SettingsScreen(
     val vm: SettingsViewModel = hiltViewModel()
     val state by vm.state.collectAsState()
 
+    if (state.showAudioSync) {
+        AudioRouteSettings(state, vm::onAction)
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -63,12 +70,18 @@ fun SettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .navigationBarsPadding()
+                .verticalScroll(rememberScrollState())
         ) {
             com.example.nightjar.ui.components.NjTopBar(
                 title = "Settings",
                 onBack = onBack
             )
 
+            Spacer(Modifier.height(24.dp))
+
+            NjButton(text = "Audio Sync", caption = "AUDIO SYNC",
+                onClick = { vm.onAction(SettingsAction.OpenAudioSync) },
+                modifier = Modifier.padding(horizontal = 20.dp).fillMaxWidth())
             Spacer(Modifier.height(24.dp))
 
             Text(

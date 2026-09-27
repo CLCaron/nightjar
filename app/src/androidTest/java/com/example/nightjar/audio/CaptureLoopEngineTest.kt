@@ -17,7 +17,8 @@ class CaptureLoopEngineTest {
         val cache = InstrumentationRegistry.getInstrumentation().targetContext.cacheDir
         val loop = File(cache, "capture-loop-test.wav")
         val recording = File(cache, "capture-loop-input-test.wav")
-        val engine = OboeAudioEngine()
+        val engine = OboeAudioEngine(AudioInputPreferences(
+            InstrumentationRegistry.getInstrumentation().targetContext))
         val frames = 22050
         val dataBytes = frames * 2
         val wav = ByteBuffer.allocate(44 + dataBytes).order(ByteOrder.LITTLE_ENDIAN).apply {
@@ -39,6 +40,11 @@ class CaptureLoopEngineTest {
             Thread.sleep(250)
             assertTrue(engine.startRecording(recording.absolutePath))
             assertTrue(engine.awaitFirstBuffer())
+            val routes = engine.getStreamEvidence()
+            assertTrue("Input stream evidence missing", routes.input.open && routes.input.hasAnchor)
+            assertTrue("Output stream evidence missing", routes.output.open && routes.output.hasAnchor)
+            assertTrue("Stream epochs missing", routes.input.epoch > 0 && routes.output.epoch > 0)
+            android.util.Log.i("CaptureLoopEngineTest", "Actual stream pair: $routes")
             engine.openWriteGate()
             Thread.sleep(3200)
             engine.pollState()

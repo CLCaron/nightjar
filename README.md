@@ -10,6 +10,8 @@ Named after a nocturnal songbird, this app is designed around late-night creativ
 
 ## How it works
 
+Development checkpoint: `feat/latency-calibration` adds Settings > Audio Sync with actual opened-route readouts and stopped-only microphone choice, plus native callback evidence and independently tested detection/timing foundations. Recording still uses existing estimated compensation. Acoustic probes, saved profiles, non-destructive Record/Studio correction and disconnect continuity are not enabled yet. Physical microphone, route and clock checks are required before measured integration. The protected import checkpoint remains `00fce22`; import phone verification is pending.
+
 Open the app. You're already on the capture screen. Three ways to start:
 
 - **Record** -- tap Record to start, press it again for another take, and press Stop to save. Keep trying within one idea, then listen back to any saved take.

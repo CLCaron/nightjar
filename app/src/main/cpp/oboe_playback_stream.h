@@ -4,6 +4,7 @@
 #include "track_mixer.h"
 #include "synth_engine.h"
 #include "atomic_transport.h"
+#include "stream_evidence.h"
 #include <oboe/Oboe.h>
 
 namespace nightjar {
@@ -41,6 +42,9 @@ public:
      * on API 24–25, or stream not open).
      */
     int64_t getOutputLatencyMs() const;
+    StreamEvidence::Snapshot evidence() const { return evidence_.snapshot(); }
+    int64_t streamEpoch() const { return evidence_.epoch(); }
+    int64_t routeInterruptions() const { return routeInterruptions_.load(); }
 
     // ── Oboe callbacks ──────────────────────────────────────────────────
 
@@ -60,6 +64,8 @@ private:
     AtomicTransport& transport_;
     SynthEngine* synth_;  // nullable, owned by AudioEngine
     std::shared_ptr<oboe::AudioStream> stream_;
+    StreamEvidence evidence_;
+    std::atomic<int64_t> routeInterruptions_{0};
 };
 
 }  // namespace nightjar

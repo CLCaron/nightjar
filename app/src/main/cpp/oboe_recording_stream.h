@@ -3,6 +3,7 @@
 #include "audio_engine.h"
 #include "spsc_ring_buffer.h"
 #include "wav_writer.h"
+#include "stream_evidence.h"
 #include <oboe/Oboe.h>
 #include <atomic>
 #include <string>
@@ -90,6 +91,15 @@ public:
         return captureStartPlaybackFrame_.load(std::memory_order_acquire);
     }
 
+    StreamEvidence::Snapshot evidence() const { return evidence_.snapshot(); }
+    int64_t streamEpoch() const { return evidence_.epoch(); }
+    void setPreferredDevice(int32_t id) { preferredDevice_.store(id); }
+    std::array<int64_t, 3> captureAnchor() const {
+        return {captureStartInputFrame_.load(std::memory_order_acquire),
+                captureStartNanos_.load(std::memory_order_acquire),
+                captureStartBlockFrames_.load(std::memory_order_acquire)};
+    }
+
     // ── Oboe callbacks ──────────────────────────────────────────────────
 
     oboe::DataCallbackResult onAudioReady(
@@ -103,6 +113,8 @@ public:
 
 private:
     AtomicTransport& transport_;
+    StreamEvidence evidence_;
+    std::atomic<int32_t> preferredDevice_{0};
     std::shared_ptr<oboe::AudioStream> stream_;
     SpscRingBuffer<kRingBufferCapacity> ringBuffer_;
     WavWriter wavWriter_;
@@ -113,6 +125,9 @@ private:
     std::atomic<float> peakAmplitude_{0.0f};
     std::atomic<int64_t> capturedFrames_{0};
     std::atomic<int64_t> captureStartPlaybackFrame_{-1};
+    std::atomic<int64_t> captureStartInputFrame_{-1};
+    std::atomic<int64_t> captureStartNanos_{0};
+    std::atomic<int64_t> captureStartBlockFrames_{0};
 };
 
 }  // namespace nightjar

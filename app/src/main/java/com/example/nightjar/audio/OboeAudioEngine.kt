@@ -15,8 +15,9 @@ import javax.inject.Singleton
  * Kotlin-idiomatic StateFlow exposure, coroutine-based awaiting, and
  * ms-to-frame conversions.
  *
- * Thread safety: JNI calls are safe from any thread. The native engine
- * uses atomics for all cross-thread state. StateFlow updates happen via
+ * Callback telemetry uses atomics. Stream lifecycle and control operations must
+ * remain serialized by their audio owner; JNI itself is not a thread-safety guarantee.
+ * StateFlow updates happen via
  * [pollState] called from the ViewModel's tick coroutine.
  *
  * ## Lifecycle
@@ -25,7 +26,7 @@ import javax.inject.Singleton
  * - The engine is a singleton — ViewModels do NOT own or release it
  */
 @Singleton
-class OboeAudioEngine @Inject constructor() {
+class OboeAudioEngine @Inject constructor(private val inputPreferences: AudioInputPreferences) {
 
     // ── StateFlows (updated by pollState() from ViewModel tick coroutine) ──
 
@@ -56,7 +57,11 @@ class OboeAudioEngine @Inject constructor() {
 
     // ── Recording ──────────────────────────────────────────────────────────
 
+    private var requestedInputDevice = 0
+
     fun startRecording(filePath: String): Boolean {
+        requestedInputDevice = inputPreferences.resolveDeviceId()
+        nativeSetPreferredInputDevice(requestedInputDevice)
         val ok = nativeStartRecording(filePath)
         Log.d(TAG, "startRecording($filePath) → $ok")
         return ok
@@ -65,6 +70,12 @@ class OboeAudioEngine @Inject constructor() {
     suspend fun awaitFirstBuffer(timeoutMs: Int = 2000): Boolean =
         withContext(Dispatchers.IO) {
             val hot = nativeAwaitFirstBuffer(timeoutMs)
+            if (hot && requestedInputDevice != 0) {
+                val actual = getStreamEvidence().input.deviceId
+                check(actual == requestedInputDevice) {
+                    "Android did not use the selected microphone. Choose System default or another microphone in Settings."
+                }
+            }
             Log.d(TAG, "awaitFirstBuffer() → $hot")
             hot
         }
@@ -89,8 +100,12 @@ class OboeAudioEngine @Inject constructor() {
     /** Input frames accepted by the writer, independent of its disk-drain progress. */
     fun getCapturedFrames(): Long = nativeGetCapturedFrames()
 
-    /** Unwrapped playback frame when the first recorded input buffer was accepted. */
+    /** Render transport observed by the first retained callback, not an acoustic timestamp. */
     fun getCaptureStartPlaybackFrame(): Long = nativeGetCaptureStartPlaybackFrame()
+
+    fun getStreamEvidence(): AudioRouteEvidence = AudioRouteEvidence.decode(nativeGetStreamEvidence())
+    /** First retained input callback: stream frame, monotonic delivery time, block frames. */
+    fun getCaptureAnchor(): LongArray = nativeGetCaptureAnchor()
 
     // ── Playback ───────────────────────────────────────────────────────────
 
@@ -372,6 +387,9 @@ class OboeAudioEngine @Inject constructor() {
     private external fun nativeGetRecordedDurationMs(): Long
     private external fun nativeGetCapturedFrames(): Long
     private external fun nativeGetCaptureStartPlaybackFrame(): Long
+    private external fun nativeGetStreamEvidence(): LongArray
+    private external fun nativeSetPreferredInputDevice(id: Int)
+    private external fun nativeGetCaptureAnchor(): LongArray
 
     // Playback
     private external fun nativeAddTrack(

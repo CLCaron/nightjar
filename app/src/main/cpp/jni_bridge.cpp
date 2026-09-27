@@ -246,6 +246,33 @@ Java_com_example_nightjar_audio_OboeAudioEngine_nativeGetLoopResetCount(
 
 // ── Hardware latency measurement ────────────────────────────────────────
 
+JNIEXPORT jlongArray JNICALL
+Java_com_example_nightjar_audio_OboeAudioEngine_nativeGetStreamEvidence(JNIEnv* env, jobject) {
+    auto values = sEngine ? sEngine->getStreamEvidence() : std::array<int64_t, 35>{};
+    auto result = env->NewLongArray(35);
+    if (result) {
+        std::array<jlong, 35> copied{};
+        std::copy(values.begin(), values.end(), copied.begin());
+        env->SetLongArrayRegion(result, 0, 35, copied.data());
+    }
+    return result;
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_nightjar_audio_OboeAudioEngine_nativeSetPreferredInputDevice(JNIEnv*, jobject, jint id) {
+    if (sEngine) sEngine->setPreferredInputDevice(id);
+}
+
+JNIEXPORT jlongArray JNICALL
+Java_com_example_nightjar_audio_OboeAudioEngine_nativeGetCaptureAnchor(JNIEnv* env, jobject) {
+    auto values = sEngine ? sEngine->getCaptureAnchor() : std::array<int64_t, 3>{-1, 0, 0};
+    std::array<jlong, 3> copied{};
+    std::copy(values.begin(), values.end(), copied.begin());
+    auto result = env->NewLongArray(3);
+    if (result) env->SetLongArrayRegion(result, 0, 3, copied.data());
+    return result;
+}
+
 JNIEXPORT jlong JNICALL
 Java_com_example_nightjar_audio_OboeAudioEngine_nativeGetOutputLatencyMs(
         JNIEnv* /* env */, jobject /* thiz */) {

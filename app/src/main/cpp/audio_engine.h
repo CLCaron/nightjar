@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common.h"
+#include "stream_evidence.h"
 #include <atomic>
 #include <memory>
 
@@ -41,6 +42,9 @@ public:
     int64_t getRecordedDurationMs() const;
     int64_t getCapturedFrames() const;
     int64_t getCaptureStartPlaybackFrame() const;
+    void setPreferredInputDevice(int32_t id);
+    std::array<int64_t, 35> getStreamEvidence() const;
+    std::array<int64_t, 3> getCaptureAnchor() const;
 
     // ── Playback API ────────────────────────────────────────────────────
     bool addTrack(int trackId, const char* filePath,

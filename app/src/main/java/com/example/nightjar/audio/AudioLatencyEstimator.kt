@@ -15,8 +15,8 @@ import javax.inject.Singleton
  *
  * **Primary source**: Hardware timestamps from the Oboe/AAudio streams
  * via [OboeAudioEngine.getOutputLatencyMs] and [getInputLatencyMs].
- * These give device-specific, runtime-accurate latency — including
- * Bluetooth codec delay — with no guessing.
+ * These are best-effort pipeline estimates. Delays unknown to the platform,
+ * including some Bluetooth processing, may not be represented.
  *
  * **Fallback**: When hardware timestamps are unavailable (API <26,
  * stream not active, or OpenSL ES backend), falls back to heuristic
@@ -53,57 +53,32 @@ class AudioLatencyEstimator @Inject constructor(
     }
 
     /**
-     * Queries [AudioManager] for the current output device type.
-     *
-     * Priority: Bluetooth > USB > Wired > Built-in speaker > Unknown.
-     * Available since API 23 (our min SDK is 24).
+     * Resolves the opened stream's device ID, never guesses from connected devices.
+     * Unknown IDs (including backends which cannot expose them) remain unknown.
      */
     fun detectOutputDeviceType(): OutputDeviceType {
-        val devices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-        // Priority scan — return the highest-latency device found, since
-        // that's the one most likely to be the active output route.
-        for (device in devices) {
-            when (device.type) {
+        val stream = audioEngine.getStreamEvidence().output
+        val device = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            .firstOrNull { stream.open && stream.deviceId > 0 && it.id == stream.deviceId }
+            ?: return OutputDeviceType.UNKNOWN
+        return when (device.type) {
                 AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
                 AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
                 AudioDeviceInfo.TYPE_BLE_HEADSET,  // BT LE Audio (API 31+)
                 AudioDeviceInfo.TYPE_BLE_SPEAKER,  // BT LE Audio (API 31+)
                 AudioDeviceInfo.TYPE_HEARING_AID   // BT-based (API 28+)
-                    -> return OutputDeviceType.BLUETOOTH_A2DP
-            }
-        }
-
-        // Fallback: check audio routing flags in case getDevices() missed
-        // the BT device (observed on some OEMs). These methods are
-        // deprecated in API 31 but still functional.
-        @Suppress("DEPRECATION")
-        if (audioManager.isBluetoothA2dpOn || audioManager.isBluetoothScoOn) {
-            Log.d(TAG, "BT detected via AudioManager routing flag (not in getDevices)")
-            return OutputDeviceType.BLUETOOTH_A2DP
-        }
-
-        for (device in devices) {
-            when (device.type) {
+                    -> OutputDeviceType.BLUETOOTH_A2DP
                 AudioDeviceInfo.TYPE_USB_DEVICE,
                 AudioDeviceInfo.TYPE_USB_HEADSET ->
-                    return OutputDeviceType.USB_AUDIO
-            }
-        }
-        for (device in devices) {
-            when (device.type) {
+                    OutputDeviceType.USB_AUDIO
                 AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
                 AudioDeviceInfo.TYPE_WIRED_HEADSET ->
-                    return OutputDeviceType.WIRED_HEADPHONES
-            }
-        }
-        for (device in devices) {
-            when (device.type) {
+                    OutputDeviceType.WIRED_HEADPHONES
                 AudioDeviceInfo.TYPE_BUILTIN_SPEAKER,
                 AudioDeviceInfo.TYPE_BUILTIN_EARPIECE ->
-                    return OutputDeviceType.BUILTIN_SPEAKER
-            }
+                    OutputDeviceType.BUILTIN_SPEAKER
+                else -> OutputDeviceType.UNKNOWN
         }
-        return OutputDeviceType.UNKNOWN
     }
 
     // ── Latency estimation ───────────────────────────────────────────────
@@ -111,8 +86,7 @@ class AudioLatencyEstimator @Inject constructor(
     /**
      * Returns the output pipeline latency (speaker/earphone side).
      *
-     * Prefers hardware timestamps from the Oboe output stream (precise,
-     * accounts for actual device including Bluetooth codec delay).
+     * Prefers best-effort timestamps from the Oboe output stream.
      * Falls back to heuristic estimation from [AudioManager] properties
      * when timestamps are unavailable.
      */

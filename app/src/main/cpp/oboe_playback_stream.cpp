@@ -23,6 +23,7 @@ void OboePlaybackStream::stop() {
         stream_->requestStop();
         stream_->close();
         stream_.reset();
+        evidence_.closed();
         LOGD("OboePlaybackStream: stopped");
     }
 }
@@ -53,6 +54,7 @@ bool OboePlaybackStream::openStream() {
          stream_->getChannelCount(),
          oboe::convertToText(stream_->getSharingMode()));
 
+    evidence_.opened(*stream_);
     result = stream_->requestStart();
     if (result != oboe::Result::OK) {
         LOGE("OboePlaybackStream: failed to start: %s", oboe::convertToText(result));
@@ -82,6 +84,7 @@ oboe::DataCallbackResult OboePlaybackStream::onAudioReady(
         int32_t numFrames) {
 
     auto* output = static_cast<float*>(audioData);
+    evidence_.callback(numFrames, transport_.posFrames.load(std::memory_order_relaxed));
 
     if (!transport_.playing.load(std::memory_order_acquire)) {
         // Paused: skip the timeline-driven track mixer and position
@@ -162,7 +165,10 @@ void OboePlaybackStream::onErrorAfterClose(
         oboe::Result error) {
     LOGW("OboePlaybackStream: error after close: %s — reopening",
          oboe::convertToText(error));
-    // Auto-reopen on device change (headphone unplug, BT disconnect)
+    evidence_.closed();
+    routeInterruptions_.fetch_add(1, std::memory_order_release);
+    // Phase-one telemetry only. Preserve existing playback recovery until route
+    // events and backed/unbacked source ranges are durably represented.
     stream_.reset();
     openStream();
 }
