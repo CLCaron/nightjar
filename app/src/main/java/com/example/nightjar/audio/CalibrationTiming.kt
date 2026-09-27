@@ -16,9 +16,29 @@ data class CalibrationRouteKey(
     val audioMode: Int,
     val transportProfile: String,
     val mapperVersion: Int,
-    val platformVersion: String
+    val platformVersion: String,
+    val inputFormat: Int = 0,
+    val outputFormat: Int = 0,
+    val inputSharing: Int = 0,
+    val outputSharing: Int = 0,
+    val inputPerformance: Int = 0,
+    val outputPerformance: Int = 0,
+    val inputBurst: Int = 0,
+    val outputBurst: Int = 0,
+    val engineVersion: Int = 1
 ) {
     val identifiable: Boolean get() = inputIdentity.isNotBlank() && outputIdentity.isNotBlank()
+
+    /** Length framing prevents accessory identifiers containing separators aliasing a key. */
+    fun encodedConfiguration(): String = listOf(inputIdentity, outputIdentity, inputRate, outputRate,
+        inputChannels, outputChannels, inputBackend, outputBackend, inputBuffer, outputBuffer,
+        inputPreset, audioMode, transportProfile, mapperVersion, platformVersion,
+        inputFormat, outputFormat, inputSharing, outputSharing, inputPerformance, outputPerformance,
+        inputBurst, outputBurst, engineVersion).joinToString("") { value -> value.toString().let { "${it.length}:$it" } }
+
+    fun fingerprint(): String = java.security.MessageDigest.getInstance("SHA-256")
+        .digest(encodedConfiguration().toByteArray(Charsets.UTF_8))
+        .joinToString("") { "%02x".format(it) }
 }
 
 data class CalibrationProfile(

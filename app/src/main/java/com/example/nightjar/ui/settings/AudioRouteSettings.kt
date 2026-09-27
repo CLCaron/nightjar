@@ -80,6 +80,7 @@ fun AudioRouteSettings(state: SettingsUiState, onAction: (SettingsAction) -> Uni
                 NjButton(text = "Details", caption = "DETAILS", isActive = showDetails,
                     onClick = { showDetails = !showDetails })
                 if (showDetails) {
+                    state.savedTimingMessage?.let { Text(it) }
                     val evidence = state.routes.evidence
                     Text("Stream details", style = MaterialTheme.typography.labelMedium)
                     Text("Input: ${evidence.input.sampleRate} Hz, ${evidence.input.channels} channels, " +

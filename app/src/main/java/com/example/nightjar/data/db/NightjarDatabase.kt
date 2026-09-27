@@ -68,16 +68,18 @@ import com.example.nightjar.data.db.entity.TrackEntity
         IdeaEntity::class, TagEntity::class, IdeaTagCrossRef::class,
         TrackEntity::class, AudioClipEntity::class, TakeEntity::class, CaptureGroupEntity::class,
         CaptureBackingEntity::class, com.example.nightjar.data.db.entity.ImportedSourceEntity::class,
+        com.example.nightjar.data.db.entity.CalibrationMeasurementEntity::class,
         DrumPatternEntity::class, DrumStepEntity::class,
         DrumClipEntity::class,
         MidiClipEntity::class, MidiNoteEntity::class
     ],
-    version = 17,
+    version = 18,
     exportSchema = false
 )
 abstract class NightjarDatabase : RoomDatabase() {
 
     abstract fun importedSourceDao(): com.example.nightjar.data.db.dao.ImportedSourceDao
+    abstract fun calibrationMeasurementDao(): com.example.nightjar.data.db.dao.CalibrationMeasurementDao
 
     abstract fun ideaDao(): IdeaDao
     abstract fun tagDao(): TagDao
@@ -650,6 +652,29 @@ abstract class NightjarDatabase : RoomDatabase() {
             }
         }
 
+        internal val MIGRATION_17_18 = object : androidx.room.migration.Migration(17, 18) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS calibration_measurements (
+                        revision TEXT NOT NULL PRIMARY KEY,
+                        routeFingerprint TEXT NOT NULL, routeConfiguration TEXT NOT NULL,
+                        inputLabel TEXT NOT NULL, outputLabel TEXT NOT NULL,
+                        identityScope TEXT NOT NULL, sessionId TEXT NOT NULL,
+                        inputEpoch INTEGER NOT NULL, outputEpoch INTEGER NOT NULL,
+                        delayOutputFrames REAL NOT NULL, outputRate INTEGER NOT NULL,
+                        acceptedTrials INTEGER NOT NULL, rejectedTrials INTEGER NOT NULL,
+                        madFrames REAL NOT NULL, rangeFrames INTEGER NOT NULL,
+                        mapperUncertaintyMs REAL NOT NULL, confirmationsPassed INTEGER NOT NULL,
+                        validityReason TEXT NOT NULL, probeVersion INTEGER NOT NULL,
+                        mapperVersion INTEGER NOT NULL, engineVersion INTEGER NOT NULL,
+                        mapperEvidence TEXT NOT NULL, trialEvidence TEXT NOT NULL,
+                        createdAtEpochMs INTEGER NOT NULL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_calibration_measurements_routeFingerprint ON calibration_measurements(routeFingerprint)")
+            }
+        }
+
         private val MIGRATION_15_16 = object : androidx.room.migration.Migration(15, 16) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                 db.execSQL("""
@@ -680,7 +705,7 @@ abstract class NightjarDatabase : RoomDatabase() {
                     MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
                     MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10,
                     MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
-                    MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17
+                    MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18
                 ).build()
                 INSTANCE = db
                 db

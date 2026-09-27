@@ -27,7 +27,8 @@ class SettingsViewModel @Inject constructor(
     private val routes: AudioRouteMonitor,
     private val engine: OboeAudioEngine,
     private val capture: CaptureSession,
-    private val acousticCheck: AcousticCheckRunner
+    private val acousticCheck: AcousticCheckRunner,
+    private val measurements: com.example.nightjar.data.repository.CalibrationMeasurementRepository
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(
@@ -38,6 +39,21 @@ class SettingsViewModel @Inject constructor(
     private var checkJob: Job? = null
 
     init {
+        viewModelScope.launch {
+            try {
+                measurements.latest.collect { saved ->
+                    _state.update { it.copy(savedTimingMessage = saved?.let { measurement ->
+                        "Saved ${if (measurement.confirmationsPassed) "check" else "unconfirmed attempt"}: ${measurement.outputLabel} + ${measurement.inputLabel}, %.1f ms. Not applied to recordings."
+                            .format(measurement.delayOutputFrames * 1000 / measurement.outputRate)
+                    }) }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("SettingsViewModel", "Cannot load saved timing evidence", e)
+                _state.update { it.copy(audioError = "Saved timing checks are unavailable. You can still record.") }
+            }
+        }
         viewModelScope.launch {
             while (isActive) {
                 try {
@@ -64,8 +80,10 @@ class SettingsViewModel @Inject constructor(
                     try {
                         val measurement = acousticCheck.measure()
                         _state.update { it.copy(timingMessage =
-                            "Last check: %.1f ms delay from %d trials. Timing remains Estimated until device verification."
-                                .format(measurement.delayMs, measurement.acceptedTrials)) }
+                            if (!measurement.confirmationsPassed) "Could not confirm timing. Timing: Estimated. You can still record."
+                            else "Last check: %.1f ms delay from %d trials. Timing: Estimated. This check is not applied yet."
+                                .format(measurement.delayMs, measurement.acceptedTrials) +
+                                if (measurement.savedRevision == null) " This setup could not be identified, so the result was not saved." else "") }
                     } catch (e: CancellationException) {
                         _state.update { it.copy(timingMessage = "Check stopped. Timing: Estimated.") }
                         throw e

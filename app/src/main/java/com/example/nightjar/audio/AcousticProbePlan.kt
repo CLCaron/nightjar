@@ -40,4 +40,9 @@ internal object AcousticProbePlan {
         (0 until decimation).sumOf { samples[index * decimation + it].toDouble() }
             .div(decimation).toFloat()
     }
+
+    fun clippedFraction(samples: FloatArray, start: Int, length: Int): Double {
+        require(start >= 0 && length > 0 && start <= samples.size - length)
+        return (start until start + length).count { kotlin.math.abs(samples[it]) >= .999f }.toDouble() / length
+    }
 }

@@ -14,6 +14,7 @@ data class SettingsUiState(
     val audioBusyReason: String? = null,
     val audioError: String? = null,
     val checkingTiming: Boolean = false,
+    val savedTimingMessage: String? = null,
     val timingMessage: String = "Timing: Estimated. Run an optional timing check below."
 )
 

@@ -42,7 +42,7 @@ class CaptureBatchTest {
         val old = android.database.sqlite.SQLiteDatabase.openOrCreateDatabase(path, null)
         try {
             // Android creates its locale table when opening the fixture database.
-            val schemas = db.openHelper.readableDatabase.query("SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '%imported_sources%' AND name NOT IN ('room_master_table', 'android_metadata')")
+            val schemas = db.openHelper.readableDatabase.query("SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '%imported_sources%' AND name NOT LIKE '%calibration_measurements%' AND name NOT IN ('room_master_table', 'android_metadata')")
             schemas.use { while (it.moveToNext()) old.execSQL(it.getString(1)) }
             for (table in listOf("ideas", "tracks", "audio_clips", "takes", "capture_groups")) {
                 db.openHelper.readableDatabase.query("SELECT * FROM $table").use { rows ->
@@ -64,7 +64,7 @@ class CaptureBatchTest {
             old.version = 16
         } finally { old.close() }
         val migrated = Room.databaseBuilder(context, NightjarDatabase::class.java, name)
-            .addMigrations(NightjarDatabase.MIGRATION_16_17).build()
+            .addMigrations(NightjarDatabase.MIGRATION_16_17, NightjarDatabase.MIGRATION_17_18).build()
         try {
             assertEquals("legacy.wav", migrated.takeDao().getTakeById(saved.takes.single().id)?.audioFileName)
             assertEquals(saved.takes.single().id, migrated.captureGroupDao().forIdea(saved.group.ideaId).single().latchedTakeId)

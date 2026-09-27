@@ -4,6 +4,11 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AcousticProbePlanTest {
+    @Test fun `raw clipping is detected even when decimation would hide it`() {
+        val raw = floatArrayOf(1f, -1f, 0f, 0f, .2f, .1f, .1f, .1f)
+        assertEquals(.25, AcousticProbePlan.clippedFraction(raw, 0, raw.size), 0.0)
+        assertTrue(AcousticProbePlan.downsample(raw).all { kotlin.math.abs(it) < .999f })
+    }
     @Test fun `probes are deterministic bounded faded and independent`() {
         val probes = AcousticProbePlan.generate()
         assertArrayEquals(probes, AcousticProbePlan.generate(), 0f)
