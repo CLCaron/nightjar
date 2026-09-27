@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.nightjar.data.db.dao.AudioClipDao
 import com.example.nightjar.data.db.dao.DrumPatternDao
 import com.example.nightjar.data.db.dao.ExploreDao
@@ -63,6 +64,8 @@ import com.example.nightjar.data.db.entity.TrackEntity
  *             `bars * stepsPerBar`. `bars` column stays for now but is no
  *             longer read at runtime (dropped in a later cleanup).
  * - **v15** — Explore sections/sketches and lightweight audio track roles.
+ * - **v16** — Stabilized the first Explore dev schema with a defensive
+ *             migration for devices that already installed an early v15 build.
  */
 @Database(
     entities = [
@@ -75,7 +78,7 @@ import com.example.nightjar.data.db.entity.TrackEntity
         ExploreCaptureEntity::class, ExploreSegmentEntity::class,
         ExploreCandidateEntity::class
     ],
-    version = 15,
+    version = 16,
     exportSchema = false
 )
 abstract class NightjarDatabase : RoomDatabase() {
@@ -624,101 +627,203 @@ abstract class NightjarDatabase : RoomDatabase() {
          * non-destructive.
          */
         private val MIGRATION_14_15 = object : androidx.room.migration.Migration(14, 15) {
-            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
-                db.execSQL("ALTER TABLE tracks ADD COLUMN trackRole TEXT NOT NULL DEFAULT 'raw'")
-
-                db.execSQL("""
-                    CREATE TABLE IF NOT EXISTS idea_sections (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                        ideaId INTEGER NOT NULL,
-                        displayName TEXT NOT NULL,
-                        startMs INTEGER NOT NULL,
-                        endMs INTEGER NOT NULL,
-                        colorIndex INTEGER NOT NULL DEFAULT 0,
-                        sortIndex INTEGER NOT NULL DEFAULT 0,
-                        createdAtEpochMs INTEGER NOT NULL,
-                        FOREIGN KEY(ideaId) REFERENCES ideas(id) ON DELETE CASCADE
-                    )
-                """.trimIndent())
-                db.execSQL("CREATE INDEX IF NOT EXISTS index_idea_sections_ideaId ON idea_sections(ideaId)")
-
-                db.execSQL("""
-                    CREATE TABLE IF NOT EXISTS explore_sketches (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                        ideaId INTEGER NOT NULL,
-                        sectionId INTEGER NOT NULL,
-                        trackId INTEGER NOT NULL,
-                        displayName TEXT NOT NULL,
-                        createdAtEpochMs INTEGER NOT NULL,
-                        updatedAtEpochMs INTEGER NOT NULL,
-                        FOREIGN KEY(ideaId) REFERENCES ideas(id) ON DELETE CASCADE,
-                        FOREIGN KEY(sectionId) REFERENCES idea_sections(id) ON DELETE CASCADE,
-                        FOREIGN KEY(trackId) REFERENCES tracks(id) ON DELETE CASCADE
-                    )
-                """.trimIndent())
-                db.execSQL("CREATE INDEX IF NOT EXISTS index_explore_sketches_ideaId ON explore_sketches(ideaId)")
-                db.execSQL("CREATE INDEX IF NOT EXISTS index_explore_sketches_sectionId ON explore_sketches(sectionId)")
-                db.execSQL("CREATE INDEX IF NOT EXISTS index_explore_sketches_trackId ON explore_sketches(trackId)")
-                db.execSQL(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS index_explore_sketches_sectionId_trackId " +
-                        "ON explore_sketches(sectionId, trackId)"
-                )
-
-                db.execSQL("""
-                    CREATE TABLE IF NOT EXISTS explore_captures (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                        ideaId INTEGER NOT NULL,
-                        sectionId INTEGER NOT NULL,
-                        trackId INTEGER NOT NULL,
-                        audioFileName TEXT NOT NULL,
-                        displayName TEXT NOT NULL,
-                        durationMs INTEGER NOT NULL,
-                        capturedStartMs INTEGER NOT NULL,
-                        capturedEndMs INTEGER NOT NULL,
-                        trimStartMs INTEGER NOT NULL DEFAULT 0,
-                        createdAtEpochMs INTEGER NOT NULL,
-                        FOREIGN KEY(ideaId) REFERENCES ideas(id) ON DELETE CASCADE,
-                        FOREIGN KEY(sectionId) REFERENCES idea_sections(id) ON DELETE CASCADE,
-                        FOREIGN KEY(trackId) REFERENCES tracks(id) ON DELETE CASCADE
-                    )
-                """.trimIndent())
-                db.execSQL("CREATE INDEX IF NOT EXISTS index_explore_captures_ideaId ON explore_captures(ideaId)")
-                db.execSQL("CREATE INDEX IF NOT EXISTS index_explore_captures_sectionId ON explore_captures(sectionId)")
-                db.execSQL("CREATE INDEX IF NOT EXISTS index_explore_captures_trackId ON explore_captures(trackId)")
-
-                db.execSQL("""
-                    CREATE TABLE IF NOT EXISTS explore_segments (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                        sketchId INTEGER NOT NULL,
-                        startMs INTEGER NOT NULL,
-                        endMs INTEGER NOT NULL,
-                        status TEXT NOT NULL DEFAULT 'keep',
-                        selectedCandidateId INTEGER,
-                        sortIndex INTEGER NOT NULL DEFAULT 0,
-                        createdAtEpochMs INTEGER NOT NULL,
-                        FOREIGN KEY(sketchId) REFERENCES explore_sketches(id) ON DELETE CASCADE
-                    )
-                """.trimIndent())
-                db.execSQL("CREATE INDEX IF NOT EXISTS index_explore_segments_sketchId ON explore_segments(sketchId)")
-                db.execSQL("CREATE INDEX IF NOT EXISTS index_explore_segments_selectedCandidateId ON explore_segments(selectedCandidateId)")
-
-                db.execSQL("""
-                    CREATE TABLE IF NOT EXISTS explore_candidates (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                        segmentId INTEGER NOT NULL,
-                        captureId INTEGER NOT NULL,
-                        sourceStartMs INTEGER NOT NULL,
-                        sourceEndMs INTEGER NOT NULL,
-                        displayName TEXT NOT NULL,
-                        sortIndex INTEGER NOT NULL DEFAULT 0,
-                        createdAtEpochMs INTEGER NOT NULL,
-                        FOREIGN KEY(segmentId) REFERENCES explore_segments(id) ON DELETE CASCADE,
-                        FOREIGN KEY(captureId) REFERENCES explore_captures(id) ON DELETE CASCADE
-                    )
-                """.trimIndent())
-                db.execSQL("CREATE INDEX IF NOT EXISTS index_explore_candidates_segmentId ON explore_candidates(segmentId)")
-                db.execSQL("CREATE INDEX IF NOT EXISTS index_explore_candidates_captureId ON explore_candidates(captureId)")
+            override fun migrate(db: SupportSQLiteDatabase) {
+                ensureExploreSchema(db)
             }
+        }
+
+        internal val MIGRATION_15_16 = object : androidx.room.migration.Migration(15, 16) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                ensureExploreSchema(db)
+                repairLegacyGrooveMidiClipSchema(db)
+            }
+        }
+
+        /**
+         * An unreleased Groove checkpoint and the first Explore checkpoint both
+         * used database version 15. Groove added a non-null `midi_clips.origin`
+         * column, while Explore removed it from [MidiClipEntity]. Devices that
+         * installed the Groove build therefore fail Room validation before any
+         * screen can read the database.
+         *
+         * Rebuild both MIDI tables so the parent clip table can be replaced
+         * without triggering `midi_notes` cascade deletion. IDs, linked-clip
+         * relationships, notes, and timing are copied unchanged.
+         */
+        internal fun repairLegacyGrooveMidiClipSchema(db: SupportSQLiteDatabase) {
+            if (!columnExists(db, "midi_clips", "origin")) return
+
+            db.execSQL("DROP TABLE IF EXISTS midi_notes_v16_repair")
+            db.execSQL("ALTER TABLE midi_clips RENAME TO midi_clips_v15_legacy")
+            db.execSQL("DROP INDEX IF EXISTS index_midi_clips_trackId")
+            db.execSQL("DROP INDEX IF EXISTS index_midi_clips_sourceClipId")
+            db.execSQL("DROP INDEX IF EXISTS index_midi_clips_origin")
+
+            db.execSQL("""
+                CREATE TABLE midi_clips (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    trackId INTEGER NOT NULL,
+                    offsetMs INTEGER NOT NULL,
+                    sortIndex INTEGER NOT NULL,
+                    sourceClipId INTEGER,
+                    lengthMs INTEGER,
+                    FOREIGN KEY(trackId) REFERENCES tracks(id) ON DELETE CASCADE,
+                    FOREIGN KEY(sourceClipId) REFERENCES midi_clips(id) ON DELETE NO ACTION
+                )
+            """.trimIndent())
+            db.execSQL("""
+                INSERT INTO midi_clips (
+                    id, trackId, offsetMs, sortIndex, sourceClipId, lengthMs
+                )
+                SELECT id, trackId, offsetMs, sortIndex, sourceClipId, lengthMs
+                FROM midi_clips_v15_legacy
+            """.trimIndent())
+
+            db.execSQL("""
+                CREATE TABLE midi_notes_v16_repair (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    trackId INTEGER NOT NULL,
+                    clipId INTEGER NOT NULL,
+                    pitch INTEGER NOT NULL,
+                    startMs INTEGER NOT NULL,
+                    durationMs INTEGER NOT NULL,
+                    velocity REAL NOT NULL,
+                    FOREIGN KEY(trackId) REFERENCES tracks(id) ON DELETE CASCADE,
+                    FOREIGN KEY(clipId) REFERENCES midi_clips(id) ON DELETE CASCADE
+                )
+            """.trimIndent())
+            db.execSQL("""
+                INSERT INTO midi_notes_v16_repair (
+                    id, trackId, clipId, pitch, startMs, durationMs, velocity
+                )
+                SELECT id, trackId, clipId, pitch, startMs, durationMs, velocity
+                FROM midi_notes
+            """.trimIndent())
+
+            db.execSQL("DROP TABLE midi_notes")
+            // The old self-reference uses NO ACTION. Clear it only after the
+            // replacement copy is safe so dropping the legacy table cannot be
+            // blocked by its own linked instances.
+            db.execSQL("UPDATE midi_clips_v15_legacy SET sourceClipId = NULL")
+            db.execSQL("DROP TABLE midi_clips_v15_legacy")
+            db.execSQL("ALTER TABLE midi_notes_v16_repair RENAME TO midi_notes")
+
+            db.execSQL("CREATE INDEX index_midi_clips_trackId ON midi_clips(trackId)")
+            db.execSQL("CREATE INDEX index_midi_clips_sourceClipId ON midi_clips(sourceClipId)")
+            db.execSQL("CREATE INDEX index_midi_notes_trackId ON midi_notes(trackId)")
+            db.execSQL("CREATE INDEX index_midi_notes_clipId ON midi_notes(clipId)")
+        }
+
+        private fun ensureExploreSchema(db: SupportSQLiteDatabase) {
+            if (!columnExists(db, "tracks", "trackRole")) {
+                db.execSQL("ALTER TABLE tracks ADD COLUMN trackRole TEXT NOT NULL DEFAULT 'raw'")
+            }
+
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS idea_sections (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    ideaId INTEGER NOT NULL,
+                    displayName TEXT NOT NULL,
+                    startMs INTEGER NOT NULL,
+                    endMs INTEGER NOT NULL,
+                    colorIndex INTEGER NOT NULL DEFAULT 0,
+                    sortIndex INTEGER NOT NULL DEFAULT 0,
+                    createdAtEpochMs INTEGER NOT NULL,
+                    FOREIGN KEY(ideaId) REFERENCES ideas(id) ON DELETE CASCADE
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_idea_sections_ideaId ON idea_sections(ideaId)")
+
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS explore_sketches (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    ideaId INTEGER NOT NULL,
+                    sectionId INTEGER NOT NULL,
+                    trackId INTEGER NOT NULL,
+                    displayName TEXT NOT NULL,
+                    createdAtEpochMs INTEGER NOT NULL,
+                    updatedAtEpochMs INTEGER NOT NULL,
+                    FOREIGN KEY(ideaId) REFERENCES ideas(id) ON DELETE CASCADE,
+                    FOREIGN KEY(sectionId) REFERENCES idea_sections(id) ON DELETE CASCADE,
+                    FOREIGN KEY(trackId) REFERENCES tracks(id) ON DELETE CASCADE
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_explore_sketches_ideaId ON explore_sketches(ideaId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_explore_sketches_sectionId ON explore_sketches(sectionId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_explore_sketches_trackId ON explore_sketches(trackId)")
+            db.execSQL(
+                "CREATE UNIQUE INDEX IF NOT EXISTS index_explore_sketches_sectionId_trackId " +
+                    "ON explore_sketches(sectionId, trackId)"
+            )
+
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS explore_captures (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    ideaId INTEGER NOT NULL,
+                    sectionId INTEGER NOT NULL,
+                    trackId INTEGER NOT NULL,
+                    audioFileName TEXT NOT NULL,
+                    displayName TEXT NOT NULL,
+                    durationMs INTEGER NOT NULL,
+                    capturedStartMs INTEGER NOT NULL,
+                    capturedEndMs INTEGER NOT NULL,
+                    trimStartMs INTEGER NOT NULL DEFAULT 0,
+                    createdAtEpochMs INTEGER NOT NULL,
+                    FOREIGN KEY(ideaId) REFERENCES ideas(id) ON DELETE CASCADE,
+                    FOREIGN KEY(sectionId) REFERENCES idea_sections(id) ON DELETE CASCADE,
+                    FOREIGN KEY(trackId) REFERENCES tracks(id) ON DELETE CASCADE
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_explore_captures_ideaId ON explore_captures(ideaId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_explore_captures_sectionId ON explore_captures(sectionId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_explore_captures_trackId ON explore_captures(trackId)")
+
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS explore_segments (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    sketchId INTEGER NOT NULL,
+                    startMs INTEGER NOT NULL,
+                    endMs INTEGER NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'keep',
+                    selectedCandidateId INTEGER,
+                    sortIndex INTEGER NOT NULL DEFAULT 0,
+                    createdAtEpochMs INTEGER NOT NULL,
+                    FOREIGN KEY(sketchId) REFERENCES explore_sketches(id) ON DELETE CASCADE
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_explore_segments_sketchId ON explore_segments(sketchId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_explore_segments_selectedCandidateId ON explore_segments(selectedCandidateId)")
+
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS explore_candidates (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    segmentId INTEGER NOT NULL,
+                    captureId INTEGER NOT NULL,
+                    sourceStartMs INTEGER NOT NULL,
+                    sourceEndMs INTEGER NOT NULL,
+                    displayName TEXT NOT NULL,
+                    sortIndex INTEGER NOT NULL DEFAULT 0,
+                    createdAtEpochMs INTEGER NOT NULL,
+                    FOREIGN KEY(segmentId) REFERENCES explore_segments(id) ON DELETE CASCADE,
+                    FOREIGN KEY(captureId) REFERENCES explore_captures(id) ON DELETE CASCADE
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_explore_candidates_segmentId ON explore_candidates(segmentId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_explore_candidates_captureId ON explore_candidates(captureId)")
+        }
+
+        private fun columnExists(
+            db: SupportSQLiteDatabase,
+            tableName: String,
+            columnName: String
+        ): Boolean {
+            db.query("PRAGMA table_info($tableName)").use { cursor ->
+                val nameIndex = cursor.getColumnIndex("name")
+                while (cursor.moveToNext()) {
+                    if (cursor.getString(nameIndex) == columnName) return true
+                }
+            }
+            return false
         }
 
         fun getInstance(context: Context): NightjarDatabase {
@@ -732,7 +837,7 @@ abstract class NightjarDatabase : RoomDatabase() {
                     MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
                     MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10,
                     MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
-                    MIGRATION_13_14, MIGRATION_14_15
+                    MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16
                 ).build()
                 INSTANCE = db
                 db

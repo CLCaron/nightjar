@@ -3,7 +3,6 @@ package com.example.nightjar.data.db.dao
 import androidx.room.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import app.cash.turbine.test
 import com.example.nightjar.data.db.NightjarDatabase
 import com.example.nightjar.data.db.entity.IdeaEntity
 import com.example.nightjar.data.db.entity.TrackEntity
@@ -113,12 +112,12 @@ class TrackDaoTest {
     }
 
     @Test
-    fun updateSortIndex_changesIndex() = runTest {
+    fun updateRole_changesRole() = runTest {
         val id = trackDao.insertTrack(track(sortIndex = 0))
 
-        trackDao.updateSortIndex(id, 5)
+        trackDao.updateRole(id, "vocal")
 
-        assertEquals(5, trackDao.getTrackById(id)?.sortIndex)
+        assertEquals("vocal", trackDao.getTrackById(id)?.trackRole)
     }
 
     @Test
@@ -166,46 +165,21 @@ class TrackDaoTest {
         assertEquals(0, trackDao.getTrackCount(ideaId))
     }
 
-    /* ---------- Flow / observe ---------- */
+    /* ---------- idea filtering ---------- */
 
     @Test
-    fun observeTracksForIdea_emitsUpdates() = runTest {
-        trackDao.observeTracksForIdea(ideaId).test {
-            assertEquals(emptyList<TrackEntity>(), awaitItem())
-
-            val id = trackDao.insertTrack(track(sortIndex = 0, audioFileName = "first.m4a"))
-            assertEquals(1, awaitItem().size)
-
-            trackDao.insertTrack(track(sortIndex = 1, audioFileName = "second.m4a"))
-            assertEquals(2, awaitItem().size)
-
-            trackDao.deleteTrackById(id)
-            assertEquals(1, awaitItem().size)
-
-            cancelAndIgnoreRemainingEvents()
-        }
-    }
-
-    @Test
-    fun observeTracksForIdea_doesNotEmitTracksFromOtherIdeas() = runTest {
+    fun getTracksForIdea_doesNotReturnTracksFromOtherIdeas() = runTest {
         val otherId = ideaDao.insertIdea(
             IdeaEntity(title = "Other Idea")
         )
 
-        trackDao.observeTracksForIdea(ideaId).test {
-            assertEquals(emptyList<TrackEntity>(), awaitItem())
+        trackDao.insertTrack(track(ideaId = otherId, sortIndex = 0))
+        trackDao.insertTrack(track(ideaId = ideaId, sortIndex = 0))
 
-            // Insert track for the other idea — should not trigger emission
-            trackDao.insertTrack(track(ideaId = otherId, sortIndex = 0))
+        val items = trackDao.getTracksForIdea(ideaId)
 
-            // Insert track for our idea — should trigger
-            trackDao.insertTrack(track(ideaId = ideaId, sortIndex = 0))
-            val items = awaitItem()
-            assertEquals(1, items.size)
-            assertEquals(ideaId, items[0].ideaId)
-
-            cancelAndIgnoreRemainingEvents()
-        }
+        assertEquals(1, items.size)
+        assertEquals(ideaId, items[0].ideaId)
     }
 
     /* ---------- helper ---------- */

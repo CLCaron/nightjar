@@ -11,8 +11,10 @@ import java.io.FileOutputStream
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.nio.charset.StandardCharsets
 import kotlin.math.floor
 import kotlin.math.min
+import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
 /** Imports reusable audio files into Nightjar's app-private WAV format. */
@@ -35,8 +37,13 @@ class AudioImporter(
             } ?: throw IllegalArgumentException("Could not open audio file.")
 
             val output = storage.createRecordingFile(prefix = "nightjar_import", extension = "wav")
-            val durationMs = convertPcmWavToNightjarWav(temp, output)
-            ImportedAudio(output, durationMs, sourceName)
+            try {
+                val durationMs = convertWaveToNightjarWav(temp, output)
+                ImportedAudio(output, durationMs, sourceName)
+            } catch (e: Exception) {
+                output.delete()
+                throw e
+            }
         } finally {
             temp.delete()
         }
@@ -49,17 +56,17 @@ class AudioImporter(
         }
     }
 
-    private fun convertPcmWavToNightjarWav(source: File, output: File): Long {
+    private fun convertWaveToNightjarWav(source: File, output: File): Long {
         RandomAccessFile(source, "r").use { raf ->
             val header = readWaveHeader(raf)
-            require(header.audioFormat == 1) {
-                "Only uncompressed PCM WAV imports are supported in this build."
+            require(header.encoding != WaveSampleEncoding.UNSUPPORTED) {
+                "Choose an uncompressed PCM or floating-point WAV file."
             }
-            require(header.bitsPerSample == 16) {
-                "Only 16-bit WAV imports are supported in this build."
+            require(header.channels in 1..MAX_CHANNELS) {
+                "Only WAV files with $MAX_CHANNELS or fewer channels are supported."
             }
-            require(header.channels == 1 || header.channels == 2) {
-                "Only mono or stereo WAV imports are supported in this build."
+            require(header.dataSize % header.blockAlign == 0L) {
+                "Could not read WAV audio data."
             }
 
             val sourceFrameCount = header.dataSize / header.blockAlign
@@ -71,6 +78,9 @@ class AudioImporter(
             val outputFrameCount = (sourceFrameCount * TARGET_SAMPLE_RATE.toDouble() /
                 header.sampleRate.toDouble()).roundToLong().coerceAtLeast(1L)
             val outputDataSize = outputFrameCount * BYTES_PER_SAMPLE
+            require(outputDataSize <= Int.MAX_VALUE) {
+                "That audio file is too large to import on this device."
+            }
 
             FileOutputStream(output).use { fos ->
                 fos.write(createWavHeader(outputDataSize))
@@ -104,14 +114,14 @@ class AudioImporter(
 
             var offset = 0
             repeat(framesToRead) {
-                val mono = if (header.channels == 1) {
-                    readShortLe(buffer, offset).toInt()
-                } else {
-                    val left = readShortLe(buffer, offset).toInt()
-                    val right = readShortLe(buffer, offset + BYTES_PER_SAMPLE).toInt()
-                    (left + right) / 2
+                var sum = 0.0
+                repeat(header.channels) { channel ->
+                    sum += readSampleUnit(buffer, offset + channel * header.bytesPerSample, header)
                 }
-                result[written++] = mono.coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+                val mono = (sum / header.channels.toDouble()).coerceIn(-1.0, 1.0)
+                result[written++] = (mono * Short.MAX_VALUE)
+                    .roundToInt()
+                    .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
                     .toShort()
                 offset += header.blockAlign
             }
@@ -156,34 +166,60 @@ class AudioImporter(
         val riff = ByteArray(12)
         raf.seek(0L)
         raf.readFully(riff)
-        require(String(riff, 0, 4) == "RIFF" && String(riff, 8, 4) == "WAVE") {
+        require(
+            String(riff, 0, 4, StandardCharsets.US_ASCII) == "RIFF" &&
+                String(riff, 8, 4, StandardCharsets.US_ASCII) == "WAVE"
+        ) {
             "Choose a WAV file."
         }
 
-        var audioFormat = 0
+        var encoding = WaveSampleEncoding.UNSUPPORTED
         var channels = 0
         var sampleRate = 0
         var blockAlign = 0
         var bitsPerSample = 0
+        var validBitsPerSample = 0
         var dataOffset = 0L
         var dataSize = 0L
 
         while (raf.filePointer + 8 <= raf.length()) {
             val chunkIdBytes = ByteArray(4)
             raf.readFully(chunkIdBytes)
-            val chunkId = String(chunkIdBytes)
+            val chunkId = String(chunkIdBytes, StandardCharsets.US_ASCII)
             val chunkSize = Integer.toUnsignedLong(readIntLe(raf))
             val chunkStart = raf.filePointer
 
             when (chunkId) {
                 "fmt " -> {
+                    require(chunkSize in MIN_FMT_CHUNK_SIZE..MAX_FMT_CHUNK_SIZE) {
+                        "Could not read WAV format data."
+                    }
                     val fmt = ByteArray(chunkSize.toInt())
                     raf.readFully(fmt)
-                    audioFormat = readShortLe(fmt, 0).toInt() and 0xFFFF
+                    val audioFormat = readShortLe(fmt, 0).toInt() and 0xFFFF
                     channels = readShortLe(fmt, 2).toInt() and 0xFFFF
                     sampleRate = readIntLe(fmt, 4)
                     blockAlign = readShortLe(fmt, 12).toInt() and 0xFFFF
                     bitsPerSample = readShortLe(fmt, 14).toInt() and 0xFFFF
+                    validBitsPerSample = bitsPerSample
+                    encoding = when (audioFormat) {
+                        WAVE_FORMAT_PCM -> WaveSampleEncoding.PCM
+                        WAVE_FORMAT_IEEE_FLOAT -> WaveSampleEncoding.IEEE_FLOAT
+                        WAVE_FORMAT_EXTENSIBLE -> {
+                            require(fmt.size >= EXTENSIBLE_FMT_SIZE) {
+                                "Could not read WAV format data."
+                            }
+                            validBitsPerSample = (readShortLe(fmt, 18).toInt() and 0xFFFF)
+                                .takeIf { it > 0 } ?: bitsPerSample
+                            when (readIntLe(fmt, 24)) {
+                                WAVE_FORMAT_PCM -> WaveSampleEncoding.PCM
+                                WAVE_FORMAT_IEEE_FLOAT -> WaveSampleEncoding.IEEE_FLOAT
+                                else -> WaveSampleEncoding.UNSUPPORTED
+                            }
+                        }
+                        else -> WaveSampleEncoding.UNSUPPORTED
+                    }
+                    raf.seek(chunkStart + chunkSize + (chunkSize % 2L))
                 }
                 "data" -> {
                     dataOffset = raf.filePointer
@@ -197,16 +233,64 @@ class AudioImporter(
         require(dataOffset > 0L && dataSize > 0L && sampleRate > 0 && blockAlign > 0) {
             "Could not read WAV audio data."
         }
+        require(bitsPerSample > 0 && blockAlign >= channels * ((bitsPerSample + 7) / 8)) {
+            "Could not read WAV format data."
+        }
+        require(isSupportedSampleDepth(encoding, bitsPerSample, validBitsPerSample)) {
+            "Choose a WAV file with 8, 16, 24, or 32-bit PCM, or 32/64-bit floating-point audio."
+        }
 
         return WaveHeader(
-            audioFormat = audioFormat,
+            encoding = encoding,
             channels = channels,
             sampleRate = sampleRate,
             blockAlign = blockAlign,
             bitsPerSample = bitsPerSample,
+            validBitsPerSample = validBitsPerSample,
             dataOffset = dataOffset,
             dataSize = dataSize
         )
+    }
+
+    private fun readSampleUnit(bytes: ByteArray, offset: Int, header: WaveHeader): Double =
+        when (header.encoding) {
+            WaveSampleEncoding.PCM -> readPcmSampleUnit(bytes, offset, header)
+            WaveSampleEncoding.IEEE_FLOAT -> readFloatSampleUnit(bytes, offset, header)
+            WaveSampleEncoding.UNSUPPORTED -> 0.0
+        }
+
+    private fun readPcmSampleUnit(bytes: ByteArray, offset: Int, header: WaveHeader): Double {
+        if (header.bitsPerSample == 8) {
+            return (((bytes[offset].toInt() and 0xFF) - 128).toDouble() / 128.0)
+                .coerceIn(-1.0, 1.0)
+        }
+
+        val raw = readSignedLe(bytes, offset, header.bytesPerSample)
+        val shift = (header.bitsPerSample - header.validBitsPerSample).coerceAtLeast(0)
+        val aligned = if (shift > 0) raw shr shift else raw
+        val scaleBits = header.validBitsPerSample.coerceIn(2, 32)
+        val scale = (1L shl (scaleBits - 1)).toDouble()
+        return (aligned.toDouble() / scale).coerceIn(-1.0, 1.0)
+    }
+
+    private fun readFloatSampleUnit(bytes: ByteArray, offset: Int, header: WaveHeader): Double {
+        val value = when (header.bitsPerSample) {
+            32 -> Float.fromBits(readIntLe(bytes, offset)).toDouble()
+            64 -> Double.fromBits(readLongLe(bytes, offset))
+            else -> 0.0
+        }
+        return if (value.isFinite()) value.coerceIn(-1.0, 1.0) else 0.0
+    }
+
+    private fun isSupportedSampleDepth(
+        encoding: WaveSampleEncoding,
+        bitsPerSample: Int,
+        validBitsPerSample: Int
+    ): Boolean = when (encoding) {
+        WaveSampleEncoding.PCM -> bitsPerSample in setOf(8, 16, 24, 32) &&
+            validBitsPerSample in 1..bitsPerSample
+        WaveSampleEncoding.IEEE_FLOAT -> bitsPerSample == 32 || bitsPerSample == 64
+        WaveSampleEncoding.UNSUPPORTED -> false
     }
 
     private fun createWavHeader(dataSize: Long): ByteArray {
@@ -246,23 +330,58 @@ class AudioImporter(
             ((bytes[offset + 2].toInt() and 0xFF) shl 16) or
             ((bytes[offset + 3].toInt() and 0xFF) shl 24)
 
+    private fun readLongLe(bytes: ByteArray, offset: Int): Long =
+        (bytes[offset].toLong() and 0xFFL) or
+            ((bytes[offset + 1].toLong() and 0xFFL) shl 8) or
+            ((bytes[offset + 2].toLong() and 0xFFL) shl 16) or
+            ((bytes[offset + 3].toLong() and 0xFFL) shl 24) or
+            ((bytes[offset + 4].toLong() and 0xFFL) shl 32) or
+            ((bytes[offset + 5].toLong() and 0xFFL) shl 40) or
+            ((bytes[offset + 6].toLong() and 0xFFL) shl 48) or
+            ((bytes[offset + 7].toLong() and 0xFFL) shl 56)
+
     private fun readShortLe(bytes: ByteArray, offset: Int): Short =
         (((bytes[offset].toInt() and 0xFF) or
             ((bytes[offset + 1].toInt() and 0xFF) shl 8))).toShort()
 
+    private fun readSignedLe(bytes: ByteArray, offset: Int, byteCount: Int): Int {
+        var value = 0
+        for (i in 0 until byteCount) {
+            value = value or ((bytes[offset + i].toInt() and 0xFF) shl (i * 8))
+        }
+        val shift = (Int.SIZE_BYTES - byteCount) * 8
+        return (value shl shift) shr shift
+    }
+
     private data class WaveHeader(
-        val audioFormat: Int,
+        val encoding: WaveSampleEncoding,
         val channels: Int,
         val sampleRate: Int,
         val blockAlign: Int,
         val bitsPerSample: Int,
+        val validBitsPerSample: Int,
         val dataOffset: Long,
         val dataSize: Long
-    )
+    ) {
+        val bytesPerSample: Int = (bitsPerSample + 7) / 8
+    }
+
+    private enum class WaveSampleEncoding {
+        PCM,
+        IEEE_FLOAT,
+        UNSUPPORTED
+    }
 
     private companion object {
         const val TARGET_SAMPLE_RATE = 44_100
         const val BYTES_PER_SAMPLE = 2
         const val WAV_HEADER_SIZE = 44
+        const val MAX_CHANNELS = 8
+        const val MIN_FMT_CHUNK_SIZE = 16L
+        const val MAX_FMT_CHUNK_SIZE = 1024L
+        const val EXTENSIBLE_FMT_SIZE = 40
+        const val WAVE_FORMAT_PCM = 0x0001
+        const val WAVE_FORMAT_IEEE_FLOAT = 0x0003
+        const val WAVE_FORMAT_EXTENSIBLE = 0xFFFE
     }
 }

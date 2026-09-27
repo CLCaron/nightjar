@@ -10,6 +10,8 @@ Named after a nocturnal songbird, this app is designed around late-night creativ
 
 ## How it works
 
+Development checkpoint: `feat/explore-sections` preserves unfinished Explore importer and legacy Groove migration work, including its migration and repository tests. This is a backup of prior local work, not a verified release. Capture Test import and latency calibration continue on separate branches; their device validation remains pending.
+
 Open the app. You're already on the capture screen. Three ways to start:
 
 - **Record** -- tap the hardware-style record button, sing your melody, tap again. Done. Live waveform while you record, preview when you stop.
