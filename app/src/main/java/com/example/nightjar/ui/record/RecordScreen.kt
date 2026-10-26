@@ -1,6 +1,5 @@
 package com.example.nightjar.ui.record
 
-import com.example.nightjar.ui.components.NjButton
 import com.example.nightjar.ui.components.NjLiveWaveform
 import com.example.nightjar.ui.components.NjRecessedPanel
 import com.example.nightjar.ui.components.NjWaveform
@@ -32,8 +31,6 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -43,7 +40,6 @@ import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -249,64 +245,6 @@ private fun RecordScreenBackground() {
 }
 
 @Composable
-internal fun CaptureLatchStrip(state: RecordUiState, onAction: (RecordAction) -> Unit) {
-    val selected = state.capture.groups.filter { it.latchedTakeId != null }
-    Row(Modifier.fillMaxWidth().height(44.dp).horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-        Text("PLAYBACK", color = NjMuted, fontFamily = IbmPlexMono, fontSize = 9.sp)
-        if (selected.isEmpty()) {
-            Text("NOTHING LATCHED", color = NjMuted2, fontFamily = IbmPlexMono, fontSize = 9.sp)
-        } else selected.forEach { group ->
-            NjButton(text = group.displayName, caption = if (state.capture.playing) "PLAYING" else "LATCHED",
-                isActive = true, ledColor = NjAmber, enabled = !state.capture.busy && !state.capture.playing,
-                onClick = { onAction(RecordAction.UnlatchGroup(group.id)) })
-        }
-    }
-}
-
-@Composable
-internal fun CaptureGroupStrip(state: RecordUiState, onAction: (RecordAction) -> Unit) {
-    val capture = state.capture
-    var renaming by remember { mutableStateOf<com.example.nightjar.data.db.entity.CaptureGroupEntity?>(null) }
-    var name by remember { mutableStateOf("") }
-    Row(Modifier.fillMaxWidth().height(56.dp).horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-        Text("RECORD TO", color = NjMuted, fontFamily = IbmPlexMono, fontSize = 9.sp)
-        if (capture.groups.isEmpty()) {
-            NjButton(text = "Original Idea", caption = "GROUP", isActive = true,
-                ledColor = NjTrackColors[0], onClick = {})
-        }
-        capture.groups.forEach { group ->
-            NjButton(text = group.displayName, caption = "GROUP", isActive = group.id == capture.openGroupId,
-                ledColor = NjTrackColors[group.sortIndex % NjTrackColors.size],
-                enabled = !capture.busy && !capture.playing,
-                onClick = { onAction(RecordAction.OpenGroup(group.id)) })
-        }
-        NjButton(text = "+", caption = "NEW GROUP", enabled = !capture.busy && !capture.playing,
-            onClick = { onAction(RecordAction.CreateGroup) })
-        val open = capture.groups.find { it.id == capture.openGroupId }
-        NjButton(text = "Name", caption = "RENAME", enabled = open != null && !capture.busy,
-            onClick = { renaming = open; name = open?.displayName.orEmpty() })
-        NjButton(text = if (open?.inStudio == true) "Added" else "Add", caption = "TO STUDIO",
-            enabled = open != null && open.inStudio.not() && !capture.busy,
-            onClick = { open?.let { onAction(RecordAction.AddGroupToStudio(it.id)) } })
-    }
-    renaming?.let { target ->
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { renaming = null },
-            title = { Text("Name this group") },
-            text = { androidx.compose.material3.OutlinedTextField(value = name,
-                onValueChange = { name = it.take(40) }, singleLine = true, label = { Text("Group name") }) },
-            confirmButton = { androidx.compose.material3.TextButton(onClick = {
-                if (name.isNotBlank()) onAction(RecordAction.RenameGroup(target.id, name))
-                renaming = null
-            }) { Text("Save") } },
-            dismissButton = { androidx.compose.material3.TextButton(onClick = { renaming = null }) { Text("Cancel") } }
-        )
-    }
-}
-
-@Composable
 internal fun CaptureTakeShelf(state: RecordUiState, onAction: (RecordAction) -> Unit,
     modifier: Modifier = Modifier) {
     val open = state.capture.groups.find { it.id == state.capture.openGroupId }
@@ -321,25 +259,25 @@ internal fun CaptureTakeShelf(state: RecordUiState, onAction: (RecordAction) -> 
             verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (state.capture.takes.isEmpty() && state.capture.pendingTakeWaveforms.isEmpty()) {
             item {
-            Text("Press Record to capture a take in this group.", color = NjMuted,
+            Text("Room for an idea", color = NjMuted,
                 style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(12.dp))
             }
         }
         items(state.capture.pendingTakeWaveforms.indices.reversed().toList(), key = { "pending-$it" }) { index ->
             val waveform = state.capture.pendingTakeWaveforms[index]
-            Column(Modifier.fillMaxWidth().height(82.dp)
+            Column(Modifier.fillMaxWidth().heightIn(min = 82.dp)
                 .clip(RoundedCornerShape(5.dp)).background(NjPanelInset).padding(7.dp),
                 verticalArrangement = Arrangement.SpaceBetween) {
                 Text("TAKE ${state.capture.takes.size + index + 1}", color = NjMuted,
-                    fontFamily = IbmPlexMono, fontSize = 9.sp)
+                    fontFamily = IbmPlexMono, fontSize = 11.sp)
                 NjLiveWaveform(amplitudes = waveform.toFloatArray(), modifier = Modifier.fillMaxWidth(),
                     height = 37.dp, barColor = NjTrackColors[0])
-                Text("FINALIZES ON STOP", color = NjMuted2, fontFamily = IbmPlexMono, fontSize = 8.sp)
+                Text("FINALIZES ON STOP", color = NjMuted, fontFamily = IbmPlexMono, fontSize = 10.sp)
             }
         }
         items(state.capture.takes.asReversed(), key = { it.id }) { take ->
             val latched = state.capture.groups.any { it.latchedTakeId == take.id }
-            Column(Modifier.fillMaxWidth().height(82.dp)
+            Column(Modifier.fillMaxWidth().heightIn(min = 82.dp)
                 .clip(RoundedCornerShape(5.dp))
                 .background(if (latched) NjPanelInset else RaisedBodyColor)
                 .clickable(enabled = !state.capture.busy && !state.capture.playing && !state.capture.pendingSave) {
@@ -347,13 +285,13 @@ internal fun CaptureTakeShelf(state: RecordUiState, onAction: (RecordAction) -> 
                 }.padding(7.dp), verticalArrangement = Arrangement.SpaceBetween) {
                 Text("${take.displayName.uppercase()}  ${take.durationMs / 1000}s",
                     color = if (latched) NjAmber else NjMuted, fontFamily = IbmPlexMono,
-                    fontSize = 9.sp, maxLines = 1)
+                    fontSize = 11.sp)
                 state.capture.takeFiles[take.id]?.let { file ->
                     NjWaveform(audioFile = file, modifier = Modifier.fillMaxWidth(),
                         height = 37.dp, barColor = if (latched) NjAmber else NjTrackColors[0])
                 }
-                Text(if (latched) "LATCHED" else "TAP TO LATCH", color = NjMuted,
-                    fontFamily = IbmPlexMono, fontSize = 8.sp)
+                Text(if (latched) "SELECTED FOR PLAY" else "NOT SELECTED", color = NjMuted,
+                    fontFamily = IbmPlexMono, fontSize = 10.sp)
             }
         }
         }

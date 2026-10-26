@@ -69,6 +69,29 @@ class CaptureSessionTest {
         capture.foregroundReady(capture.state.value.token)
     }
 
+    @Test fun `destination changes retain exact playback labels without starting audio`() = runTest(dispatcher) {
+        val vocal = TakeEntity(id = 2, clipId = 8, audioFileName = "vocal.wav",
+            displayName = "Take 4", sortIndex = 3, durationMs = 12000)
+        coEvery { repo.getCaptureGroups(42L) } returns listOf(
+            CaptureGroupEntity(id = 1, ideaId = 42, clipId = 7, displayName = "Guitar", sortIndex = 0, latchedTakeId = 1),
+            CaptureGroupEntity(id = 2, ideaId = 42, clipId = 8, displayName = "Vocals", sortIndex = 1, latchedTakeId = 2))
+        coEvery { repo.getCaptureTake(2L) } returns vocal
+        coEvery { repo.getCaptureTakes(8L) } returns listOf(vocal)
+
+        capture.openIdea(42L)
+        runCurrent()
+        assertEquals(setOf(1L, 2L), capture.state.value.latchedTakes.keys)
+        capture.selectGroup(2L)
+        runCurrent()
+        assertEquals(2L, capture.state.value.openGroupId)
+        assertEquals("Take 1", capture.state.value.latchedTakes[1L]?.displayName)
+        assertEquals("Take 4", capture.state.value.latchedTakes[2L]?.displayName)
+        assertEquals(listOf(1L, 2L), capture.state.value.groups.map { it.latchedTakeId })
+        assertFalse(capture.state.value.playing)
+        verify(exactly = 0) { engine.play() }
+        verify(exactly = 0) { engine.startRecording(any()) }
+    }
+
     @Test fun `input waits for foreground service and duplicate starts are ignored`() = runTest(dispatcher) {
         capture.start(CaptureOptions())
         val token = capture.state.value.token

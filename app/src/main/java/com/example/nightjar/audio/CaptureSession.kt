@@ -50,6 +50,7 @@ data class CaptureState(
     val takes: List<TakeEntity> = emptyList(),
     val takeFiles: Map<Long, File> = emptyMap(),
     val groups: List<CaptureGroupEntity> = emptyList(),
+    val latchedTakes: Map<Long, TakeEntity> = emptyMap(),
     val openGroupId: Long? = null,
     val selectedTakeId: Long? = null,
     val takeNumber: Int = 0,
@@ -179,9 +180,15 @@ class CaptureSession @Inject constructor(
             ?: groups.find { it.id == state.value.openGroupId } ?: groups.firstOrNull()
         group = open?.let { CaptureGroup(ideaId, it.clipId) }
         val takes = open?.let { repo.getCaptureTakes(it.clipId) }.orEmpty()
+        // Read-only labels for selections in groups other than the recording destination.
+        val latchedTakes = groups.mapNotNull { selectedGroup ->
+            val id = selectedGroup.latchedTakeId ?: return@mapNotNull null
+            val take = if (selectedGroup.id == open?.id) takes.find { it.id == id } else repo.getCaptureTake(id)
+            take?.let { id to it }
+        }.toMap()
         mutableState.value = state.value.copy(loadingIdea = false,
             ideaTitle = repo.getIdeaById(ideaId)?.title,
-            groups = groups, openGroupId = open?.id,
+            groups = groups, latchedTakes = latchedTakes, openGroupId = open?.id,
             takes = takes, takeFiles = takes.associate { it.id to storage.getAudioFile(it.audioFileName) },
             selectedTakeId = takes.lastOrNull()?.id,
             file = takes.lastOrNull()?.let { storage.getAudioFile(it.audioFileName) })
