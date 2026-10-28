@@ -250,19 +250,14 @@ internal fun CaptureTakeShelf(state: RecordUiState, onAction: (RecordAction) -> 
     val open = state.capture.groups.find { it.id == state.capture.openGroupId }
     val scrollStates = rememberSaveableStateHolder()
     Column(modifier.fillMaxWidth()) {
-        Text("${(open?.displayName ?: "ORIGINAL IDEA").uppercase()} TAKES  /  ${state.capture.takes.size + state.capture.pendingTakeWaveforms.size}",
+        val takeCount = state.capture.takes.size + state.capture.pendingTakeWaveforms.size
+        if (takeCount > 0) Text("TAKES / $takeCount",
             color = NjMuted, fontFamily = IbmPlexMono, fontSize = 9.sp,
             modifier = Modifier.padding(vertical = 7.dp))
         Box(Modifier.fillMaxWidth().weight(1f)) {
         scrollStates.SaveableStateProvider(open?.id ?: 0L) {
         LazyColumn(Modifier.fillMaxSize(), state = rememberLazyListState(),
             verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (state.capture.takes.isEmpty() && state.capture.pendingTakeWaveforms.isEmpty()) {
-            item {
-            Text("Room for an idea", color = NjMuted,
-                style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(12.dp))
-            }
-        }
         items(state.capture.pendingTakeWaveforms.indices.reversed().toList(), key = { "pending-$it" }) { index ->
             val waveform = state.capture.pendingTakeWaveforms[index]
             Column(Modifier.fillMaxWidth().heightIn(min = 82.dp)
@@ -283,7 +278,7 @@ internal fun CaptureTakeShelf(state: RecordUiState, onAction: (RecordAction) -> 
                 .clickable(enabled = !state.capture.busy && !state.capture.playing && !state.capture.pendingSave) {
                     onAction(RecordAction.SelectTake(take.id))
                 }.padding(7.dp), verticalArrangement = Arrangement.SpaceBetween) {
-                Text("${take.displayName.uppercase()}  ${take.durationMs / 1000}s",
+                Text("${take.displayName.uppercase()}  ${captureDurationLabel(take.durationMs)}",
                     color = if (latched) NjAmber else NjMuted, fontFamily = IbmPlexMono,
                     fontSize = 11.sp)
                 state.capture.takeFiles[take.id]?.let { file ->

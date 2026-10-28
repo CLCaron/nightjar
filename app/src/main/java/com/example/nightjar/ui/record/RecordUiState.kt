@@ -2,6 +2,14 @@ package com.example.nightjar.ui.record
 
 import java.io.File
 
+/** Keep a valid short recording from looking like an empty file. */
+internal fun captureDurationLabel(durationMs: Long): String {
+    if (durationMs <= 0L) return "0s"
+    if (durationMs < 1000L) return "<1s"
+    val seconds = durationMs / 1000L
+    return if (seconds < 60L) "${seconds}s" else "${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}"
+}
+
 /** Snapshot of a just-captured recording, held until the user navigates away. */
 data class PostRecordingState(
     val ideaId: Long,

@@ -10,9 +10,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.MoreHoriz
-import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material3.Icon
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -26,6 +27,11 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.testTag
+import android.view.HapticFeedbackConstants
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
@@ -36,6 +42,7 @@ import androidx.compose.ui.unit.sp
 import com.example.nightjar.ui.components.NjButton
 import com.example.nightjar.ui.components.NjKnob
 import com.example.nightjar.ui.components.NjRecessedPanel
+import com.example.nightjar.ui.components.NjLiveWaveform
 import com.example.nightjar.ui.theme.*
 
 /** Transport stays outside the scrolling work area, including when the IME is open. */
@@ -111,7 +118,7 @@ internal fun CaptureWritingWorkspace(
                 CaptureTempoDrawer(state, onAction, Modifier.weight(1f))
             }
             state.isWriting -> CaptureWordsEditor(state, editor, edit, focus, wordsScroll, onAction, workModifier, compact)
-            else -> CaptureSoundPanel(state, status, onAction, workModifier, compact)
+            else -> CaptureTakeShelf(state, onAction, workModifier)
         }
     }
     BoxWithConstraints(modifier) {
@@ -124,6 +131,7 @@ internal fun CaptureWritingWorkspace(
                         CaptureWorkspaceModes(state, onAction, { panel = null }, Modifier.fillMaxWidth())
                         CaptureDestination(state, { openPanel("groups") })
                         Spacer(Modifier.weight(1f))
+                        CaptureLiveDisplay(state, status, compact = true)
                         CapturePlaybackSummary(state, { openPanel("playback") })
                         CaptureWritingTransport(state, { panel = null; onRecord() }, onAction, Modifier.fillMaxWidth(), compact = true)
                     }
@@ -133,6 +141,7 @@ internal fun CaptureWritingWorkspace(
                 CaptureWorkspaceModes(state, onAction, { panel = null }, Modifier.fillMaxWidth())
                 CaptureDestination(state, { openPanel("groups") })
                 work(Modifier.weight(1f).fillMaxWidth(), compact)
+                CaptureLiveDisplay(state, status, compact)
                 CapturePlaybackSummary(state, { openPanel("playback") })
                 CaptureWritingTransport(state, { panel = null; onRecord() }, onAction, Modifier.fillMaxWidth(), compact)
             }
@@ -142,30 +151,51 @@ internal fun CaptureWritingWorkspace(
 
 @Composable
 private fun CaptureWorkspaceHeader(state: RecordUiState, onLibrary: () -> Unit, onOptions: () -> Unit) {
-    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp), horizontalArrangement = Arrangement.spacedBy(12.dp),
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        NjButton(text = "Library", icon = Icons.Filled.LibraryMusic, caption = "LIBRARY",
+        CaptureTextControl(text = "Library",
             enabled = !state.capture.busy && !state.capture.pendingSave, onClick = onLibrary)
         Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
             Text("NIGHTJAR", color = NjMuted, fontFamily = IbmPlexMono, fontSize = 10.sp)
             Text(state.capture.ideaTitle ?: "New Idea", color = NjStarlight,
                 style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        NjButton(text = "Options", icon = Icons.Filled.MoreHoriz, caption = "OPTIONS", onClick = onOptions)
+        CaptureTextControl(text = "Options", onClick = onOptions)
     }
 }
 
 @Composable
 private fun CaptureDestination(state: RecordUiState, onOpen: () -> Unit) {
     val open = state.capture.groups.find { it.id == state.capture.openGroupId }
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    val view = LocalView.current
+    TextButton(onClick = {
+        view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+        onOpen()
+    }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+        .semantics { contentDescription = "Change recording destination" },
+        colors = ButtonDefaults.textButtonColors(contentColor = NjOnBg),
+        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp)) {
         Column(Modifier.weight(1f)) {
             Text("RECORDING INTO", color = NjMuted, fontFamily = IbmPlexMono, fontSize = 10.sp)
             Text(open?.displayName ?: "Original Idea", color = NjOnBg,
                 style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        NjButton(text = "Groups", icon = Icons.Filled.KeyboardArrowDown, caption = "GROUPS", onClick = onOpen)
+        Icon(Icons.Filled.KeyboardArrowDown, contentDescription = null, tint = NjMuted,
+            modifier = Modifier.size(20.dp))
+    }
+}
+
+/** Quiet navigation retains a full touch target without a raised transport-style face. */
+@Composable
+internal fun CaptureTextControl(text: String, onClick: () -> Unit, modifier: Modifier = Modifier,
+    enabled: Boolean = true) {
+    val view = LocalView.current
+    TextButton(onClick = {
+        view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+        onClick()
+    }, enabled = enabled, modifier = modifier.heightIn(min = 48.dp),
+        colors = ButtonDefaults.textButtonColors(contentColor = NjMuted)) {
+        Text(text, fontFamily = IbmPlexMono, fontSize = 12.sp)
     }
 }
 
@@ -202,30 +232,28 @@ private fun CaptureWordsEditor(state: RecordUiState, editor: TextFieldValue, edi
 }
 
 @Composable
-private fun CaptureSoundPanel(state: RecordUiState, status: String, onAction: (RecordAction) -> Unit,
-    modifier: Modifier, compact: Boolean = false) {
-    Column(modifier.fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(status, color = if (state.isRecording || state.capture.pendingSave) NjRecordCoral else NjMuted,
-                fontFamily = IbmPlexMono, fontSize = 11.sp, modifier = Modifier.weight(1f))
-            if (state.isMetronomeEnabled) {
-                Text("${state.metronomeBpm.toInt()} BPM", color = NjMetronomeLed,
-                    fontFamily = IbmPlexMono, fontSize = 11.sp)
+private fun CaptureLiveDisplay(state: RecordUiState, status: String, compact: Boolean) {
+    NjRecessedPanel(Modifier.fillMaxWidth().height(if (compact) 44.dp else 60.dp)
+        .semantics { contentDescription = "Live recording display" }) {
+        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(status, color = if (state.isRecording || state.capture.pendingSave) NjRecordCoral else NjMuted,
+                    fontFamily = IbmPlexMono, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                if (state.isMetronomeEnabled) {
+                    Text("${state.metronomeBpm.toInt()} BPM", color = NjMetronomeLed,
+                        fontFamily = IbmPlexMono, fontSize = 11.sp)
+                }
+            }
+            // Saved audio belongs in the take shelf; this display is reserved for live input.
+            Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                if (state.isRecording || state.isSaving || state.capture.pendingSave) {
+                    NjLiveWaveform(state.liveAmplitudes, Modifier.fillMaxWidth(),
+                        height = if (compact) 12.dp else 24.dp, barColor = NjTrackColors[0])
+                } else {
+                    androidx.compose.material3.HorizontalDivider(color = NjOutline)
+                }
             }
         }
-        CaptureMeterRow(state, onAction, if (compact) 48.dp else 72.dp)
-        CaptureTakeShelf(state, onAction, Modifier.weight(1f))
-    }
-}
-
-@Composable
-private fun CaptureMeterRow(state: RecordUiState, onAction: (RecordAction) -> Unit, height: androidx.compose.ui.unit.Dp) {
-    Box(Modifier.fillMaxWidth().height(height)) {
-        WaveformSection(state.postRecording, state.liveAmplitudes, NjTrackColors[0],
-            { state.capture.takes.lastOrNull()?.let { onAction(RecordAction.SelectTake(it.id)) } },
-            Modifier.fillMaxSize())
-        if (state.capture.importing) Text("IMPORTING AUDIO", color = NjStarlight,
-            fontFamily = IbmPlexMono, fontSize = 11.sp, modifier = Modifier.align(Alignment.Center))
     }
 }
 
@@ -273,7 +301,7 @@ private fun CaptureWritingTransport(state: RecordUiState, onRecord: () -> Unit,
     val capture = state.capture
     Row(modifier.heightIn(min = if (compact) 80.dp else 112.dp), horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically) {
-        NjButton(text = "Play", icon = Icons.Filled.PlayArrow, caption = "PLAY", isActive = capture.playing,
+        CaptureTransportKey(text = "Play", icon = Icons.Filled.PlayArrow, isActive = capture.playing,
             enabled = !capture.busy && !capture.pendingSave && capture.groups.any { it.latchedTakeId != null },
             onClick = { onAction(RecordAction.PlayTake) })
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -283,9 +311,20 @@ private fun CaptureWritingTransport(state: RecordUiState, onRecord: () -> Unit,
                 modifier = if (compact) Modifier.size(56.dp) else Modifier)
             Text("RECORD", color = NjMuted, fontFamily = IbmPlexMono, fontSize = 10.sp)
         }
-        NjButton(text = "Stop", icon = Icons.Filled.Stop, caption = "STOP", ledColor = NjRecordCoral,
+        CaptureTransportKey(text = "Stop", icon = Icons.Filled.Stop, accent = NjRecordCoral,
             isActive = capture.recording || capture.playing, enabled = capture.recording || capture.playing,
             onClick = { onAction(RecordAction.StopAndSave) })
+    }
+}
+
+@Composable
+private fun CaptureTransportKey(text: String, icon: ImageVector, enabled: Boolean,
+    isActive: Boolean, onClick: () -> Unit, accent: Color = NjAmber) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        NjButton(text = text, icon = icon, enabled = enabled, isActive = isActive,
+            ledColor = accent, onClick = onClick,
+            modifier = Modifier.size(56.dp).testTag("capture-${text.lowercase()}-face"))
+        Text(text.uppercase(), color = NjMuted, fontFamily = IbmPlexMono, fontSize = 10.sp)
     }
 }
 
